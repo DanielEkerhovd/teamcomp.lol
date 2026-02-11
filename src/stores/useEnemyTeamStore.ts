@@ -1,0 +1,429 @@
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
+import { Team, Player, createEmptyTeam, createSubPlayer, generateId, Region, Role, ROLES, ChampionTier, TieredChampion } from '../types';
+
+interface EnemyTeamState {
+  teams: Team[];
+  addTeam: (name: string) => Team;
+  importTeamFromOpgg: (name: string, region: Region, players: { summonerName: string; tagLine: string }[]) => Team;
+  updateTeam: (id: string, updates: Partial<Omit<Team, 'id' | 'createdAt'>>) => void;
+  deleteTeam: (id: string) => void;
+  updatePlayer: (teamId: string, playerId: string, updates: Partial<Omit<Player, 'id'>>) => void;
+  addSub: (teamId: string) => void;
+  removeSub: (teamId: string, playerId: string) => void;
+  getTeam: (id: string) => Team | undefined;
+  // Drag-based role management
+  swapPlayerRoles: (teamId: string, playerId1: string, playerId2: string) => void;
+  moveToRole: (teamId: string, playerId: string, role: Role) => void;
+  moveToSubs: (teamId: string, playerId: string) => void;
+  setPlayerChampionTier: (teamId: string, playerId: string, championId: string, tier: ChampionTier) => void;
+  removePlayerChampion: (teamId: string, playerId: string, championId: string) => void;
+  // Group-based champion management
+  addChampionToGroup: (teamId: string, playerId: string, groupId: string, championId: string) => void;
+  removeChampionFromGroup: (teamId: string, playerId: string, groupId: string, championId: string) => void;
+  moveChampion: (teamId: string, playerId: string, fromGroupId: string, toGroupId: string, championId: string, newIndex: number) => void;
+  reorderChampionInGroup: (teamId: string, playerId: string, groupId: string, championId: string, newIndex: number) => void;
+  addGroup: (teamId: string, playerId: string, groupName: string) => void;
+  removeGroup: (teamId: string, playerId: string, groupId: string) => void;
+  renameGroup: (teamId: string, playerId: string, groupId: string, newName: string) => void;
+  reorderGroups: (teamId: string, playerId: string, groupIds: string[]) => void;
+}
+
+export const useEnemyTeamStore = create<EnemyTeamState>()(
+  persist(
+    (set, get) => ({
+      teams: [],
+
+      addTeam: (name: string) => {
+        const newTeam = createEmptyTeam(name);
+        set((state) => ({ teams: [...state.teams, newTeam] }));
+        return newTeam;
+      },
+
+      importTeamFromOpgg: (name: string, region: Region, players: { summonerName: string; tagLine: string }[]) => {
+        const newTeam = createEmptyTeam(name);
+
+        // Assign first 5 players to main roster roles
+        const mainPlayers = players.slice(0, 5);
+        const subPlayers = players.slice(5);
+
+        // Update main roster
+        newTeam.players = ROLES.map((role, index) => ({
+          id: generateId(),
+          summonerName: mainPlayers[index]?.summonerName || '',
+          tagLine: mainPlayers[index]?.tagLine || '',
+          role: role.value as Role,
+          notes: '',
+          region,
+          isSub: false,
+          championPool: [],
+          championGroups: [],
+        }));
+
+        // Add subs if there are more than 5 players
+        subPlayers.forEach((p) => {
+          newTeam.players.push({
+            id: generateId(),
+            summonerName: p.summonerName,
+            tagLine: p.tagLine,
+            role: 'mid', // default role for subs
+            notes: '',
+            region,
+            isSub: true,
+            championPool: [],
+            championGroups: [],
+          });
+        });
+
+        set((state) => ({ teams: [...state.teams, newTeam] }));
+        return newTeam;
+      },
+
+      updateTeam: (id: string, updates: Partial<Omit<Team, 'id' | 'createdAt'>>) => {
+        set((state) => ({
+          teams: state.teams.map((team) =>
+            team.id === id
+              ? { ...team, ...updates, updatedAt: Date.now() }
+              : team
+          ),
+        }));
+      },
+
+      deleteTeam: (id: string) => {
+        set((state) => ({
+          teams: state.teams.filter((team) => team.id !== id),
+        }));
+      },
+
+      updatePlayer: (teamId: string, playerId: string, updates: Partial<Omit<Player, 'id'>>) => {
+        set((state) => ({
+          teams: state.teams.map((team) =>
+            team.id === teamId
+              ? {
+                  ...team,
+                  players: team.players.map((player) =>
+                    player.id === playerId ? { ...player, ...updates } : player
+                  ),
+                  updatedAt: Date.now(),
+                }
+              : team
+          ),
+        }));
+      },
+
+      addSub: (teamId: string) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            const region = team.players[0]?.region || 'euw';
+            return {
+              ...team,
+              players: [...team.players, createSubPlayer(region)],
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
+      removeSub: (teamId: string, playerId: string) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            return {
+              ...team,
+              players: team.players.filter((p) => p.id !== playerId),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
+      swapPlayerRoles: (teamId: string, playerId1: string, playerId2: string) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            const players = [...team.players];
+            const player1 = players.find((p) => p.id === playerId1);
+            const player2 = players.find((p) => p.id === playerId2);
+
+            if (!player1 || !player2) return team;
+
+            // Swap roles and isSub status
+            const tempRole = player1.role;
+            const tempIsSub = player1.isSub;
+            player1.role = player2.role;
+            player1.isSub = player2.isSub;
+            player2.role = tempRole;
+            player2.isSub = tempIsSub;
+
+            return { ...team, players, updatedAt: Date.now() };
+          }),
+        }));
+      },
+
+      moveToRole: (teamId: string, playerId: string, role: Role) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            const players = [...team.players];
+            const player = players.find((p) => p.id === playerId);
+            const existingPlayer = players.find((p) => p.role === role && !p.isSub);
+
+            if (!player) return team;
+
+            // If there's already a player in this role, swap them
+            if (existingPlayer && existingPlayer.id !== playerId) {
+              existingPlayer.role = player.role;
+              existingPlayer.isSub = player.isSub;
+            }
+
+            player.role = role;
+            player.isSub = false;
+
+            return { ...team, players, updatedAt: Date.now() };
+          }),
+        }));
+      },
+
+      moveToSubs: (teamId: string, playerId: string) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            return {
+              ...team,
+              players: team.players.map((p) =>
+                p.id === playerId ? { ...p, isSub: true } : p
+              ),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
+      getTeam: (id: string) => {
+        return get().teams.find((team) => team.id === id);
+      },
+
+      setPlayerChampionTier: (teamId: string, playerId: string, championId: string, tier: ChampionTier) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            return {
+              ...team,
+              players: team.players.map((player) => {
+                if (player.id !== playerId) return player;
+                const pool = player.championPool || [];
+                const existingIndex = pool.findIndex((c) => c.championId === championId);
+                if (existingIndex >= 0) {
+                  const newPool = [...pool];
+                  newPool[existingIndex] = { championId, tier };
+                  return { ...player, championPool: newPool };
+                }
+                return { ...player, championPool: [...pool, { championId, tier }] };
+              }),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
+      removePlayerChampion: (teamId: string, playerId: string, championId: string) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            return {
+              ...team,
+              players: team.players.map((player) => {
+                if (player.id !== playerId) return player;
+                return {
+                  ...player,
+                  championPool: (player.championPool || []).filter((c) => c.championId !== championId),
+                };
+              }),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
+      addChampionToGroup: (teamId: string, playerId: string, groupId: string, championId: string) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            return {
+              ...team,
+              players: team.players.map((p) => {
+                if (p.id !== playerId) return p;
+                const groups = p.championGroups || [];
+                return {
+                  ...p,
+                  championGroups: groups.map((g) =>
+                    g.id === groupId && !g.championIds.includes(championId)
+                      ? { ...g, championIds: [...g.championIds, championId] }
+                      : g
+                  ),
+                };
+              }),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
+      removeChampionFromGroup: (teamId: string, playerId: string, groupId: string, championId: string) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            return {
+              ...team,
+              players: team.players.map((p) => {
+                if (p.id !== playerId) return p;
+                const groups = p.championGroups || [];
+                return {
+                  ...p,
+                  championGroups: groups.map((g) =>
+                    g.id === groupId
+                      ? { ...g, championIds: g.championIds.filter((id) => id !== championId) }
+                      : g
+                  ),
+                };
+              }),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
+      moveChampion: (teamId: string, playerId: string, fromGroupId: string, toGroupId: string, championId: string, newIndex: number) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            return {
+              ...team,
+              players: team.players.map((p) => {
+                if (p.id !== playerId) return p;
+                const groups = (p.championGroups || []).map((g) => {
+                  if (g.id === fromGroupId) {
+                    return { ...g, championIds: g.championIds.filter((id) => id !== championId) };
+                  }
+                  if (g.id === toGroupId) {
+                    const newIds = g.championIds.filter((id) => id !== championId);
+                    newIds.splice(newIndex, 0, championId);
+                    return { ...g, championIds: newIds };
+                  }
+                  return g;
+                });
+                return { ...p, championGroups: groups };
+              }),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
+      reorderChampionInGroup: (teamId: string, playerId: string, groupId: string, championId: string, newIndex: number) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            return {
+              ...team,
+              players: team.players.map((p) => {
+                if (p.id !== playerId) return p;
+                const groups = (p.championGroups || []).map((g) => {
+                  if (g.id !== groupId) return g;
+                  const newIds = g.championIds.filter((id) => id !== championId);
+                  newIds.splice(newIndex, 0, championId);
+                  return { ...g, championIds: newIds };
+                });
+                return { ...p, championGroups: groups };
+              }),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
+      addGroup: (teamId: string, playerId: string, groupName: string) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            return {
+              ...team,
+              players: team.players.map((p) => {
+                if (p.id !== playerId) return p;
+                const groups = p.championGroups || [];
+                return {
+                  ...p,
+                  championGroups: [...groups, { id: generateId(), name: groupName, championIds: [] }],
+                };
+              }),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
+      removeGroup: (teamId: string, playerId: string, groupId: string) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            return {
+              ...team,
+              players: team.players.map((p) => {
+                if (p.id !== playerId) return p;
+                const groups = p.championGroups || [];
+                // Simply remove the group - champions return to the pool
+                return { ...p, championGroups: groups.filter((g) => g.id !== groupId) };
+              }),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
+      renameGroup: (teamId: string, playerId: string, groupId: string, newName: string) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            return {
+              ...team,
+              players: team.players.map((p) => {
+                if (p.id !== playerId) return p;
+                return {
+                  ...p,
+                  championGroups: (p.championGroups || []).map((g) =>
+                    g.id === groupId ? { ...g, name: newName } : g
+                  ),
+                };
+              }),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
+      reorderGroups: (teamId: string, playerId: string, groupIds: string[]) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            return {
+              ...team,
+              players: team.players.map((p) => {
+                if (p.id !== playerId) return p;
+                const groups = p.championGroups || [];
+                const reordered = groupIds
+                  .map((id) => groups.find((g) => g.id === id))
+                  .filter((g): g is NonNullable<typeof g> => g !== undefined);
+                return { ...p, championGroups: reordered };
+              }),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+    }),
+    {
+      name: 'teamcomp-lol-enemy-teams',
+    }
+  )
+);

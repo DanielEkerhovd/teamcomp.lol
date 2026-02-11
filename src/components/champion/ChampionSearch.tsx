@@ -1,0 +1,91 @@
+import { useState, useRef, useEffect } from 'react';
+import { useChampionData } from '../../hooks/useChampionData';
+import { Champion } from '../../types';
+import { Input } from '../ui';
+
+interface ChampionSearchProps {
+  onSelect: (champion: Champion) => void;
+  placeholder?: string;
+  excludeIds?: string[];
+}
+
+export default function ChampionSearch({
+  onSelect,
+  placeholder = 'Search champions...',
+  excludeIds = [],
+}: ChampionSearchProps) {
+  const [query, setQuery] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
+  const { searchChampions, getIconUrl, loading } = useChampionData();
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  const results = searchChampions(query).filter(
+    (c) => !excludeIds.includes(c.id)
+  );
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSelect = (champion: Champion) => {
+    onSelect(champion);
+    setQuery('');
+    setIsOpen(false);
+  };
+
+  if (loading) {
+    return <Input placeholder="Loading champions..." disabled />;
+  }
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <Input
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setIsOpen(true);
+        }}
+        onFocus={() => setIsOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && results.length > 0) {
+            e.preventDefault();
+            handleSelect(results[0]);
+          }
+        }}
+        placeholder={placeholder}
+      />
+      {isOpen && query && results.length > 0 && (
+        <div className="absolute z-50 w-full mt-1 bg-lol-gray border border-gray-600 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+          {results.slice(0, 10).map((champion) => (
+            <button
+              key={champion.id}
+              type="button"
+              onClick={() => handleSelect(champion)}
+              className="w-full flex items-center gap-3 px-3 py-2 hover:bg-gray-700 text-left"
+            >
+              <img
+                src={getIconUrl(champion.id)}
+                alt={champion.name}
+                className="w-8 h-8 rounded"
+                loading="lazy"
+              />
+              <span className="text-white">{champion.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {isOpen && query && results.length === 0 && (
+        <div className="absolute z-50 w-full mt-1 bg-lol-gray border border-gray-600 rounded-lg shadow-lg p-3 text-gray-400">
+          No champions found
+        </div>
+      )}
+    </div>
+  );
+}

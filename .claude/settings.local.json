@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tailwindcss:*)",
+      "Bash(./node_modules/.bin/tailwindcss init:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run dev:*)",
+      "Bash(tree:*)",
+      "Bash(dir \"c:\\\\Coding\\\\private\\\\draft-sheet\\\\src\\\\components\"\")",
+      "Bash(dir:*)",
+      "Bash(npx tsc:*)",
+      "Bash(git add:*)",
+      "Bash(del \"\\\\?\\\\c:\\\\Coding\\\\private\\\\draft-sheet\\\\nul\")",
+      "Bash(cmd.exe /c \"del \\\\\\\\?\\\\c:\\\\Coding\\\\private\\\\draft-sheet\\\\nul\")",
+      "Bash(cmd.exe /c \"del /f /q \"\"\\\\?\\\\c:\\\\Coding\\\\private\\\\draft-sheet\\\\nul\"\"\")",
+      "Bash(powershell.exe -Command \"Remove-Item -Path ''\\\\?\\\\c:\\\\Coding\\\\private\\\\draft-sheet\\\\nul'' -Force\")",
+      "Bash(powershell.exe -Command \"Remove-Item -LiteralPath ''\\\\?\\\\c:\\\\Coding\\\\private\\\\draft-sheet\\\\nul'' -Force\")",
+      "Bash(powershell.exe -Command \"[System.IO.File]::Delete\\(''\\\\\\\\?\\\\c:\\\\Coding\\\\private\\\\draft-sheet\\\\nul''\\)\")",
+      "Bash(powershell.exe -Command \"Rename-Item -LiteralPath ''c:\\\\Coding\\\\private\\\\draft-sheet\\\\nul'' -NewName ''nul_to_delete'' -Force\")",
+      "Bash(cmd.exe /c \"dir /x\")"
+    ],
+    "defaultMode": "acceptEdits"
+  }
+}

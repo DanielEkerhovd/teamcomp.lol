@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+@theme {
+  /* Primary accent - vibrant gold with warm undertones */
+  --color-lol-gold: #F0B232;
+  --color-lol-gold-light: #FFD666;
+  --color-lol-gold-dark: #C89B3C;
+
+  /* Secondary accent - teal/cyan */
+  --color-lol-blue: #0AC8B9;
+  --color-lol-blue-light: #3DEFE0;
+
+  /* Background hierarchy */
+  --color-lol-dark: #080A0C;
+  --color-lol-gray: #13161A;
+  --color-lol-card: #1A1D23;
+  --color-lol-card-hover: #22262E;
+  --color-lol-surface: #252A33;
+
+  /* Borders and dividers */
+  --color-lol-border: #2D333D;
+  --color-lol-border-light: #3D4450;
+
+  /* Glass effect */
+  --color-glass: rgba(26, 29, 35, 0.8);
+  --color-glass-border: rgba(255, 255, 255, 0.08);
+}
+
+:root {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.6;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-lol-dark);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-lol-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-lol-border-light);
+}
+
+/* Selection color */
+::selection {
+  background: rgba(240, 178, 50, 0.3);
+  color: white;
+}
