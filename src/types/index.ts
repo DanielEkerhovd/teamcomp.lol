@@ -46,6 +46,18 @@ export interface Player {
   championGroups?: ChampionGroup[];
 }
 
+// A champion pool tied to a specific player name + role.
+// This persists across team changes: if a player moves from Top to Mid,
+// their Top pool is preserved and restored when they return to Top.
+export interface PlayerPool {
+  id: string;
+  summonerName: string; // stored as entered; lookups are case-insensitive
+  tagLine: string;
+  role: Role;           // the role this pool belongs to
+  championGroups: ChampionGroup[];
+  updatedAt: number;
+}
+
 export interface Team {
   id: string;
   name: string;
@@ -112,7 +124,7 @@ export interface DraftSession {
 
 // Helper function to generate unique IDs
 export function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 }
 
 // Helper function to create an empty player

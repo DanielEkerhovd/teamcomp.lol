@@ -26,7 +26,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Card } from "../ui";
 import ChampionIcon from "./ChampionIcon";
-import { Champion, Player, ChampionGroup, Role, ROLES } from "../../types";
+import { Champion, ChampionGroup, Role, ROLES } from "../../types";
 import { useChampionData } from "../../hooks/useChampionData";
 import { getChampionRoles } from "../../data/championRoles";
 import { useCustomTemplatesStore } from "../../stores/useCustomTemplatesStore";
@@ -76,8 +76,13 @@ const getTemplates = (role: Role): GroupTemplate[] => [
   },
 ];
 
+export interface PlayerTierListData {
+  championGroups?: ChampionGroup[];
+  role?: Role; // Used for role-specific template generation
+}
+
 interface PlayerTierListProps {
-  player: Player;
+  player: PlayerTierListData;
   onAddChampion: (groupId: string, championId: string) => void;
   onRemoveChampion: (groupId: string, championId: string) => void;
   onMoveChampion: (
@@ -705,6 +710,8 @@ export default function PlayerTierList({
   const [saveAsTemplate, setSaveAsTemplate] = useState(false);
   const { templates: customTemplates, addTemplate, removeTemplate } = useCustomTemplatesStore();
 
+  const primaryRole: Role = player.role ?? 'mid';
+
   const groups = player.championGroups || [];
   const allChampionIds = groups.flatMap((g) => g.championIds);
 
@@ -1022,7 +1029,7 @@ export default function PlayerTierList({
                   <>
                     <p className="text-gray-500 text-xs mb-4 text-center">Choose a template</p>
                     <div className="grid grid-cols-2 gap-3">
-                      {getTemplates(player.role).map((template) => (
+                      {getTemplates(primaryRole).map((template) => (
                         <button
                           key={template.id}
                           type="button"

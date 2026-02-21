@@ -18,7 +18,12 @@
       "Bash(powershell.exe -Command \"Remove-Item -LiteralPath ''\\\\?\\\\c:\\\\Coding\\\\private\\\\draft-sheet\\\\nul'' -Force\")",
       "Bash(powershell.exe -Command \"[System.IO.File]::Delete\\(''\\\\\\\\?\\\\c:\\\\Coding\\\\private\\\\draft-sheet\\\\nul''\\)\")",
       "Bash(powershell.exe -Command \"Rename-Item -LiteralPath ''c:\\\\Coding\\\\private\\\\draft-sheet\\\\nul'' -NewName ''nul_to_delete'' -Force\")",
-      "Bash(cmd.exe /c \"dir /x\")"
+      "Bash(cmd.exe /c \"dir /x\")",
+      "Bash(node --version:*)",
+      "Bash(npm --version:*)",
+      "Bash(cmd /c \"nvm version 2>nul || echo nvm_not_found\")",
+      "Bash(cmd /c \"winget --version 2>nul || echo winget_not_found\")",
+      "Bash(cmd /c \"fnm --version 2>nul || echo fnm_not_found\")"
     ],
     "defaultMode": "acceptEdits"
   }
