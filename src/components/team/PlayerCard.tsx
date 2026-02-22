@@ -102,21 +102,21 @@ const PlayerCard = forwardRef<HTMLDivElement, PlayerCardProps>(
               placeholder="Tag"
               className="flex-1 bg-transparent text-gray-400 text-xs placeholder-gray-600 focus:outline-none focus:text-white transition-colors"
             />
-            {!compact && (
-              <select
-                value={player.region}
-                onChange={(e) =>
-                  onChange({ region: e.target.value as Player["region"] })
-                }
-                className="bg-transparent text-gray-500 text-xs focus:outline-none cursor-pointer hover:text-gray-300 transition-colors"
-              >
-                {REGIONS.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.value.toUpperCase()}
-                  </option>
-                ))}
-              </select>
-            )}
+            <select
+              value={player.region}
+              onChange={(e) =>
+                onChange({ region: e.target.value as Player["region"] })
+              }
+              className={`bg-lol-surface text-gray-500 focus:outline-none cursor-pointer hover:text-gray-300 transition-colors rounded ${
+                compact ? 'text-[10px] px-1 py-0.5' : 'text-xs bg-transparent'
+              }`}
+            >
+              {REGIONS.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.value.toUpperCase()}
+                </option>
+              ))}
+            </select>
           </div>
 
           {player.championPool && player.championPool.length > 0 && (

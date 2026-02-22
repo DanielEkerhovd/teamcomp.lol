@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { Team, Player, createEmptyTeam, createSubPlayer, generateId, Region, Role, ROLES, ChampionTier, TieredChampion } from '../types';
+import { useSettingsStore } from './useSettingsStore';
 
 export const MAX_TEAMS = 3;
 
@@ -137,11 +138,10 @@ export const useMyTeamStore = create<MyTeamState>()(
 
       addSub: () => {
         set((state) => {
-          const team = state.teams.find((t) => t.id === state.selectedTeamId);
-          const region = team?.players[0]?.region || 'euw';
+          const defaultRegion = useSettingsStore.getState().defaultRegion;
           return updateSelectedTeam(state, (t) => ({
             ...t,
-            players: [...t.players, createSubPlayer(region)],
+            players: [...t.players, createSubPlayer(defaultRegion)],
             updatedAt: Date.now(),
           }));
         });

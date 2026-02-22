@@ -1,0 +1,119 @@
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
+
+type DraftSide = 'blue' | 'red';
+type SlotType = 'ban' | 'pick';
+
+interface SlotLocation {
+  side: DraftSide;
+  type: SlotType;
+  index: number;
+}
+
+interface DraftTheoryState {
+  blueBans: (string | null)[];
+  bluePicks: (string | null)[];
+  redBans: (string | null)[];
+  redPicks: (string | null)[];
+  blueTeamName: string;
+  redTeamName: string;
+
+  setSlot: (side: DraftSide, type: SlotType, index: number, championId: string | null) => void;
+  swapSlots: (from: SlotLocation, to: SlotLocation) => void;
+  clearSlot: (side: DraftSide, type: SlotType, index: number) => void;
+  clearSide: (side: DraftSide) => void;
+  clearAll: () => void;
+  getAllUsedChampionIds: () => string[];
+  isChampionUsed: (championId: string) => boolean;
+  setTeamName: (side: DraftSide, name: string) => void;
+}
+
+const createEmptySlots = (): (string | null)[] => [null, null, null, null, null];
+
+const initialState = {
+  blueBans: createEmptySlots(),
+  bluePicks: createEmptySlots(),
+  redBans: createEmptySlots(),
+  redPicks: createEmptySlots(),
+  blueTeamName: 'Blue Side',
+  redTeamName: 'Red Side',
+};
+
+const getSlotKey = (side: DraftSide, type: SlotType): keyof typeof initialState => {
+  return `${side}${type.charAt(0).toUpperCase() + type.slice(1)}s` as keyof typeof initialState;
+};
+
+export const useDraftTheoryStore = create<DraftTheoryState>()(
+  persist(
+    (set, get) => ({
+      ...initialState,
+
+      setSlot: (side, type, index, championId) => {
+        const key = getSlotKey(side, type);
+        set((state) => ({
+          [key]: state[key].map((id, i) => (i === index ? championId : id)),
+        }));
+      },
+
+      swapSlots: (from, to) => {
+        const state = get();
+        const fromKey = getSlotKey(from.side, from.type);
+        const toKey = getSlotKey(to.side, to.type);
+
+        const fromChampion = state[fromKey][from.index];
+        const toChampion = state[toKey][to.index];
+
+        if (fromKey === toKey) {
+          // Same array, need to update both indices at once
+          set({
+            [fromKey]: state[fromKey].map((id, i) => {
+              if (i === from.index) return toChampion;
+              if (i === to.index) return fromChampion;
+              return id;
+            }),
+          });
+        } else {
+          // Different arrays
+          set({
+            [fromKey]: state[fromKey].map((id, i) => (i === from.index ? toChampion : id)),
+            [toKey]: state[toKey].map((id, i) => (i === to.index ? fromChampion : id)),
+          });
+        }
+      },
+
+      clearSlot: (side, type, index) => {
+        get().setSlot(side, type, index, null);
+      },
+
+      clearSide: (side) => {
+        set({
+          [`${side}Bans`]: createEmptySlots(),
+          [`${side}Picks`]: createEmptySlots(),
+        });
+      },
+
+      clearAll: () => set(initialState),
+
+      getAllUsedChampionIds: () => {
+        const state = get();
+        return [
+          ...state.blueBans,
+          ...state.bluePicks,
+          ...state.redBans,
+          ...state.redPicks,
+        ].filter((id): id is string => id !== null);
+      },
+
+      isChampionUsed: (championId) => {
+        return get().getAllUsedChampionIds().includes(championId);
+      },
+
+      setTeamName: (side, name) => {
+        set({ [`${side}TeamName`]: name });
+      },
+    }),
+    {
+      name: 'teamcomp-lol-draft-theory',
+    }
+  )
+);

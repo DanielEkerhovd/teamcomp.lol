@@ -90,6 +90,15 @@ export interface ChampionGroup {
   championIds: string[];
 }
 
+// A custom pool not tied to any player or team (e.g., tier lists)
+export interface CustomPool {
+  id: string;
+  name: string;
+  championGroups: ChampionGroup[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface TeamChampionPriority {
   championId: string;
   priority: Priority;

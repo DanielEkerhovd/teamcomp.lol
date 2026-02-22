@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMyTeamStore } from '../stores/useMyTeamStore';
 import { usePlayerPoolStore } from '../stores/usePlayerPoolStore';
+import { useCustomPoolStore } from '../stores/useCustomPoolStore';
 import { PlayerTierList } from '../components/champion';
 import { Card } from '../components/ui';
 import { ROLES, Role, Player } from '../types';
@@ -72,20 +73,12 @@ function AddPlayerInline({ player, onSave }: { player: Player; onSave: (name: st
   );
 }
 
+type SelectionMode = 'player' | 'custom';
+
 export default function ChampionPoolPage() {
   const { teams, selectedTeamId, updatePlayer } = useMyTeamStore();
-  const {
-    findPool,
-    getOrCreatePool,
-    addChampionToGroup,
-    removeChampionFromGroup,
-    moveChampion,
-    reorderChampionInGroup,
-    addGroup,
-    removeGroup,
-    renameGroup,
-    reorderGroups,
-  } = usePlayerPoolStore();
+  const playerPoolStore = usePlayerPoolStore();
+  const customPoolStore = useCustomPoolStore();
 
   const team = teams.find((t) => t.id === selectedTeamId) || teams[0];
 
@@ -101,22 +94,45 @@ export default function ChampionPoolPage() {
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>(
     allPlayers[0]?.id ?? ''
   );
+  const [selectionMode, setSelectionMode] = useState<SelectionMode>('player');
+  const [isCreatingCustomPool, setIsCreatingCustomPool] = useState(false);
+  const [newPoolName, setNewPoolName] = useState('');
 
   const selectedPlayer = allPlayers.find((p) => p.id === selectedPlayerId) ?? allPlayers[0];
+  const selectedCustomPool = customPoolStore.pools.find((p) => p.id === customPoolStore.selectedPoolId);
+
+  const handleCreateCustomPool = () => {
+    if (newPoolName.trim()) {
+      customPoolStore.createPool(newPoolName.trim());
+      setNewPoolName('');
+      setIsCreatingCustomPool(false);
+      setSelectionMode('custom');
+    }
+  };
+
+  const handleSelectCustomPool = (poolId: string) => {
+    customPoolStore.selectPool(poolId);
+    setSelectionMode('custom');
+  };
+
+  const handleSelectPlayer = (playerId: string) => {
+    setSelectedPlayerId(playerId);
+    setSelectionMode('player');
+  };
 
   // Find the pool for the selected player (null if player has no name yet)
-  const pool = selectedPlayer?.summonerName
-    ? findPool(selectedPlayer.summonerName, selectedPlayer.role)
+  const playerPool = selectedPlayer?.summonerName
+    ? playerPoolStore.findPool(selectedPlayer.summonerName, selectedPlayer.role)
     : null;
 
   // When pool operations are triggered, ensure the pool exists first
-  const resolvePool = () => {
+  const resolvePlayerPool = () => {
     if (!selectedPlayer?.summonerName) return null;
-    return getOrCreatePool(selectedPlayer.summonerName, selectedPlayer.tagLine, selectedPlayer.role);
+    return playerPoolStore.getOrCreatePool(selectedPlayer.summonerName, selectedPlayer.tagLine, selectedPlayer.role);
   };
 
-  const withPool = <T,>(fn: (poolId: string) => T): T | undefined => {
-    const p = resolvePool();
+  const withPlayerPool = <T,>(fn: (poolId: string) => T): T | undefined => {
+    const p = resolvePlayerPool();
     if (!p) return undefined;
     return fn(p.id);
   };
@@ -146,15 +162,15 @@ export default function ChampionPoolPage() {
               </p>
               <div className="flex flex-col gap-1">
                 {mainPlayers.map((player) => {
-                  const active = player.id === selectedPlayer?.id;
+                  const active = selectionMode === 'player' && player.id === selectedPlayer?.id;
                   const isEmpty = !player.summonerName;
-                  const champCount = pool && player.id === selectedPlayer?.id
-                    ? pool.championGroups.reduce((n, g) => n + g.championIds.length, 0)
+                  const champCount = playerPool && player.id === selectedPlayer?.id
+                    ? playerPool.championGroups.reduce((n: number, g: { championIds: string[] }) => n + g.championIds.length, 0)
                     : 0;
                   return (
                     <button
                       key={player.id}
-                      onClick={() => setSelectedPlayerId(player.id)}
+                      onClick={() => handleSelectPlayer(player.id)}
                       className={tabClass(active)}
                     >
                       <div className="flex items-center gap-1.5 mb-0.5">
@@ -186,12 +202,12 @@ export default function ChampionPoolPage() {
               </p>
               <div className="flex flex-col gap-1">
                 {subs.map((player) => {
-                  const active = player.id === selectedPlayer?.id;
+                  const active = selectionMode === 'player' && player.id === selectedPlayer?.id;
                   const isEmpty = !player.summonerName;
                   return (
                     <button
                       key={player.id}
-                      onClick={() => setSelectedPlayerId(player.id)}
+                      onClick={() => handleSelectPlayer(player.id)}
                       className={tabClass(active)}
                     >
                       <div className="flex items-center gap-1.5 mb-0.5">
@@ -209,11 +225,142 @@ export default function ChampionPoolPage() {
               </div>
             </div>
           )}
+
+          {/* Custom Pools */}
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 px-1">
+              Custom Pools
+            </p>
+            <div className="flex flex-col gap-1">
+              {customPoolStore.pools.map((pool) => {
+                const active = selectionMode === 'custom' && pool.id === customPoolStore.selectedPoolId;
+                const champCount = pool.championGroups.reduce((n: number, g: { championIds: string[] }) => n + g.championIds.length, 0);
+                return (
+                  <button
+                    key={pool.id}
+                    onClick={() => handleSelectCustomPool(pool.id)}
+                    className={tabClass(active)}
+                  >
+                    <div className="text-sm font-semibold truncate">
+                      {pool.name}
+                    </div>
+                    {champCount > 0 && (
+                      <div className={`text-xs ${active ? 'text-lol-dark/60' : 'text-gray-500'}`}>
+                        {champCount} champ{champCount !== 1 ? 's' : ''}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+
+              {/* Create new custom pool */}
+              {isCreatingCustomPool ? (
+                <div className="flex flex-col gap-1.5 p-2 bg-lol-surface rounded-lg">
+                  <input
+                    type="text"
+                    value={newPoolName}
+                    onChange={(e) => setNewPoolName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleCreateCustomPool();
+                      if (e.key === 'Escape') {
+                        setIsCreatingCustomPool(false);
+                        setNewPoolName('');
+                      }
+                    }}
+                    placeholder="Pool name"
+                    autoFocus
+                    className="px-2 py-1.5 bg-lol-dark border border-lol-border rounded text-white placeholder-gray-500 text-sm focus:outline-none focus:border-lol-gold"
+                  />
+                  <div className="flex gap-1">
+                    <button
+                      onClick={handleCreateCustomPool}
+                      disabled={!newPoolName.trim()}
+                      className="flex-1 px-2 py-1 rounded bg-lol-gold text-lol-dark font-medium text-xs hover:bg-lol-gold/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      Create
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsCreatingCustomPool(false);
+                        setNewPoolName('');
+                      }}
+                      className="px-2 py-1 rounded bg-lol-dark text-gray-400 font-medium text-xs hover:text-white transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setIsCreatingCustomPool(true)}
+                  className="w-full px-3 py-2 rounded-lg text-gray-500 hover:text-white hover:bg-lol-surface transition-colors text-left text-sm"
+                >
+                  + New Pool
+                </button>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Main content */}
         <div className="flex-1 min-w-0">
-          {!selectedPlayer ? (
+          {selectionMode === 'custom' && selectedCustomPool ? (
+            // Custom pool view
+            <>
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <div>
+                  <h2 className="text-lg font-bold text-white leading-tight">
+                    {selectedCustomPool.name}
+                  </h2>
+                  <p className="text-xs text-gray-500">
+                    {selectedCustomPool.championGroups.reduce((n, g) => n + g.championIds.length, 0)} champions
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    if (confirm(`Delete "${selectedCustomPool.name}"?`)) {
+                      customPoolStore.deletePool(selectedCustomPool.id);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded text-red-400 hover:text-red-300 hover:bg-red-900/20 text-sm transition-colors"
+                >
+                  Delete
+                </button>
+              </div>
+
+              <Card variant="bordered" padding="lg">
+                <PlayerTierList
+                  player={{
+                    championGroups: selectedCustomPool.championGroups,
+                  }}
+                  onAddChampion={(groupId, championId) =>
+                    customPoolStore.addChampionToGroup(selectedCustomPool.id, groupId, championId)
+                  }
+                  onRemoveChampion={(groupId, championId) =>
+                    customPoolStore.removeChampionFromGroup(selectedCustomPool.id, groupId, championId)
+                  }
+                  onMoveChampion={(fromGroupId, toGroupId, championId, newIndex) =>
+                    customPoolStore.moveChampion(selectedCustomPool.id, fromGroupId, toGroupId, championId, newIndex)
+                  }
+                  onReorderChampion={(groupId, championId, newIndex) =>
+                    customPoolStore.reorderChampionInGroup(selectedCustomPool.id, groupId, championId, newIndex)
+                  }
+                  onAddGroup={(groupName) =>
+                    customPoolStore.addGroup(selectedCustomPool.id, groupName)
+                  }
+                  onRemoveGroup={(groupId) =>
+                    customPoolStore.removeGroup(selectedCustomPool.id, groupId)
+                  }
+                  onRenameGroup={(groupId, newName) =>
+                    customPoolStore.renameGroup(selectedCustomPool.id, groupId, newName)
+                  }
+                  onReorderGroups={(groupIds) =>
+                    customPoolStore.reorderGroups(selectedCustomPool.id, groupIds)
+                  }
+                />
+              </Card>
+            </>
+          ) : !selectedPlayer ? (
             <Card className="text-center py-12">
               <p className="text-gray-400">No players in team yet. Add players on the My Team page.</p>
             </Card>
@@ -244,8 +391,8 @@ export default function ChampionPoolPage() {
                   <p className="text-xs text-gray-500">
                     {ROLES.find(r => r.value === selectedPlayer.role)?.label}
                     {selectedPlayer.isSub && ' · Sub'}
-                    {pool
-                      ? ` · ${pool.championGroups.reduce((n, g) => n + g.championIds.length, 0)} champions`
+                    {playerPool
+                      ? ` · ${playerPool.championGroups.reduce((n: number, g: { championIds: string[] }) => n + g.championIds.length, 0)} champions`
                       : ' · no pool yet'}
                   </p>
                 </div>
@@ -255,31 +402,31 @@ export default function ChampionPoolPage() {
                 <PlayerTierList
                   player={{
                     role: selectedPlayer.role,
-                    championGroups: pool?.championGroups ?? [],
+                    championGroups: playerPool?.championGroups ?? [],
                   }}
                   onAddChampion={(groupId, championId) =>
-                    withPool((id) => addChampionToGroup(id, groupId, championId))
+                    withPlayerPool((id) => playerPoolStore.addChampionToGroup(id, groupId, championId))
                   }
                   onRemoveChampion={(groupId, championId) =>
-                    withPool((id) => removeChampionFromGroup(id, groupId, championId))
+                    withPlayerPool((id) => playerPoolStore.removeChampionFromGroup(id, groupId, championId))
                   }
                   onMoveChampion={(fromGroupId, toGroupId, championId, newIndex) =>
-                    withPool((id) => moveChampion(id, fromGroupId, toGroupId, championId, newIndex))
+                    withPlayerPool((id) => playerPoolStore.moveChampion(id, fromGroupId, toGroupId, championId, newIndex))
                   }
                   onReorderChampion={(groupId, championId, newIndex) =>
-                    withPool((id) => reorderChampionInGroup(id, groupId, championId, newIndex))
+                    withPlayerPool((id) => playerPoolStore.reorderChampionInGroup(id, groupId, championId, newIndex))
                   }
                   onAddGroup={(groupName) =>
-                    withPool((id) => addGroup(id, groupName))
+                    withPlayerPool((id) => playerPoolStore.addGroup(id, groupName))
                   }
                   onRemoveGroup={(groupId) =>
-                    withPool((id) => removeGroup(id, groupId))
+                    withPlayerPool((id) => playerPoolStore.removeGroup(id, groupId))
                   }
                   onRenameGroup={(groupId, newName) =>
-                    withPool((id) => renameGroup(id, groupId, newName))
+                    withPlayerPool((id) => playerPoolStore.renameGroup(id, groupId, newName))
                   }
                   onReorderGroups={(groupIds) =>
-                    withPool((id) => reorderGroups(id, groupIds))
+                    withPlayerPool((id) => playerPoolStore.reorderGroups(id, groupIds))
                   }
                 />
               </Card>

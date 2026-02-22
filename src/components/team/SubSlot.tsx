@@ -1,6 +1,6 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Player } from '../../types';
+import { Player, Role, ROLES } from '../../types';
 import PlayerCard from './PlayerCard';
 
 interface SubSlotProps {
@@ -30,7 +30,20 @@ export default function SubSlot({ player, onPlayerChange, onRemove }: SubSlotPro
   return (
     <div className="flex-1 min-w-32 max-w-48 rounded-lg p-1">
       <div className="flex items-center justify-between mb-1">
-        <span className="text-xs text-gray-500 font-medium uppercase tracking-wide">Sub</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-gray-500 font-medium uppercase tracking-wide">Sub</span>
+          <select
+            value={player.role}
+            onChange={(e) => onPlayerChange(player.id, { role: e.target.value as Role })}
+            className="text-xs bg-lol-dark text-lol-gold border border-lol-border rounded px-1.5 py-0.5 focus:outline-none focus:border-lol-gold cursor-pointer"
+          >
+            {ROLES.map((r) => (
+              <option key={r.value} value={r.value}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+        </div>
         <button
           onClick={onRemove}
           className="text-xs text-gray-500 hover:text-red-400 transition-colors"

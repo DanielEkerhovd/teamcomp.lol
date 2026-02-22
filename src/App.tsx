@@ -5,6 +5,9 @@ import EnemyTeamPage from './pages/EnemyTeamPage';
 import MyTeamPage from './pages/MyTeamPage';
 import ChampionPoolPage from './pages/ChampionPoolPage';
 import DraftPage from './pages/DraftPage';
+import ToolsPage from './pages/ToolsPage';
+import FirstTimeSetupModal from './components/onboarding/FirstTimeSetupModal';
+import SettingsModal from './components/settings/SettingsModal';
 
 // Icons as components
 const HomeIcon = () => (
@@ -37,6 +40,13 @@ const ChampionIcon = () => (
   </svg>
 );
 
+const ToolsIcon = () => (
+  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+  </svg>
+);
+
 const SettingsIcon = () => (
   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -60,13 +70,14 @@ const CollapseIcon = ({ collapsed }: { collapsed: boolean }) => (
   </svg>
 );
 
-function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed: (v: boolean) => void }) {
+function Sidebar({ collapsed, setCollapsed, onSettingsClick }: { collapsed: boolean; setCollapsed: (v: boolean) => void; onSettingsClick: () => void }) {
   const navItems = [
     { to: '/', label: 'Home', icon: HomeIcon },
     { to: '/draft', label: 'Draft', icon: DraftIcon },
     { to: '/enemy-teams', label: 'Enemy Teams', icon: EnemyIcon },
-    { to: '/my-team', label: 'My Team', icon: TeamIcon },
-    { to: '/champion-pool', label: 'Champions', icon: ChampionIcon },
+    { to: '/my-teams', label: 'My Teams', icon: TeamIcon },
+    { to: '/champion-pool', label: 'Pools', icon: ChampionIcon },
+    { to: '/tools', label: 'Tools', icon: ToolsIcon },
   ];
 
   return (
@@ -146,6 +157,7 @@ function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed
       <div className="border-t border-lol-border p-3 space-y-1">
         {/* Settings */}
         <button
+          onClick={onSettingsClick}
           className="flex items-center gap-3 w-full px-3 py-3 rounded-xl font-medium text-gray-400 hover:text-white hover:bg-lol-surface transition-all duration-200 group relative"
         >
           <span className="shrink-0"><SettingsIcon /></span>
@@ -172,10 +184,15 @@ function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed
 
 function Layout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-lol-gray">
-      <Sidebar collapsed={collapsed} setCollapsed={setCollapsed} />
+      <Sidebar
+        collapsed={collapsed}
+        setCollapsed={setCollapsed}
+        onSettingsClick={() => setIsSettingsOpen(true)}
+      />
       <main
         className={`transition-all duration-300 ease-in-out min-h-screen ${
           collapsed ? 'ml-[72px]' : 'ml-[240px]'
@@ -183,6 +200,10 @@ function Layout({ children }: { children: React.ReactNode }) {
       >
         <div className="px-8 py-6">{children}</div>
       </main>
+
+      {/* Modals */}
+      <FirstTimeSetupModal />
+      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     </div>
   );
 }
@@ -195,8 +216,9 @@ export default function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/draft" element={<DraftPage />} />
           <Route path="/enemy-teams" element={<EnemyTeamPage />} />
-          <Route path="/my-team" element={<MyTeamPage />} />
+          <Route path="/my-teams" element={<MyTeamPage />} />
           <Route path="/champion-pool" element={<ChampionPoolPage />} />
+          <Route path="/tools" element={<ToolsPage />} />
         </Routes>
       </Layout>
     </BrowserRouter>

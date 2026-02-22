@@ -1,11 +1,13 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { Team, Player, createEmptyTeam, createSubPlayer, generateId, Region, Role, ROLES, ChampionTier, TieredChampion } from '../types';
+import { useSettingsStore } from './useSettingsStore';
 
 interface EnemyTeamState {
   teams: Team[];
   addTeam: (name: string) => Team;
   importTeamFromOpgg: (name: string, region: Region, players: { summonerName: string; tagLine: string }[]) => Team;
+  importPlayersToTeam: (teamId: string, region: Region, players: { summonerName: string; tagLine: string }[]) => void;
   updateTeam: (id: string, updates: Partial<Omit<Team, 'id' | 'createdAt'>>) => void;
   deleteTeam: (id: string) => void;
   updatePlayer: (teamId: string, playerId: string, updates: Partial<Omit<Player, 'id'>>) => void;
@@ -79,6 +81,55 @@ export const useEnemyTeamStore = create<EnemyTeamState>()(
         return newTeam;
       },
 
+      importPlayersToTeam: (teamId: string, region: Region, players: { summonerName: string; tagLine: string }[]) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+
+            const mainPlayers = players.slice(0, 5);
+            const subPlayers = players.slice(5);
+
+            // Update main roster - preserve champion pools if player name matches
+            const newMainRoster = ROLES.map((role, index) => {
+              const existingPlayer = team.players.find(p => !p.isSub && p.role === role.value);
+              const newPlayerData = mainPlayers[index];
+
+              return {
+                id: existingPlayer?.id || generateId(),
+                summonerName: newPlayerData?.summonerName || '',
+                tagLine: newPlayerData?.tagLine || '',
+                role: role.value as Role,
+                notes: existingPlayer?.notes || '',
+                region,
+                isSub: false,
+                championPool: existingPlayer?.championPool || [],
+                championGroups: existingPlayer?.championGroups || [],
+              };
+            });
+
+            // Add new subs from import (keep existing subs)
+            const existingSubs = team.players.filter(p => p.isSub);
+            const newSubs = subPlayers.map((p) => ({
+              id: generateId(),
+              summonerName: p.summonerName,
+              tagLine: p.tagLine,
+              role: 'mid' as Role,
+              notes: '',
+              region,
+              isSub: true,
+              championPool: [] as typeof existingSubs[0]['championPool'],
+              championGroups: [] as typeof existingSubs[0]['championGroups'],
+            }));
+
+            return {
+              ...team,
+              players: [...newMainRoster, ...existingSubs, ...newSubs],
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
       updateTeam: (id: string, updates: Partial<Omit<Team, 'id' | 'createdAt'>>) => {
         set((state) => ({
           teams: state.teams.map((team) =>
@@ -115,10 +166,10 @@ export const useEnemyTeamStore = create<EnemyTeamState>()(
         set((state) => ({
           teams: state.teams.map((team) => {
             if (team.id !== teamId) return team;
-            const region = team.players[0]?.region || 'euw';
+            const defaultRegion = useSettingsStore.getState().defaultRegion;
             return {
               ...team,
-              players: [...team.players, createSubPlayer(region)],
+              players: [...team.players, createSubPlayer(defaultRegion)],
               updatedAt: Date.now(),
             };
           }),

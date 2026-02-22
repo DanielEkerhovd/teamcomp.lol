@@ -40,6 +40,7 @@ export default function EnemyTeamPage() {
     teams,
     addTeam,
     importTeamFromOpgg,
+    importPlayersToTeam,
     updateTeam,
     deleteTeam,
     updatePlayer,
@@ -66,6 +67,8 @@ export default function EnemyTeamPage() {
   const [importError, setImportError] = useState('');
   const [expandedTeamId, setExpandedTeamId] = useState<string | null>(null);
   const [activePlayer, setActivePlayer] = useState<Player | null>(null);
+  const [inlineImportUrl, setInlineImportUrl] = useState<Record<string, string>>({});
+  const [inlineImportError, setInlineImportError] = useState<Record<string, string>>({});
   const [activeDragTeamId, setActiveDragTeamId] = useState<string | null>(null);
 
   const sensors = useSensors(
@@ -142,6 +145,29 @@ export default function EnemyTeamPage() {
     setImportTeamName('');
     setIsImportModalOpen(false);
     setExpandedTeamId(team.id);
+  };
+
+  const handleInlineImport = (teamId: string) => {
+    const url = inlineImportUrl[teamId] || '';
+    setInlineImportError((prev) => ({ ...prev, [teamId]: '' }));
+
+    const parsed = parseOpggMultiSearchUrl(url);
+
+    if (!parsed) {
+      setInlineImportError((prev) => ({
+        ...prev,
+        [teamId]: 'Invalid OP.GG URL. Use format: https://www.op.gg/multisearch/euw?summoners=...',
+      }));
+      return;
+    }
+
+    if (parsed.players.length === 0) {
+      setInlineImportError((prev) => ({ ...prev, [teamId]: 'No players found in URL' }));
+      return;
+    }
+
+    importPlayersToTeam(teamId, parsed.region, parsed.players);
+    setInlineImportUrl((prev) => ({ ...prev, [teamId]: '' }));
   };
 
   const handleDeleteTeam = (id: string) => {
@@ -227,6 +253,30 @@ export default function EnemyTeamPage() {
                       value={team.name}
                       onChange={(e) => updateTeam(team.id, { name: e.target.value })}
                     />
+
+                    <div>
+                      <h3 className="text-sm font-medium text-gray-300 mb-3">Import Players from OP.GG</h3>
+                      <div className="flex gap-2">
+                        <Input
+                          value={inlineImportUrl[team.id] || ''}
+                          onChange={(e) => {
+                            setInlineImportUrl((prev) => ({ ...prev, [team.id]: e.target.value }));
+                            setInlineImportError((prev) => ({ ...prev, [team.id]: '' }));
+                          }}
+                          placeholder="Paste OP.GG multi-search URL..."
+                          className="flex-1"
+                        />
+                        <Button
+                          onClick={() => handleInlineImport(team.id)}
+                          disabled={!inlineImportUrl[team.id]?.trim()}
+                        >
+                          Import
+                        </Button>
+                      </div>
+                      {inlineImportError[team.id] && (
+                        <p className="text-sm text-red-400 mt-2">{inlineImportError[team.id]}</p>
+                      )}
+                    </div>
 
                     <div>
                       <h3 className="text-sm font-medium text-gray-300 mb-3">OP.GG Links</h3>
