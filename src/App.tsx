@@ -8,6 +8,8 @@ import DraftPage from './pages/DraftPage';
 import ToolsPage from './pages/ToolsPage';
 import FirstTimeSetupModal from './components/onboarding/FirstTimeSetupModal';
 import SettingsModal from './components/settings/SettingsModal';
+import { AuthProvider } from './contexts/AuthContext';
+import UserMenu from './components/auth/UserMenu';
 
 // Icons as components
 const HomeIcon = () => (
@@ -137,20 +139,7 @@ function Sidebar({ collapsed, setCollapsed, onSettingsClick }: { collapsed: bool
 
       {/* User section */}
       <div className="px-3 pb-3">
-        <div className="flex items-center gap-3 px-3 py-3 rounded-xl bg-lol-surface/50 border border-lol-border group relative">
-          <div className="w-9 h-9 shrink-0 rounded-lg bg-linear-to-br from-gray-600 to-gray-700 flex items-center justify-center text-white font-semibold text-sm">
-            ?
-          </div>
-          <div className={`flex-1 min-w-0 transition-all duration-300 ${collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100'}`}>
-            <div className="text-sm font-medium text-white truncate">Guest User</div>
-            <div className="text-xs text-gray-500">Not signed in</div>
-          </div>
-          {collapsed && (
-            <div className="absolute left-full ml-3 px-3 py-2 bg-lol-card border border-lol-border rounded-lg text-sm text-white whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 shadow-xl z-50">
-              Guest User
-            </div>
-          )}
-        </div>
+        <UserMenu collapsed={collapsed} />
       </div>
 
       {/* Bottom section */}
@@ -210,17 +199,19 @@ function Layout({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/draft" element={<DraftPage />} />
-          <Route path="/enemy-teams" element={<EnemyTeamPage />} />
-          <Route path="/my-teams" element={<MyTeamPage />} />
-          <Route path="/champion-pool" element={<ChampionPoolPage />} />
-          <Route path="/tools" element={<ToolsPage />} />
-        </Routes>
-      </Layout>
-    </BrowserRouter>
+    <AuthProvider>
+      <BrowserRouter>
+        <Layout>
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/draft" element={<DraftPage />} />
+            <Route path="/enemy-teams" element={<EnemyTeamPage />} />
+            <Route path="/my-teams" element={<MyTeamPage />} />
+            <Route path="/champion-pool" element={<ChampionPoolPage />} />
+            <Route path="/tools" element={<ToolsPage />} />
+          </Routes>
+        </Layout>
+      </BrowserRouter>
+    </AuthProvider>
   );
 }

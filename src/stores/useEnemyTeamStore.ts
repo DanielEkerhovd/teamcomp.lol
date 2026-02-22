@@ -10,6 +10,7 @@ interface EnemyTeamState {
   importPlayersToTeam: (teamId: string, region: Region, players: { summonerName: string; tagLine: string }[]) => void;
   updateTeam: (id: string, updates: Partial<Omit<Team, 'id' | 'createdAt'>>) => void;
   deleteTeam: (id: string) => void;
+  toggleFavorite: (id: string) => void;
   updatePlayer: (teamId: string, playerId: string, updates: Partial<Omit<Player, 'id'>>) => void;
   addSub: (teamId: string) => void;
   removeSub: (teamId: string, playerId: string) => void;
@@ -29,6 +30,7 @@ interface EnemyTeamState {
   removeGroup: (teamId: string, playerId: string, groupId: string) => void;
   renameGroup: (teamId: string, playerId: string, groupId: string, newName: string) => void;
   reorderGroups: (teamId: string, playerId: string, groupIds: string[]) => void;
+  setAllowDuplicateChampions: (teamId: string, playerId: string, allowDuplicates: boolean) => void;
 }
 
 export const useEnemyTeamStore = create<EnemyTeamState>()(
@@ -143,6 +145,14 @@ export const useEnemyTeamStore = create<EnemyTeamState>()(
       deleteTeam: (id: string) => {
         set((state) => ({
           teams: state.teams.filter((team) => team.id !== id),
+        }));
+      },
+
+      toggleFavorite: (id: string) => {
+        set((state) => ({
+          teams: state.teams.map((team) =>
+            team.id === id ? { ...team, isFavorite: !team.isFavorite } : team
+          ),
         }));
       },
 
@@ -466,6 +476,22 @@ export const useEnemyTeamStore = create<EnemyTeamState>()(
                   .map((id) => groups.find((g) => g.id === id))
                   .filter((g): g is NonNullable<typeof g> => g !== undefined);
                 return { ...p, championGroups: reordered };
+              }),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
+      setAllowDuplicateChampions: (teamId: string, playerId: string, allowDuplicates: boolean) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            return {
+              ...team,
+              players: team.players.map((p) => {
+                if (p.id !== playerId) return p;
+                return { ...p, allowDuplicateChampions: allowDuplicates };
               }),
               updatedAt: Date.now(),
             };

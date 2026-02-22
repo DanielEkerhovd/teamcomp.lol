@@ -38,6 +38,7 @@ interface GroupTemplate {
   description: string;
   groups: string[];
   roleSpecific?: boolean;
+  allowDuplicates: boolean;
 }
 
 const PLAYSTYLE_BY_ROLE: Record<Role, string[]> = {
@@ -54,6 +55,7 @@ const getTemplates = (role: Role): GroupTemplate[] => [
     name: "Tier List",
     description: "Rank champions by strength",
     groups: ["S-Tier", "A-Tier", "B-Tier", "C-Tier"],
+    allowDuplicates: false,
   },
   {
     id: "playstyle",
@@ -61,24 +63,28 @@ const getTemplates = (role: Role): GroupTemplate[] => [
     description: `Champion styles for ${role}`,
     groups: PLAYSTYLE_BY_ROLE[role] || ["Main", "Secondary", "Situational"],
     roleSpecific: true,
+    allowDuplicates: true,
   },
   {
     id: "comfort-level",
     name: "Comfort Level",
     description: "By how confident you are",
     groups: ["Main", "Comfort Pick", "Learning", "Pocket Pick"],
+    allowDuplicates: false,
   },
   {
     id: "draft-priority",
     name: "Draft Priority",
     description: "When to pick them in draft",
     groups: ["Blind Pickable", "Flex", "Counter Pick", "Banned Often"],
+    allowDuplicates: true,
   },
 ];
 
 export interface PlayerTierListData {
   championGroups?: ChampionGroup[];
   role?: Role; // Used for role-specific template generation
+  allowDuplicateChampions?: boolean;
 }
 
 interface PlayerTierListProps {
@@ -100,6 +106,7 @@ interface PlayerTierListProps {
   onRemoveGroup: (groupId: string) => void;
   onRenameGroup: (groupId: string, newName: string) => void;
   onReorderGroups: (groupIds: string[]) => void;
+  onSetAllowDuplicates?: (allowDuplicates: boolean) => void;
 }
 
 interface SortableChampionProps {
@@ -700,6 +707,7 @@ export default function PlayerTierList({
   onRemoveGroup,
   onRenameGroup,
   onReorderGroups,
+  onSetAllowDuplicates,
 }: PlayerTierListProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
@@ -708,12 +716,16 @@ export default function PlayerTierList({
   const [customGroups, setCustomGroups] = useState<string[]>([""]);
   const [templateName, setTemplateName] = useState("");
   const [saveAsTemplate, setSaveAsTemplate] = useState(false);
+  const [allowDuplicates, setAllowDuplicates] = useState(false);
   const { templates: customTemplates, addTemplate, removeTemplate } = useCustomTemplatesStore();
 
   const primaryRole: Role = player.role ?? 'mid';
 
   const groups = player.championGroups || [];
-  const allChampionIds = groups.flatMap((g) => g.championIds);
+  // Only exclude champions if duplicates are not allowed
+  const allChampionIds = player.allowDuplicateChampions
+    ? []
+    : groups.flatMap((g) => g.championIds);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -979,6 +991,15 @@ export default function PlayerTierList({
                     >
                       + Add another group
                     </button>
+                    <label className="flex items-center gap-2 text-xs text-gray-400 mb-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={allowDuplicates}
+                        onChange={(e) => setAllowDuplicates(e.target.checked)}
+                        className="rounded border-lol-border bg-lol-dark"
+                      />
+                      Allow champions in multiple groups
+                    </label>
                     <label className="flex items-center gap-2 text-xs text-gray-400 mb-4 cursor-pointer">
                       <input
                         type="checkbox"
@@ -996,6 +1017,7 @@ export default function PlayerTierList({
                           setCustomGroups([""]);
                           setTemplateName("");
                           setSaveAsTemplate(false);
+                          setAllowDuplicates(false);
                         }}
                         className="flex-1 px-4 py-2 rounded border border-lol-border text-gray-400 hover:text-white hover:border-gray-500 text-sm"
                       >
@@ -1009,14 +1031,17 @@ export default function PlayerTierList({
                             const trimmedGroups = validGroups.map((g) => g.trim());
                             // Save as template if checkbox is checked and name is provided
                             if (saveAsTemplate && templateName.trim()) {
-                              addTemplate(templateName.trim(), trimmedGroups);
+                              addTemplate(templateName.trim(), trimmedGroups, allowDuplicates);
                             }
+                            // Set allow duplicates for this pool
+                            onSetAllowDuplicates?.(allowDuplicates);
                             // Create the groups
                             trimmedGroups.forEach((groupName) => onAddGroup(groupName));
                             setShowCustomForm(false);
                             setCustomGroups([""]);
                             setTemplateName("");
                             setSaveAsTemplate(false);
+                            setAllowDuplicates(false);
                           }
                         }}
                         className="flex-1 px-4 py-2 rounded bg-lol-gold text-lol-dark font-medium text-sm hover:bg-lol-gold/90"
@@ -1034,12 +1059,20 @@ export default function PlayerTierList({
                           key={template.id}
                           type="button"
                           onClick={() => {
+                            onSetAllowDuplicates?.(template.allowDuplicates);
                             template.groups.forEach((groupName) => onAddGroup(groupName));
                           }}
                           className="p-3 rounded-lg border border-lol-border bg-lol-surface hover:border-lol-gold hover:bg-lol-gold/5 transition-colors text-left group"
                         >
-                          <div className="text-sm font-medium text-white group-hover:text-lol-gold transition-colors">
-                            {template.name}
+                          <div className="flex items-center gap-2">
+                            <div className="text-sm font-medium text-white group-hover:text-lol-gold transition-colors">
+                              {template.name}
+                            </div>
+                            {template.allowDuplicates && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400" title="Champions can be in multiple groups">
+                                multi
+                              </span>
+                            )}
                           </div>
                           <div className="text-xs text-gray-500 mt-0.5">{template.description}</div>
                           <div className="flex flex-wrap gap-1 mt-2">
@@ -1065,12 +1098,20 @@ export default function PlayerTierList({
                           <button
                             type="button"
                             onClick={() => {
+                              onSetAllowDuplicates?.(template.allowDuplicates);
                               template.groups.forEach((groupName) => onAddGroup(groupName));
                             }}
                             className="w-full text-left"
                           >
-                            <div className="text-sm font-medium text-lol-gold group-hover:text-lol-gold-light transition-colors">
-                              {template.name}
+                            <div className="flex items-center gap-2">
+                              <div className="text-sm font-medium text-lol-gold group-hover:text-lol-gold-light transition-colors">
+                                {template.name}
+                              </div>
+                              {template.allowDuplicates && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400" title="Champions can be in multiple groups">
+                                  multi
+                                </span>
+                              )}
                             </div>
                             <div className="text-xs text-gray-500 mt-0.5">Custom template</div>
                             <div className="flex flex-wrap gap-1 mt-2">
@@ -1143,9 +1184,22 @@ export default function PlayerTierList({
             </SortableContext>
           )}
 
-          {/* Add new group */}
+          {/* Add new group and settings */}
           {groups.length > 0 && (
-            <AddGroupButton onAddGroup={onAddGroup} groupCount={groups.length} />
+            <div className="mt-4 flex items-center justify-between">
+              <AddGroupButton onAddGroup={onAddGroup} groupCount={groups.length} />
+              {onSetAllowDuplicates && (
+                <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-300 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={player.allowDuplicateChampions ?? false}
+                    onChange={(e) => onSetAllowDuplicates(e.target.checked)}
+                    className="rounded border-lol-border bg-lol-dark"
+                  />
+                  Allow champions in multiple groups
+                </label>
+              )}
+            </div>
           )}
         </Card>
 

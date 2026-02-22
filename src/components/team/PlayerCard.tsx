@@ -2,6 +2,7 @@ import { useState, forwardRef, HTMLAttributes } from "react";
 import { Player, ROLES, REGIONS } from "../../types";
 import { useOpgg } from "../../hooks/useOpgg";
 import { ChampionIcon } from "../champion";
+import RankBadge from "./RankBadge";
 
 interface PlayerCardProps extends Omit<
   HTMLAttributes<HTMLDivElement>,
@@ -118,6 +119,12 @@ const PlayerCard = forwardRef<HTMLDivElement, PlayerCardProps>(
               ))}
             </select>
           </div>
+
+          {player.summonerName && player.tagLine && (
+            <div className="mt-1.5">
+              <RankBadge player={player} compact={compact} />
+            </div>
+          )}
 
           {player.championPool && player.championPool.length > 0 && (
             <div className="flex items-center gap-1 mt-2 flex-wrap">

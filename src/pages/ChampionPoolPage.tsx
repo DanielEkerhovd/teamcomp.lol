@@ -332,6 +332,7 @@ export default function ChampionPoolPage() {
                 <PlayerTierList
                   player={{
                     championGroups: selectedCustomPool.championGroups,
+                    allowDuplicateChampions: selectedCustomPool.allowDuplicateChampions,
                   }}
                   onAddChampion={(groupId, championId) =>
                     customPoolStore.addChampionToGroup(selectedCustomPool.id, groupId, championId)
@@ -356,6 +357,9 @@ export default function ChampionPoolPage() {
                   }
                   onReorderGroups={(groupIds) =>
                     customPoolStore.reorderGroups(selectedCustomPool.id, groupIds)
+                  }
+                  onSetAllowDuplicates={(allowDuplicates) =>
+                    customPoolStore.setAllowDuplicateChampions(selectedCustomPool.id, allowDuplicates)
                   }
                 />
               </Card>
@@ -403,6 +407,7 @@ export default function ChampionPoolPage() {
                   player={{
                     role: selectedPlayer.role,
                     championGroups: playerPool?.championGroups ?? [],
+                    allowDuplicateChampions: playerPool?.allowDuplicateChampions,
                   }}
                   onAddChampion={(groupId, championId) =>
                     withPlayerPool((id) => playerPoolStore.addChampionToGroup(id, groupId, championId))
@@ -427,6 +432,9 @@ export default function ChampionPoolPage() {
                   }
                   onReorderGroups={(groupIds) =>
                     withPlayerPool((id) => playerPoolStore.reorderGroups(id, groupIds))
+                  }
+                  onSetAllowDuplicates={(allowDuplicates) =>
+                    withPlayerPool((id) => playerPoolStore.setAllowDuplicateChampions(id, allowDuplicates))
                   }
                 />
               </Card>

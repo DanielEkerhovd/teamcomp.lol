@@ -44,6 +44,7 @@ export interface Player {
   isSub?: boolean;
   championPool: TieredChampion[];
   championGroups?: ChampionGroup[];
+  allowDuplicateChampions?: boolean;
 }
 
 // A champion pool tied to a specific player name + role.
@@ -55,6 +56,7 @@ export interface PlayerPool {
   tagLine: string;
   role: Role;           // the role this pool belongs to
   championGroups: ChampionGroup[];
+  allowDuplicateChampions?: boolean;
   updatedAt: number;
 }
 
@@ -66,6 +68,7 @@ export interface Team {
   createdAt: number;
   updatedAt: number;
   championPool?: TeamChampionPriority[];
+  isFavorite?: boolean;
 }
 
 export interface Champion {
@@ -78,6 +81,21 @@ export interface Champion {
 export type Priority = 'high' | 'medium' | 'low';
 
 export type ChampionTier = 'S' | 'A' | 'B' | 'C';
+
+// Ranked tiers for player ranks
+export type RankedTier =
+  | 'IRON'
+  | 'BRONZE'
+  | 'SILVER'
+  | 'GOLD'
+  | 'PLATINUM'
+  | 'EMERALD'
+  | 'DIAMOND'
+  | 'MASTER'
+  | 'GRANDMASTER'
+  | 'CHALLENGER';
+
+export type RankedDivision = 'I' | 'II' | 'III' | 'IV';
 
 export interface TieredChampion {
   championId: string;
@@ -95,6 +113,7 @@ export interface CustomPool {
   id: string;
   name: string;
   championGroups: ChampionGroup[];
+  allowDuplicateChampions?: boolean;
   createdAt: number;
   updatedAt: number;
 }

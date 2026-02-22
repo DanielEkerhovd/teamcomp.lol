@@ -11,6 +11,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
 import { useMyTeamStore, MAX_TEAMS } from '../stores/useMyTeamStore';
+import { useRankStore } from '../stores/useRankStore';
 import { parseOpggMultiSearchUrl, Player, Role, ROLES } from '../types';
 import { Card, Input, Button, Modal } from '../components/ui';
 import { RoleSlot, SubSlot } from '../components/team';
@@ -56,6 +57,35 @@ export default function MyTeamPage() {
   const team = teams.find((t) => t.id === selectedTeamId) || teams[0];
 
   const { openMultiSearch } = useOpgg();
+  const {
+    fetchRanksForContext,
+    fetchRanksFromCache,
+    isFetchingContext,
+    isConfigured: isRankApiConfigured,
+    allPlayersUpdated,
+    somePlayersNeedUpdate,
+  } = useRankStore();
+
+  const MY_TEAM_CONTEXT = `my-team-${selectedTeamId}`;
+  const isLoadingRanks = isFetchingContext(MY_TEAM_CONTEXT);
+
+  // Get players for button state
+  const teamPlayers = team?.players
+    .filter((p) => p.summonerName && p.tagLine)
+    .map((p) => ({ summonerName: p.summonerName, tagLine: p.tagLine, region: p.region })) || [];
+  const isUpdated = allPlayersUpdated(teamPlayers);
+  const needsUpdate = somePlayersNeedUpdate(teamPlayers);
+
+  // Auto-fetch ranks from cache on page load
+  useEffect(() => {
+    if (!isRankApiConfigured() || !team) return;
+    const players = team.players
+      .filter((p) => p.summonerName && p.tagLine)
+      .map((p) => ({ summonerName: p.summonerName, tagLine: p.tagLine, region: p.region }));
+    if (players.length > 0) {
+      fetchRanksFromCache(players);
+    }
+  }, [team?.id, fetchRanksFromCache, isRankApiConfigured]);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importUrl, setImportUrl] = useState('');
   const [importError, setImportError] = useState('');
@@ -105,6 +135,12 @@ export default function MyTeamPage() {
     if (confirm('Are you sure you want to reset this team? This will clear all player data.')) {
       resetTeam();
     }
+  };
+
+  const handleRefreshRanks = async () => {
+    if (!team || !needsUpdate) return;
+    const playersWithNames = team.players.filter(p => p.summonerName && p.tagLine);
+    await fetchRanksForContext(MY_TEAM_CONTEXT, playersWithNames);
   };
 
   const handleDeleteTeam = (teamId: string) => {
@@ -274,6 +310,20 @@ export default function MyTeamPage() {
             )}
           </div>
           <div className="flex items-center gap-3">
+            {isRankApiConfigured() && teamPlayers.length > 0 && (
+              <Button
+                variant="ghost"
+                onClick={handleRefreshRanks}
+                disabled={isLoadingRanks || !needsUpdate}
+                title={
+                  isUpdated
+                    ? 'All players have been updated within the last 24 hours'
+                    : 'Fetch player ranks from Riot API'
+                }
+              >
+                {isLoadingRanks ? 'Fetching...' : isUpdated ? 'Updated' : 'Update'}
+              </Button>
+            )}
             <Button variant="secondary" onClick={() => setIsImportModalOpen(true)}>
               Import from OP.GG
             </Button>

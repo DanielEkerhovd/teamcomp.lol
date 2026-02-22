@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -12,6 +12,7 @@ import {
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
 import { useDroppable } from '@dnd-kit/core';
 import { useEnemyTeamStore } from '../stores/useEnemyTeamStore';
+import { useRankStore } from '../stores/useRankStore';
 import { parseOpggMultiSearchUrl, ROLES, Role, Player } from '../types';
 import { Button, Card, Input, Modal } from '../components/ui';
 import { RoleSlot, SubSlot, OpggLinks } from '../components/team';
@@ -57,6 +58,8 @@ export default function EnemyTeamPage() {
     removeGroup,
     renameGroup,
     reorderGroups,
+    setAllowDuplicateChampions,
+    toggleFavorite,
   } = useEnemyTeamStore();
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<Record<string, string>>({});
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -70,6 +73,45 @@ export default function EnemyTeamPage() {
   const [inlineImportUrl, setInlineImportUrl] = useState<Record<string, string>>({});
   const [inlineImportError, setInlineImportError] = useState<Record<string, string>>({});
   const [activeDragTeamId, setActiveDragTeamId] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+
+  const {
+    fetchRanksForContext,
+    fetchRanksFromCache,
+    isFetchingContext,
+    isConfigured: isRankApiConfigured,
+    allPlayersUpdated,
+    somePlayersNeedUpdate,
+  } = useRankStore();
+
+  // Auto-fetch ranks from cache on page load
+  useEffect(() => {
+    if (!isRankApiConfigured()) return;
+
+    // Collect all players from all teams
+    const allPlayers = teams.flatMap((team) =>
+      team.players
+        .filter((p) => p.summonerName && p.tagLine)
+        .map((p) => ({
+          summonerName: p.summonerName,
+          tagLine: p.tagLine,
+          region: p.region,
+        }))
+    );
+
+    if (allPlayers.length > 0) {
+      fetchRanksFromCache(allPlayers);
+    }
+  }, [teams, fetchRanksFromCache, isRankApiConfigured]);
+
+  const handleFetchRanksForTeam = async (teamId: string) => {
+    const team = teams.find(t => t.id === teamId);
+    if (!team) return;
+    const playersWithNames = team.players.filter(p => p.summonerName && p.tagLine);
+    await fetchRanksForContext(teamId, playersWithNames);
+  };
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -189,6 +231,22 @@ export default function EnemyTeamPage() {
   const getSubs = (players: typeof teams[0]['players']) =>
     players.filter(p => p.isSub);
 
+  const filteredTeams = teams.filter((team) => {
+    // Search filter - match team name or player names
+    const searchLower = searchQuery.toLowerCase();
+    const matchesSearch =
+      !searchQuery ||
+      team.name.toLowerCase().includes(searchLower) ||
+      team.players.some((p) => p.summonerName?.toLowerCase().includes(searchLower));
+
+    if (!matchesSearch) return false;
+
+    // Favorites filter
+    if (showFavoritesOnly && !team.isFavorite) return false;
+
+    return true;
+  });
+
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between">
@@ -203,6 +261,68 @@ export default function EnemyTeamPage() {
           <Button onClick={() => setIsAddModalOpen(true)}>+ Add Team</Button>
         </div>
       </div>
+
+      {/* Search and Filter Bar */}
+      {teams.length > 0 && (
+        <div className="flex gap-3 items-center">
+          <div className="relative flex-1 max-w-md">
+            <svg
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+              />
+            </svg>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search teams or players..."
+              className="w-full pl-10 pr-4 py-2.5 bg-lol-dark border border-lol-border rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-lol-gold/50 focus:ring-2 focus:ring-lol-gold/20 transition-all duration-200"
+            />
+          </div>
+          <button
+            onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border transition-all duration-200 ${
+              showFavoritesOnly
+                ? 'bg-lol-gold/20 border-lol-gold text-lol-gold'
+                : 'bg-lol-dark border-lol-border text-gray-400 hover:text-white hover:border-gray-500'
+            }`}
+          >
+            <svg
+              className="w-4 h-4"
+              fill={showFavoritesOnly ? 'currentColor' : 'none'}
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
+              />
+            </svg>
+            Favorites
+          </button>
+          {(searchQuery || showFavoritesOnly) && (
+            <button
+              onClick={() => {
+                setSearchQuery('');
+                setShowFavoritesOnly(false);
+              }}
+              className="px-3 py-2.5 text-gray-400 hover:text-white transition-colors"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
 
       {teams.length === 0 ? (
         <Card className="text-center py-12">
@@ -219,9 +339,22 @@ export default function EnemyTeamPage() {
             <Button onClick={() => setIsAddModalOpen(true)}>Add Manually</Button>
           </div>
         </Card>
+      ) : filteredTeams.length === 0 ? (
+        <Card className="text-center py-8">
+          <p className="text-gray-400">No teams match your search{showFavoritesOnly ? ' or favorites filter' : ''}.</p>
+          <button
+            onClick={() => {
+              setSearchQuery('');
+              setShowFavoritesOnly(false);
+            }}
+            className="mt-3 text-lol-gold hover:text-lol-gold-light transition-colors"
+          >
+            Clear filters
+          </button>
+        </Card>
       ) : (
         <div className="space-y-4">
-          {teams.map((team) => {
+          {filteredTeams.map((team) => {
             const mainRoster = getMainRoster(team.players);
             const subs = getSubs(team.players);
             const filledPlayers = team.players.filter((p) => p.summonerName).length;
@@ -229,20 +362,98 @@ export default function EnemyTeamPage() {
 
             return (
               <Card key={team.id} variant="bordered" padding="lg">
-                <div
-                  className="flex items-center justify-between cursor-pointer"
-                  onClick={() => toggleExpanded(team.id)}
-                >
-                  <div>
-                    <h2 className="text-xl font-semibold text-white">{team.name}</h2>
+                <div className="flex items-center justify-between">
+                  <div
+                    className="flex-1 cursor-pointer"
+                    onClick={() => toggleExpanded(team.id)}
+                  >
+                    <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+                      {team.name}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleFavorite(team.id);
+                        }}
+                        className={`transition-colors ${team.isFavorite ? 'text-lol-gold' : 'text-gray-600 hover:text-gray-400'}`}
+                      >
+                        <svg className="w-4 h-4" fill={team.isFavorite ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                        </svg>
+                      </button>
+                    </h2>
                     <p className="text-sm text-gray-400 mt-1">
                       {filledPlayers} players ({mainRoster.filter(p => p.summonerName).length} main{subs.length > 0 && `, ${subs.filter(p => p.summonerName).length} subs`})
                     </p>
                   </div>
-                  <div className={`p-2 rounded-lg transition-all duration-200 ${isExpanded ? 'bg-lol-gold/20 text-lol-gold' : 'text-gray-500 hover:text-white'}`}>
-                    <svg className={`w-5 h-5 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
+                  <div className="flex items-center gap-1">
+                    {/* Expand/collapse button */}
+                    <button
+                      onClick={() => toggleExpanded(team.id)}
+                      className={`p-2 rounded-lg transition-all duration-200 ${isExpanded ? 'bg-lol-gold/20 text-lol-gold' : 'text-gray-500 hover:text-white'}`}
+                    >
+                      <svg className={`w-5 h-5 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                    {/* Three-dot menu */}
+                    <div className="relative">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenMenuId(openMenuId === team.id ? null : team.id);
+                        }}
+                        className="p-2 rounded-lg text-gray-500 hover:text-white hover:bg-lol-surface transition-all duration-200"
+                      >
+                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                          <circle cx="12" cy="5" r="2" />
+                          <circle cx="12" cy="12" r="2" />
+                          <circle cx="12" cy="19" r="2" />
+                        </svg>
+                      </button>
+                      {openMenuId === team.id && (
+                        <>
+                          <div
+                            className="fixed inset-0 z-10"
+                            onClick={() => setOpenMenuId(null)}
+                          />
+                          <div className="absolute right-0 top-full mt-1 z-20 bg-lol-card border border-lol-border rounded-lg shadow-xl min-w-40 py-1">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenMenuId(null);
+                                toggleFavorite(team.id);
+                              }}
+                              className="w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-lol-surface transition-colors flex items-center gap-2"
+                            >
+                              <svg
+                                className="w-4 h-4"
+                                fill={team.isFavorite ? 'currentColor' : 'none'}
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                strokeWidth={2}
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
+                                />
+                              </svg>
+                              {team.isFavorite ? 'Remove Favorite' : 'Add to Favorites'}
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenMenuId(null);
+                                handleDeleteTeam(team.id);
+                              }}
+                              className="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-red-500/10 transition-colors"
+                            >
+                              Delete Team
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -282,6 +493,34 @@ export default function EnemyTeamPage() {
                       <h3 className="text-sm font-medium text-gray-300 mb-3">OP.GG Links</h3>
                       <OpggLinks team={team} />
                     </div>
+
+                    {/* Fetch Ranks Button */}
+                    {isRankApiConfigured() && (() => {
+                      const teamPlayers = team.players
+                        .filter((p) => p.summonerName && p.tagLine)
+                        .map((p) => ({ summonerName: p.summonerName, tagLine: p.tagLine, region: p.region }));
+                      const isUpdated = allPlayersUpdated(teamPlayers);
+                      const needsUpdate = somePlayersNeedUpdate(teamPlayers);
+                      const isFetching = isFetchingContext(team.id);
+
+                      return (
+                        <div>
+                          <h3 className="text-sm font-medium text-gray-300 mb-3">Player Ranks</h3>
+                          <Button
+                            variant="secondary"
+                            onClick={() => handleFetchRanksForTeam(team.id)}
+                            disabled={isFetching || !needsUpdate}
+                            title={
+                              isUpdated
+                                ? 'All players have been updated within the last 24 hours'
+                                : 'Fetch player ranks from Riot API'
+                            }
+                          >
+                            {isFetching ? 'Fetching...' : isUpdated ? 'Updated' : 'Update'}
+                          </Button>
+                        </div>
+                      );
+                    })()}
 
                     <DndContext
                       sensors={sensors}
@@ -379,23 +618,25 @@ export default function EnemyTeamPage() {
                       {/* Player Tabs - Main Roster */}
                       <div className="flex flex-wrap gap-2 mb-4">
                         <div className="flex gap-2 bg-lol-dark p-1.5 rounded-xl border border-lol-border">
-                          {mainRoster.map((player) => {
-                            const roleLabel = ROLES.find((r) => r.value === player.role)?.label || player.role;
-                            const selectedId = selectedPlayerIds[team.id] || mainRoster[0]?.id;
+                          {ROLES.map((role) => {
+                            const player = mainRoster.find((p) => p.role === role.value);
+                            if (!player) return null;
+                            const roleLabel = role.label;
+                            const selectedId = selectedPlayerIds[team.id] || mainRoster.find(p => p.role === 'top')?.id || mainRoster[0]?.id;
                             const isSelected = player.id === selectedId;
                             const champCount = (player.championGroups || []).reduce((acc, g) => acc + g.championIds.length, 0);
                             return (
                               <button
                                 key={player.id}
                                 onClick={() => setSelectedPlayerIds((prev) => ({ ...prev, [team.id]: player.id }))}
-                                className={`px-4 py-2.5 rounded-lg font-medium transition-all duration-200 ${
+                                className={`px-4 py-2.5 rounded-lg font-medium transition-all duration-200 min-w-35 text-center ${
                                   isSelected
                                     ? 'bg-gradient-to-b from-lol-gold-light to-lol-gold text-lol-dark shadow-md'
                                     : 'text-gray-400 hover:text-white hover:bg-lol-surface'
                                 }`}
                               >
                                 <div className="text-sm">{roleLabel}</div>
-                                <div className={`text-xs mt-0.5 ${isSelected ? 'text-lol-dark/70' : 'text-gray-500'}`}>
+                                <div className={`text-xs mt-0.5 truncate ${isSelected ? 'text-lol-dark/70' : 'text-gray-500'}`}>
                                   {player.summonerName || 'Empty'} {champCount > 0 && `(${champCount})`}
                                 </div>
                               </button>
@@ -406,21 +647,21 @@ export default function EnemyTeamPage() {
                         {subs.length > 0 && (
                           <div className="flex gap-2 bg-lol-dark p-1.5 rounded-xl border border-lol-border/50">
                             {subs.map((player) => {
-                              const selectedId = selectedPlayerIds[team.id] || mainRoster[0]?.id;
+                              const selectedId = selectedPlayerIds[team.id] || mainRoster.find(p => p.role === 'top')?.id || mainRoster[0]?.id;
                               const isSelected = player.id === selectedId;
                               const champCount = (player.championGroups || []).reduce((acc, g) => acc + g.championIds.length, 0);
                               return (
                                 <button
                                   key={player.id}
                                   onClick={() => setSelectedPlayerIds((prev) => ({ ...prev, [team.id]: player.id }))}
-                                  className={`px-4 py-2.5 rounded-lg font-medium transition-all duration-200 ${
+                                  className={`px-4 py-2.5 rounded-lg font-medium transition-all duration-200 min-w-35 text-center ${
                                     isSelected
                                       ? 'bg-gradient-to-b from-lol-gold-light to-lol-gold text-lol-dark shadow-md'
                                       : 'text-gray-400 hover:text-white hover:bg-lol-surface'
                                   }`}
                                 >
                                   <div className="text-sm text-orange-400">Sub</div>
-                                  <div className={`text-xs mt-0.5 ${isSelected ? 'text-lol-dark/70' : 'text-gray-500'}`}>
+                                  <div className={`text-xs mt-0.5 truncate ${isSelected ? 'text-lol-dark/70' : 'text-gray-500'}`}>
                                     {player.summonerName || 'Empty'} {champCount > 0 && `(${champCount})`}
                                   </div>
                                 </button>
@@ -446,20 +687,12 @@ export default function EnemyTeamPage() {
                             onRemoveGroup={(groupId) => removeGroup(team.id, selectedPlayer.id, groupId)}
                             onRenameGroup={(groupId, newName) => renameGroup(team.id, selectedPlayer.id, groupId, newName)}
                             onReorderGroups={(groupIds) => reorderGroups(team.id, selectedPlayer.id, groupIds)}
+                            onSetAllowDuplicates={(allowDuplicates) => setAllowDuplicateChampions(team.id, selectedPlayer.id, allowDuplicates)}
                           />
                         );
                       })()}
                     </div>
 
-                    <div className="flex justify-end pt-2">
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        onClick={() => handleDeleteTeam(team.id)}
-                      >
-                        Delete Team
-                      </Button>
-                    </div>
                   </div>
                 )}
               </Card>

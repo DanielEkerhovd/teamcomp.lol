@@ -10,6 +10,7 @@ interface CustomPoolState {
   deletePool: (poolId: string) => void;
   renamePool: (poolId: string, newName: string) => void;
   selectPool: (poolId: string | null) => void;
+  setAllowDuplicateChampions: (poolId: string, allowDuplicates: boolean) => void;
   // Champion group operations
   addChampionToGroup: (poolId: string, groupId: string, championId: string) => void;
   removeChampionFromGroup: (poolId: string, groupId: string, championId: string) => void;
@@ -64,6 +65,16 @@ export const useCustomPoolStore = create<CustomPoolState>()(
 
       selectPool: (poolId) => {
         set({ selectedPoolId: poolId });
+      },
+
+      setAllowDuplicateChampions: (poolId, allowDuplicates) => {
+        set((state) => ({
+          pools: updatePool(state.pools, poolId, (pool) => ({
+            ...pool,
+            allowDuplicateChampions: allowDuplicates,
+            updatedAt: Date.now(),
+          })),
+        }));
       },
 
       addChampionToGroup: (poolId, groupId, championId) => {

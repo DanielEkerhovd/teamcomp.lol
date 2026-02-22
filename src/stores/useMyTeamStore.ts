@@ -2,8 +2,18 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { Team, Player, createEmptyTeam, createSubPlayer, generateId, Region, Role, ROLES, ChampionTier, TieredChampion } from '../types';
 import { useSettingsStore } from './useSettingsStore';
+import { useAuthStore } from './useAuthStore';
 
-export const MAX_TEAMS = 3;
+// Guest mode limit (MAX_TEAMS exported for backward compatibility)
+export const MAX_TEAMS_GUEST = 3;
+export const MAX_TEAMS = MAX_TEAMS_GUEST;
+
+// Get the maximum teams allowed based on auth state
+export const getMaxTeams = (): number => {
+  const { user, profile } = useAuthStore.getState();
+  if (!user) return MAX_TEAMS_GUEST; // Guest mode
+  return profile?.maxTeams ?? 1; // Authenticated: use tier limit
+};
 
 interface MyTeamState {
   teams: Team[];
@@ -55,7 +65,8 @@ export const useMyTeamStore = create<MyTeamState>()(
 
       addTeam: (name: string) => {
         const state = get();
-        if (state.teams.length >= MAX_TEAMS) return null;
+        const maxTeams = getMaxTeams();
+        if (state.teams.length >= maxTeams) return null;
         const newTeam = createEmptyTeam(name);
         set({ teams: [...state.teams, newTeam], selectedTeamId: newTeam.id });
         return newTeam;

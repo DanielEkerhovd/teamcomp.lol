@@ -5,11 +5,12 @@ export interface CustomTemplate {
   id: string;
   name: string;
   groups: string[];
+  allowDuplicates: boolean;
 }
 
 interface CustomTemplatesState {
   templates: CustomTemplate[];
-  addTemplate: (name: string, groups: string[]) => void;
+  addTemplate: (name: string, groups: string[], allowDuplicates: boolean) => void;
   removeTemplate: (id: string) => void;
 }
 
@@ -22,11 +23,11 @@ export const useCustomTemplatesStore = create<CustomTemplatesState>()(
     (set) => ({
       templates: [],
 
-      addTemplate: (name: string, groups: string[]) => {
+      addTemplate: (name: string, groups: string[], allowDuplicates: boolean) => {
         set((state) => ({
           templates: [
             ...state.templates,
-            { id: generateId(), name, groups },
+            { id: generateId(), name, groups, allowDuplicates },
           ],
         }));
       },

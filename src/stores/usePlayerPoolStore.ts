@@ -11,6 +11,8 @@ interface PlayerPoolState {
   findPool: (summonerName: string, role: Role) => PlayerPool | null;
   // Get existing pool or create a new one (called when a player has a name)
   getOrCreatePool: (summonerName: string, tagLine: string, role: Role) => PlayerPool;
+  // Settings
+  setAllowDuplicateChampions: (poolId: string, allowDuplicates: boolean) => void;
   // Champion group operations (all keyed by pool id)
   addChampionToGroup: (poolId: string, groupId: string, championId: string) => void;
   removeChampionFromGroup: (poolId: string, groupId: string, championId: string) => void;
@@ -56,6 +58,16 @@ export const usePlayerPoolStore = create<PlayerPoolState>()(
         };
         set((state) => ({ pools: [...state.pools, newPool] }));
         return newPool;
+      },
+
+      setAllowDuplicateChampions: (poolId, allowDuplicates) => {
+        set((state) => ({
+          pools: updatePool(state.pools, poolId, (pool) => ({
+            ...pool,
+            allowDuplicateChampions: allowDuplicates,
+            updatedAt: Date.now(),
+          })),
+        }));
       },
 
       addChampionToGroup: (poolId, groupId, championId) => {

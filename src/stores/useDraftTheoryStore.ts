@@ -39,8 +39,10 @@ const initialState = {
   redTeamName: 'Red Side',
 };
 
-const getSlotKey = (side: DraftSide, type: SlotType): keyof typeof initialState => {
-  return `${side}${type.charAt(0).toUpperCase() + type.slice(1)}s` as keyof typeof initialState;
+type SlotKey = 'blueBans' | 'bluePicks' | 'redBans' | 'redPicks';
+
+const getSlotKey = (side: DraftSide, type: SlotType): SlotKey => {
+  return `${side}${type.charAt(0).toUpperCase() + type.slice(1)}s` as SlotKey;
 };
 
 export const useDraftTheoryStore = create<DraftTheoryState>()(
@@ -51,7 +53,7 @@ export const useDraftTheoryStore = create<DraftTheoryState>()(
       setSlot: (side, type, index, championId) => {
         const key = getSlotKey(side, type);
         set((state) => ({
-          [key]: state[key].map((id, i) => (i === index ? championId : id)),
+          [key]: (state[key] as (string | null)[]).map((id: string | null, i: number) => (i === index ? championId : id)),
         }));
       },
 
@@ -60,13 +62,15 @@ export const useDraftTheoryStore = create<DraftTheoryState>()(
         const fromKey = getSlotKey(from.side, from.type);
         const toKey = getSlotKey(to.side, to.type);
 
-        const fromChampion = state[fromKey][from.index];
-        const toChampion = state[toKey][to.index];
+        const fromArr = state[fromKey] as (string | null)[];
+        const toArr = state[toKey] as (string | null)[];
+        const fromChampion = fromArr[from.index];
+        const toChampion = toArr[to.index];
 
         if (fromKey === toKey) {
           // Same array, need to update both indices at once
           set({
-            [fromKey]: state[fromKey].map((id, i) => {
+            [fromKey]: fromArr.map((id: string | null, i: number) => {
               if (i === from.index) return toChampion;
               if (i === to.index) return fromChampion;
               return id;
@@ -75,8 +79,8 @@ export const useDraftTheoryStore = create<DraftTheoryState>()(
         } else {
           // Different arrays
           set({
-            [fromKey]: state[fromKey].map((id, i) => (i === from.index ? toChampion : id)),
-            [toKey]: state[toKey].map((id, i) => (i === to.index ? fromChampion : id)),
+            [fromKey]: fromArr.map((id: string | null, i: number) => (i === from.index ? toChampion : id)),
+            [toKey]: toArr.map((id: string | null, i: number) => (i === to.index ? fromChampion : id)),
           });
         }
       },
