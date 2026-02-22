@@ -26,7 +26,8 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Card } from "../ui";
 import ChampionIcon from "./ChampionIcon";
-import { Champion, ChampionGroup, Role, ROLES } from "../../types";
+import MasteryDisplay from "./MasteryDisplay";
+import { Champion, ChampionGroup, Role, ROLES, Region } from "../../types";
 import { useChampionData } from "../../hooks/useChampionData";
 import { getChampionRoles } from "../../data/championRoles";
 import { useCustomTemplatesStore } from "../../stores/useCustomTemplatesStore";
@@ -85,6 +86,12 @@ export interface PlayerTierListData {
   championGroups?: ChampionGroup[];
   role?: Role; // Used for role-specific template generation
   allowDuplicateChampions?: boolean;
+  // Optional player info for mastery display
+  summonerName?: string;
+  tagLine?: string;
+  region?: Region;
+  notes?: string;
+  notepad?: { id: string; content: string; createdAt: number }[];
 }
 
 interface PlayerTierListProps {
@@ -107,6 +114,10 @@ interface PlayerTierListProps {
   onRenameGroup: (groupId: string, newName: string) => void;
   onReorderGroups: (groupIds: string[]) => void;
   onSetAllowDuplicates?: (allowDuplicates: boolean) => void;
+  // Player notepad management
+  onAddNote?: () => void;
+  onUpdateNote?: (noteId: string, content: string) => void;
+  onDeleteNote?: (noteId: string) => void;
 }
 
 interface SortableChampionProps {
@@ -708,6 +719,9 @@ export default function PlayerTierList({
   onRenameGroup,
   onReorderGroups,
   onSetAllowDuplicates,
+  onAddNote,
+  onUpdateNote,
+  onDeleteNote,
 }: PlayerTierListProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
@@ -825,6 +839,34 @@ export default function PlayerTierList({
       return;
     }
 
+    // Check if dragging from the mastery display
+    if (activeIdStr.startsWith("mastery:")) {
+      const championId = activeIdStr.replace("mastery:", "");
+
+      // Dropped on a group directly
+      if (overIdStr.startsWith("group:")) {
+        const targetGroupId = overIdStr.replace("group:", "");
+        onAddChampion(targetGroupId, championId);
+        return;
+      }
+
+      // Dropped on a sortable-group wrapper (treat as dropping on the group)
+      if (overIdStr.startsWith("sortable-group:")) {
+        const targetGroupId = overIdStr.replace("sortable-group:", "");
+        onAddChampion(targetGroupId, championId);
+        return;
+      }
+
+      // Dropped on a champion in a group
+      if (overIdStr.includes(":") && !overIdStr.startsWith("pool:") && !overIdStr.startsWith("mastery:")) {
+        const [targetGroupId] = overIdStr.split(":");
+        if (targetGroupId) {
+          onAddChampion(targetGroupId, championId);
+        }
+      }
+      return;
+    }
+
     // Check if dropped on the pool (remove from group)
     if (overIdStr === "pool") {
       const [groupId, championId] = activeIdStr.split(":");
@@ -902,9 +944,11 @@ export default function PlayerTierList({
   const activeChampionId = activeId
     ? activeId.startsWith("pool:")
       ? activeId.replace("pool:", "")
-      : activeId.startsWith("sortable-group:")
-        ? null
-        : activeId.split(":")[1]
+      : activeId.startsWith("mastery:")
+        ? activeId.replace("mastery:", "")
+        : activeId.startsWith("sortable-group:")
+          ? null
+          : activeId.split(":")[1]
     : null;
 
   // Get the group being dragged for overlay
@@ -912,6 +956,9 @@ export default function PlayerTierList({
     ? activeId.replace("sortable-group:", "")
     : null;
   const activeGroup = activeGroupId ? groups.find((g) => g.id === activeGroupId) : null;
+
+  // Check if we have player info for mastery display
+  const hasPlayerInfo = player.summonerName && player.tagLine && player.region;
 
   return (
     <DndContext
@@ -921,7 +968,9 @@ export default function PlayerTierList({
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div className="space-y-4">
+      <div className="flex gap-4">
+        {/* Main champion pool area */}
+        <div className="flex-1 space-y-4">
         <Card variant="bordered" className="p-4">
           {groups.length === 0 ? (
             <div className="py-8 flex items-stretch gap-6">
@@ -991,23 +1040,41 @@ export default function PlayerTierList({
                     >
                       + Add another group
                     </button>
-                    <label className="flex items-center gap-2 text-xs text-gray-400 mb-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={allowDuplicates}
-                        onChange={(e) => setAllowDuplicates(e.target.checked)}
-                        className="rounded border-lol-border bg-lol-dark"
-                      />
-                      Allow champions in multiple groups
+                    <label className="flex items-center gap-3 text-xs text-gray-400 mb-2 cursor-pointer group">
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={allowDuplicates}
+                        onClick={() => setAllowDuplicates(!allowDuplicates)}
+                        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-lol-gold focus-visible:ring-offset-2 focus-visible:ring-offset-lol-dark ${
+                          allowDuplicates ? 'bg-lol-gold' : 'bg-gray-600'
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ease-in-out ${
+                            allowDuplicates ? 'translate-x-4.5' : 'translate-x-0.75'
+                          }`}
+                        />
+                      </button>
+                      <span className="group-hover:text-gray-300 transition-colors">Allow champions in multiple groups</span>
                     </label>
-                    <label className="flex items-center gap-2 text-xs text-gray-400 mb-4 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={saveAsTemplate}
-                        onChange={(e) => setSaveAsTemplate(e.target.checked)}
-                        className="rounded border-lol-border bg-lol-dark"
-                      />
-                      Save as reusable template
+                    <label className="flex items-center gap-3 text-xs text-gray-400 mb-4 cursor-pointer group">
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={saveAsTemplate}
+                        onClick={() => setSaveAsTemplate(!saveAsTemplate)}
+                        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-lol-gold focus-visible:ring-offset-2 focus-visible:ring-offset-lol-dark ${
+                          saveAsTemplate ? 'bg-lol-gold' : 'bg-gray-600'
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ease-in-out ${
+                            saveAsTemplate ? 'translate-x-4.5' : 'translate-x-0.75'
+                          }`}
+                        />
+                      </button>
+                      <span className="group-hover:text-gray-300 transition-colors">Save as reusable template</span>
                     </label>
                     <div className="flex gap-2">
                       <button
@@ -1189,14 +1256,23 @@ export default function PlayerTierList({
             <div className="mt-4 flex items-center justify-between">
               <AddGroupButton onAddGroup={onAddGroup} groupCount={groups.length} />
               {onSetAllowDuplicates && (
-                <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-gray-300 transition-colors">
-                  <input
-                    type="checkbox"
-                    checked={player.allowDuplicateChampions ?? false}
-                    onChange={(e) => onSetAllowDuplicates(e.target.checked)}
-                    className="rounded border-lol-border bg-lol-dark"
-                  />
-                  Allow champions in multiple groups
+                <label className="flex items-center gap-3 text-xs text-gray-400 cursor-pointer group">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={player.allowDuplicateChampions ?? false}
+                    onClick={() => onSetAllowDuplicates(!(player.allowDuplicateChampions ?? false))}
+                    className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-lol-gold focus-visible:ring-offset-2 focus-visible:ring-offset-lol-dark ${
+                      player.allowDuplicateChampions ? 'bg-lol-gold' : 'bg-gray-600'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ease-in-out ${
+                        player.allowDuplicateChampions ? 'translate-x-4.5' : 'translate-x-0.75'
+                      }`}
+                    />
+                  </button>
+                  <span className="group-hover:text-gray-300 transition-colors">Allow champions in multiple groups</span>
                 </label>
               )}
             </div>
@@ -1204,6 +1280,64 @@ export default function PlayerTierList({
         </Card>
 
         <ChampionPoolSection excludeIds={allChampionIds} isOver={overGroupId === "pool"} />
+        </div>
+
+        {/* Mastery display and Player Notes on the right */}
+        {hasPlayerInfo && (
+          <div className="w-100 shrink-0 space-y-4">
+            <MasteryDisplay
+              player={{
+                id: '',
+                summonerName: player.summonerName!,
+                tagLine: player.tagLine!,
+                region: player.region!,
+                role: player.role || 'mid',
+                notes: '',
+                championPool: [],
+              }}
+            />
+
+            {/* Player Notes */}
+            {onAddNote && onUpdateNote && onDeleteNote && (
+              <Card variant="bordered" className="p-4">
+                <h4 className="text-sm font-medium text-gray-400 mb-3">Player Notes</h4>
+                <div className="flex flex-wrap gap-3">
+                  {(player.notepad || []).map((note) => (
+                    <div
+                      key={note.id}
+                      className="relative group w-full h-38 bg-lol-dark rounded-xl border border-lol-border/50 p-3 hover:border-lol-border-light transition-all duration-200"
+                    >
+                      <button
+                        onClick={() => onDeleteNote(note.id)}
+                        className="absolute -top-2 -right-2 w-5 h-5 bg-red-500/80 hover:bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center z-10"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                      <textarea
+                        value={note.content}
+                        onChange={(e) => onUpdateNote(note.id, e.target.value)}
+                        placeholder="Add note..."
+                        className="w-full h-full bg-transparent text-white text-sm placeholder-gray-600 resize-none focus:outline-none"
+                      />
+                    </div>
+                  ))}
+                  {/* Add Note Placeholder */}
+                  <button
+                    onClick={() => onAddNote()}
+                    className="w-full h-38 bg-lol-card/50 rounded-xl border border-dashed border-lol-border/50 hover:border-lol-gold/50 hover:bg-lol-card transition-all duration-200 flex flex-col items-center justify-center gap-2 text-gray-500 hover:text-lol-gold"
+                  >
+                    <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
+                    </svg>
+                    <span className="text-sm">Add Note</span>
+                  </button>
+                </div>
+              </Card>
+            )}
+          </div>
+        )}
       </div>
 
       <DragOverlay>

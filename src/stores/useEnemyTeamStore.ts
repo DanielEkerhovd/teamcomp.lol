@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { Team, Player, createEmptyTeam, createSubPlayer, generateId, Region, Role, ROLES, ChampionTier, TieredChampion } from '../types';
+import { Team, Player, createEmptyTeam, createSubPlayer, generateId, Region, Role, ROLES, ChampionTier, TieredChampion, Note } from '../types';
 import { useSettingsStore } from './useSettingsStore';
 
 interface EnemyTeamState {
@@ -31,6 +31,14 @@ interface EnemyTeamState {
   renameGroup: (teamId: string, playerId: string, groupId: string, newName: string) => void;
   reorderGroups: (teamId: string, playerId: string, groupIds: string[]) => void;
   setAllowDuplicateChampions: (teamId: string, playerId: string, allowDuplicates: boolean) => void;
+  // Team notepad management
+  addNote: (teamId: string) => void;
+  updateNote: (teamId: string, noteId: string, content: string) => void;
+  deleteNote: (teamId: string, noteId: string) => void;
+  // Player notepad management
+  addPlayerNote: (teamId: string, playerId: string) => void;
+  updatePlayerNote: (teamId: string, playerId: string, noteId: string, content: string) => void;
+  deletePlayerNote: (teamId: string, playerId: string, noteId: string) => void;
 }
 
 export const useEnemyTeamStore = create<EnemyTeamState>()(
@@ -492,6 +500,113 @@ export const useEnemyTeamStore = create<EnemyTeamState>()(
               players: team.players.map((p) => {
                 if (p.id !== playerId) return p;
                 return { ...p, allowDuplicateChampions: allowDuplicates };
+              }),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
+      addNote: (teamId: string) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            const newNote: Note = {
+              id: generateId(),
+              content: '',
+              createdAt: Date.now(),
+            };
+            return {
+              ...team,
+              notepad: [...(team.notepad || []), newNote],
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
+      updateNote: (teamId: string, noteId: string, content: string) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            return {
+              ...team,
+              notepad: (team.notepad || []).map((note) =>
+                note.id === noteId ? { ...note, content } : note
+              ),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
+      deleteNote: (teamId: string, noteId: string) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            return {
+              ...team,
+              notepad: (team.notepad || []).filter((note) => note.id !== noteId),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
+      addPlayerNote: (teamId: string, playerId: string) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            return {
+              ...team,
+              players: team.players.map((p) => {
+                if (p.id !== playerId) return p;
+                const newNote = {
+                  id: generateId(),
+                  content: '',
+                  createdAt: Date.now(),
+                };
+                return { ...p, notepad: [...(p.notepad || []), newNote] };
+              }),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
+      updatePlayerNote: (teamId: string, playerId: string, noteId: string, content: string) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            return {
+              ...team,
+              players: team.players.map((p) => {
+                if (p.id !== playerId) return p;
+                return {
+                  ...p,
+                  notepad: (p.notepad || []).map((note) =>
+                    note.id === noteId ? { ...note, content } : note
+                  ),
+                };
+              }),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
+      deletePlayerNote: (teamId: string, playerId: string, noteId: string) => {
+        set((state) => ({
+          teams: state.teams.map((team) => {
+            if (team.id !== teamId) return team;
+            return {
+              ...team,
+              players: team.players.map((p) => {
+                if (p.id !== playerId) return p;
+                return {
+                  ...p,
+                  notepad: (p.notepad || []).filter((note) => note.id !== noteId),
+                };
               }),
               updatedAt: Date.now(),
             };

@@ -1,8 +1,8 @@
 import { useDroppable } from '@dnd-kit/core';
 import { useSortable } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
 import { Player, Role, ROLES } from '../../types';
 import PlayerCard from './PlayerCard';
+import RoleIcon from './RoleIcon';
 
 interface RoleSlotProps {
   role: Role;
@@ -17,24 +17,21 @@ export default function RoleSlot({ role, player, onPlayerChange }: RoleSlotProps
     attributes,
     listeners,
     setNodeRef,
-    transform,
-    transition,
     isDragging,
+    isOver: isOverSortable,
   } = useSortable({
     id: player?.id || `empty-${role}`,
     data: { type: 'player', role, player },
     disabled: !player,
   });
 
-  const { isOver, setNodeRef: setDropRef } = useDroppable({
+  const { isOver: isOverDroppable, setNodeRef: setDropRef } = useDroppable({
     id: `role-${role}`,
     data: { type: 'role', role },
   });
 
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  };
+  // Show highlight when dragging over either the role area or the player card
+  const isOver = isOverDroppable || isOverSortable;
 
   return (
     <div
@@ -43,17 +40,22 @@ export default function RoleSlot({ role, player, onPlayerChange }: RoleSlotProps
         isOver ? 'bg-lol-gold/15 ring-2 ring-lol-gold/50' : ''
       }`}
     >
-      <div className="text-xs text-lol-gold text-center mb-2 font-semibold uppercase tracking-wider bg-lol-gold/10 rounded-md py-1 px-2 mx-auto w-fit">
+      <div className="text-xs text-lol-gold text-center mb-2 font-semibold uppercase tracking-wider bg-lol-gold/10 rounded-md py-1 px-2 mx-auto w-fit flex items-center gap-1">
+        <RoleIcon role={role} size="xs" />
         {roleLabel}
       </div>
       {player ? (
-        <div ref={setNodeRef} style={style}>
+        <div
+          ref={setNodeRef}
+          {...attributes}
+          {...listeners}
+          className="cursor-grab active:cursor-grabbing"
+        >
           <PlayerCard
             player={player}
             onChange={(updates) => onPlayerChange(player.id, updates)}
             isDragging={isDragging}
             showRole={false}
-            dragHandleProps={{ ...attributes, ...listeners }}
             compact
           />
         </div>

@@ -3,6 +3,7 @@ import { Player, ROLES, REGIONS } from "../../types";
 import { useOpgg } from "../../hooks/useOpgg";
 import { ChampionIcon } from "../champion";
 import RankBadge from "./RankBadge";
+import RoleIcon from "./RoleIcon";
 
 interface PlayerCardProps extends Omit<
   HTMLAttributes<HTMLDivElement>,
@@ -15,7 +16,6 @@ interface PlayerCardProps extends Omit<
   compact?: boolean;
   isDragging?: boolean;
   showRole?: boolean;
-  dragHandleProps?: HTMLAttributes<HTMLDivElement>;
 }
 
 const PlayerCard = forwardRef<HTMLDivElement, PlayerCardProps>(
@@ -27,7 +27,6 @@ const PlayerCard = forwardRef<HTMLDivElement, PlayerCardProps>(
       compact = false,
       isDragging = false,
       showRole = true,
-      dragHandleProps,
       className = "",
       ...props
     },
@@ -49,16 +48,14 @@ const PlayerCard = forwardRef<HTMLDivElement, PlayerCardProps>(
       >
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-1">
-            {dragHandleProps && (
-              <div
-                {...dragHandleProps}
-                className="cursor-grab text-gray-600 hover:text-lol-gold select-none transition-colors"
-              >
-                ⋮⋮
-              </div>
-            )}
+            <div className="text-gray-600 select-none">
+              ⋮⋮
+            </div>
             {showRole && (
-              <span className="font-semibold text-lol-gold">{roleLabel}</span>
+              <span className="font-semibold text-lol-gold flex items-center gap-1">
+                <RoleIcon role={player.role} size="sm" />
+                {roleLabel}
+              </span>
             )}
           </div>
           <div className="flex items-center gap-1">
@@ -66,7 +63,7 @@ const PlayerCard = forwardRef<HTMLDivElement, PlayerCardProps>(
               <button
                 type="button"
                 onClick={() => openPlayerProfile(player)}
-                className="text-[10px] text-gray-500 hover:text-lol-gold transition-colors px-1.5 py-0.5 rounded hover:bg-lol-gold/10"
+                className="text-[10px] text-gray-500 hover:text-lol-gold transition-colors px-1.5 py-0.5 rounded hover:bg-lol-gold/10 "
                 title="Open OP.GG"
               >
                 OP.GG
@@ -76,7 +73,7 @@ const PlayerCard = forwardRef<HTMLDivElement, PlayerCardProps>(
               <button
                 type="button"
                 onClick={() => setShowNotes(!showNotes)}
-                className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
+                className={`text-[10px] px-1.5 py-0.5 rounded transition-colors  ${
                   showNotes || player.notes
                     ? "text-lol-gold bg-lol-gold/10"
                     : "text-gray-500 hover:text-gray-300 hover:bg-lol-surface"
@@ -93,7 +90,7 @@ const PlayerCard = forwardRef<HTMLDivElement, PlayerCardProps>(
             value={player.summonerName}
             onChange={(e) => onChange({ summonerName: e.target.value })}
             placeholder="Name"
-            className="w-full bg-transparent text-white text-sm placeholder-gray-600 focus:outline-none border-b border-transparent focus:border-lol-gold/30 transition-colors"
+            className="w-full bg-transparent text-white text-sm placeholder-gray-600 focus:outline-none border-b border-transparent focus:border-lol-gold/30 transition-colors "
           />
           <div className="flex items-center gap-1 mt-0.5">
             <span className="text-gray-500 text-xs">#</span>
@@ -101,14 +98,14 @@ const PlayerCard = forwardRef<HTMLDivElement, PlayerCardProps>(
               value={player.tagLine}
               onChange={(e) => onChange({ tagLine: e.target.value })}
               placeholder="Tag"
-              className="flex-1 bg-transparent text-gray-400 text-xs placeholder-gray-600 focus:outline-none focus:text-white transition-colors"
+              className="flex-1 bg-transparent text-gray-400 text-xs placeholder-gray-600 focus:outline-none focus:text-white transition-colors "
             />
             <select
               value={player.region}
               onChange={(e) =>
                 onChange({ region: e.target.value as Player["region"] })
               }
-              className={`bg-lol-surface text-gray-500 focus:outline-none cursor-pointer hover:text-gray-300 transition-colors rounded ${
+              className={`bg-lol-surface text-gray-500 focus:outline-none cursor-pointer hover:text-gray-300 transition-colors rounded  ${
                 compact ? 'text-[10px] px-1 py-0.5' : 'text-xs bg-transparent'
               }`}
             >
@@ -148,7 +145,7 @@ const PlayerCard = forwardRef<HTMLDivElement, PlayerCardProps>(
             value={player.notes}
             onChange={(e) => onChange({ notes: e.target.value })}
             placeholder="Notes..."
-            className="w-full mt-2 px-2 py-1.5 bg-lol-dark border border-lol-border rounded-lg text-white placeholder-gray-600 text-xs resize-none focus:outline-none focus:border-lol-gold/50 focus:ring-1 focus:ring-lol-gold/20 transition-all"
+            className="w-full mt-2 px-2 py-1.5 bg-lol-dark border border-lol-border rounded-lg text-white placeholder-gray-600 text-xs resize-none focus:outline-none focus:border-lol-gold/50 focus:ring-1 focus:ring-lol-gold/20 transition-all "
             rows={2}
           />
         )}

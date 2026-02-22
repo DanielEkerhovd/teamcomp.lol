@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import {
   DndContext,
   DragOverlay,
-  closestCenter,
+  closestCorners,
   PointerSensor,
   useSensor,
   useSensors,
@@ -12,6 +12,7 @@ import {
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
 import { useMyTeamStore, MAX_TEAMS } from '../stores/useMyTeamStore';
 import { useRankStore } from '../stores/useRankStore';
+import { useMasteryStore } from '../stores/useMasteryStore';
 import { parseOpggMultiSearchUrl, Player, Role, ROLES } from '../types';
 import { Card, Input, Button, Modal } from '../components/ui';
 import { RoleSlot, SubSlot } from '../components/team';
@@ -52,6 +53,9 @@ export default function MyTeamPage() {
     swapPlayerRoles,
     moveToRole,
     moveToSubs,
+    addNote,
+    updateNote,
+    deleteNote,
   } = useMyTeamStore();
 
   const team = teams.find((t) => t.id === selectedTeamId) || teams[0];
@@ -66,6 +70,8 @@ export default function MyTeamPage() {
     somePlayersNeedUpdate,
   } = useRankStore();
 
+  const { fetchMasteriesFromCache, fetchMasteriesForPlayers } = useMasteryStore();
+
   const MY_TEAM_CONTEXT = `my-team-${selectedTeamId}`;
   const isLoadingRanks = isFetchingContext(MY_TEAM_CONTEXT);
 
@@ -76,7 +82,7 @@ export default function MyTeamPage() {
   const isUpdated = allPlayersUpdated(teamPlayers);
   const needsUpdate = somePlayersNeedUpdate(teamPlayers);
 
-  // Auto-fetch ranks from cache on page load
+  // Auto-fetch ranks and masteries from cache on page load
   useEffect(() => {
     if (!isRankApiConfigured() || !team) return;
     const players = team.players
@@ -84,8 +90,9 @@ export default function MyTeamPage() {
       .map((p) => ({ summonerName: p.summonerName, tagLine: p.tagLine, region: p.region }));
     if (players.length > 0) {
       fetchRanksFromCache(players);
+      fetchMasteriesFromCache(players);
     }
-  }, [team?.id, fetchRanksFromCache, isRankApiConfigured]);
+  }, [team?.id, fetchRanksFromCache, fetchMasteriesFromCache, isRankApiConfigured]);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importUrl, setImportUrl] = useState('');
   const [importError, setImportError] = useState('');
@@ -140,7 +147,10 @@ export default function MyTeamPage() {
   const handleRefreshRanks = async () => {
     if (!team || !needsUpdate) return;
     const playersWithNames = team.players.filter(p => p.summonerName && p.tagLine);
-    await fetchRanksForContext(MY_TEAM_CONTEXT, playersWithNames);
+    await Promise.all([
+      fetchRanksForContext(MY_TEAM_CONTEXT, playersWithNames),
+      fetchMasteriesForPlayers(playersWithNames),
+    ]);
   };
 
   const handleDeleteTeam = (teamId: string) => {
@@ -189,6 +199,17 @@ export default function MyTeamPage() {
     const activeId = active.id as string;
     const overId = over.id as string;
 
+    // Check if dropping on another player first (for swapping)
+    if (activeId !== overId) {
+      const draggedPlayer = team?.players.find((p) => p.id === activeId);
+      const targetPlayer = team?.players.find((p) => p.id === overId);
+
+      if (draggedPlayer && targetPlayer) {
+        swapPlayerRoles(activeId, overId);
+        return;
+      }
+    }
+
     if (overId.startsWith('role-')) {
       const role = overId.replace('role-', '') as Role;
       moveToRole(activeId, role);
@@ -198,15 +219,6 @@ export default function MyTeamPage() {
     if (overId === 'subs-drop-zone') {
       moveToSubs(activeId);
       return;
-    }
-
-    if (activeId !== overId) {
-      const draggedPlayer = team?.players.find((p) => p.id === activeId);
-      const targetPlayer = team?.players.find((p) => p.id === overId);
-
-      if (draggedPlayer && targetPlayer) {
-        swapPlayerRoles(activeId, overId);
-      }
     }
   };
 
@@ -220,7 +232,7 @@ export default function MyTeamPage() {
   return (
     <DndContext
       sensors={sensors}
-      collisionDetection={closestCenter}
+      collisionDetection={closestCorners}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
@@ -321,7 +333,7 @@ export default function MyTeamPage() {
                     : 'Fetch player ranks from Riot API'
                 }
               >
-                {isLoadingRanks ? 'Fetching...' : isUpdated ? 'Updated' : 'Update'}
+                {isLoadingRanks ? 'Fetching Ranks...' : isUpdated ? 'Ranks Updated' : 'Update Ranks'}
               </Button>
             )}
             <Button variant="secondary" onClick={() => setIsImportModalOpen(true)}>
@@ -394,16 +406,42 @@ export default function MyTeamPage() {
           </SortableContext>
         </Card>
 
-        {/* Notes */}
+        {/* Notepad */}
         <Card variant="bordered" padding="lg">
           <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">Team Notes</h2>
-          <textarea
-            value={team.notes}
-            onChange={(e) => updateTeam({ notes: e.target.value })}
-            placeholder="Team notes, strategies, comps..."
-            className="w-full px-4 py-3 bg-lol-dark border border-lol-border rounded-xl text-white placeholder-gray-500 resize-none focus:outline-none focus:border-lol-gold/50 focus:ring-2 focus:ring-lol-gold/20 transition-all duration-200 min-h-[100px]"
-            rows={4}
-          />
+          <div className="flex flex-wrap gap-3">
+            {(team.notepad || []).map((note) => (
+              <div
+                key={note.id}
+                className="relative group w-[calc((100%-3rem)/5)] min-w-36 h-38 bg-lol-dark rounded-xl border border-lol-border/50 p-3 hover:border-lol-border-light transition-all duration-200"
+              >
+                <button
+                  onClick={() => deleteNote(note.id)}
+                  className="absolute -top-2 -right-2 w-5 h-5 bg-red-500/80 hover:bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center z-10"
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+                <textarea
+                  value={note.content}
+                  onChange={(e) => updateNote(note.id, e.target.value)}
+                  placeholder="Add note..."
+                  className="w-full h-full bg-transparent text-white text-sm placeholder-gray-600 resize-none focus:outline-none"
+                />
+              </div>
+            ))}
+            {/* Add Note Placeholder */}
+            <button
+              onClick={() => addNote()}
+              className="w-[calc((100%-3rem)/5)] min-w-36 h-38 bg-lol-card/50 rounded-xl border border-dashed border-lol-border/50 hover:border-lol-gold/50 hover:bg-lol-card transition-all duration-200 flex flex-col items-center justify-center gap-2 text-gray-500 hover:text-lol-gold"
+            >
+              <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
+              </svg>
+              <span className="text-sm">Add Note</span>
+            </button>
+          </div>
         </Card>
 
         {/* Import Modal */}

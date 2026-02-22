@@ -196,7 +196,8 @@ export async function fetchPlayerRankFromCache(
 export async function fetchPlayerRank(
   summonerName: string,
   tagLine: string,
-  region: Region
+  region: Region,
+  forceRefresh = false
 ): Promise<CachedRank> {
   if (!summonerName || !tagLine) {
     return { rank: null, fetchedAt: Date.now(), error: 'Missing summoner name or tag' };
@@ -206,7 +207,7 @@ export async function fetchPlayerRank(
 
   try {
     // Fetch rank via Supabase Edge Function (it handles cache checking)
-    const response = await fetchRankFromProxy(summonerName, tagLine, region, false);
+    const response = await fetchRankFromProxy(summonerName, tagLine, region, forceRefresh);
 
     const fetchedAt = response.cachedAt ? new Date(response.cachedAt).getTime() : Date.now();
     const result: CachedRank = {

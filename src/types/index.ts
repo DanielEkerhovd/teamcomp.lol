@@ -1,4 +1,4 @@
-export type Role = 'top' | 'jungle' | 'mid' | 'adc' | 'support';
+export type Role = 'top' | 'jungle' | 'mid' | 'adc' | 'support' | 'flex';
 
 export type Region =
   | 'euw' | 'eune' | 'na' | 'kr' | 'br'
@@ -34,12 +34,18 @@ export const ROLES: { value: Role; label: string }[] = [
   { value: 'support', label: 'Support' },
 ];
 
+export const SUB_ROLES: { value: Role; label: string }[] = [
+  ...ROLES,
+  { value: 'flex', label: 'Flex' },
+];
+
 export interface Player {
   id: string;
   summonerName: string;
   tagLine: string;
   role: Role;
   notes: string;
+  notepad?: Note[];
   region: Region;
   isSub?: boolean;
   championPool: TieredChampion[];
@@ -65,6 +71,7 @@ export interface Team {
   name: string;
   players: Player[];
   notes: string;
+  notepad?: Note[];
   createdAt: number;
   updatedAt: number;
   championPool?: TeamChampionPriority[];
@@ -106,6 +113,12 @@ export interface ChampionGroup {
   id: string;
   name: string;
   championIds: string[];
+}
+
+export interface Note {
+  id: string;
+  content: string;
+  createdAt: number;
 }
 
 // A custom pool not tied to any player or team (e.g., tier lists)

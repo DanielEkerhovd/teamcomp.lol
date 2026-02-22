@@ -1,7 +1,7 @@
 import { useSortable } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import { Player, Role, ROLES } from '../../types';
+import { Player, Role, SUB_ROLES } from '../../types';
 import PlayerCard from './PlayerCard';
+import RoleIcon from './RoleIcon';
 
 interface SubSlotProps {
   player: Player;
@@ -14,30 +14,27 @@ export default function SubSlot({ player, onPlayerChange, onRemove }: SubSlotPro
     attributes,
     listeners,
     setNodeRef,
-    transform,
-    transition,
     isDragging,
+    isOver,
   } = useSortable({
     id: player.id,
     data: { type: 'player', player },
   });
 
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  };
-
   return (
-    <div className="flex-1 min-w-32 max-w-48 rounded-lg p-1">
+    <div className={`w-[calc((100%-3rem)/5)] min-w-36 rounded-xl p-1.5 transition-all duration-200 ${
+      isOver ? 'bg-lol-gold/15 ring-2 ring-lol-gold/50' : ''
+    }`}>
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-gray-500 font-medium uppercase tracking-wide">Sub</span>
+          <RoleIcon role={player.role} size="xs" />
           <select
             value={player.role}
             onChange={(e) => onPlayerChange(player.id, { role: e.target.value as Role })}
-            className="text-xs bg-lol-dark text-lol-gold border border-lol-border rounded px-1.5 py-0.5 focus:outline-none focus:border-lol-gold cursor-pointer"
+            className="text-xs bg-lol-dark text-gray-400 border border-lol-border rounded px-1.5 py-0.5 focus:outline-none focus:border-gray-500 cursor-pointer"
           >
-            {ROLES.map((r) => (
+            {SUB_ROLES.map((r) => (
               <option key={r.value} value={r.value}>
                 {r.label}
               </option>
@@ -52,13 +49,17 @@ export default function SubSlot({ player, onPlayerChange, onRemove }: SubSlotPro
           ×
         </button>
       </div>
-      <div ref={setNodeRef} style={style}>
+      <div
+        ref={setNodeRef}
+        {...attributes}
+        {...listeners}
+        className="cursor-grab active:cursor-grabbing"
+      >
         <PlayerCard
           player={player}
           onChange={(updates) => onPlayerChange(player.id, updates)}
           isDragging={isDragging}
           showRole={false}
-          dragHandleProps={{ ...attributes, ...listeners }}
           compact
         />
       </div>

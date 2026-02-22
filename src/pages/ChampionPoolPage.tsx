@@ -12,6 +12,7 @@ const ROLE_ICON_URLS: Record<Role, string> = {
   mid: 'https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-clash/global/default/assets/images/position-selector/positions/icon-position-middle.png',
   adc: 'https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-clash/global/default/assets/images/position-selector/positions/icon-position-bottom.png',
   support: 'https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-clash/global/default/assets/images/position-selector/positions/icon-position-utility.png',
+  flex: 'https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-clash/global/default/assets/images/position-selector/positions/icon-position-fill.png',
 };
 
 function RoleIcon({ role, className = 'w-4 h-4' }: { role: Role; className?: string }) {
@@ -164,9 +165,6 @@ export default function ChampionPoolPage() {
                 {mainPlayers.map((player) => {
                   const active = selectionMode === 'player' && player.id === selectedPlayer?.id;
                   const isEmpty = !player.summonerName;
-                  const champCount = playerPool && player.id === selectedPlayer?.id
-                    ? playerPool.championGroups.reduce((n: number, g: { championIds: string[] }) => n + g.championIds.length, 0)
-                    : 0;
                   return (
                     <button
                       key={player.id}
@@ -182,11 +180,6 @@ export default function ChampionPoolPage() {
                       <div className={`text-sm font-semibold truncate ${isEmpty ? 'italic opacity-50' : ''}`}>
                         {isEmpty ? 'Empty' : player.summonerName}
                       </div>
-                      {!isEmpty && champCount > 0 && (
-                        <div className={`text-xs ${active ? 'text-lol-dark/60' : 'text-gray-500'}`}>
-                          {champCount} champ{champCount !== 1 ? 's' : ''}
-                        </div>
-                      )}
                     </button>
                   );
                 })}

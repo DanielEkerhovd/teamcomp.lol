@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { Team, Player, createEmptyTeam, createSubPlayer, generateId, Region, Role, ROLES, ChampionTier, TieredChampion } from '../types';
+import { Team, Player, createEmptyTeam, createSubPlayer, generateId, Region, Role, ROLES, ChampionTier, TieredChampion, Note } from '../types';
 import { useSettingsStore } from './useSettingsStore';
 import { useAuthStore } from './useAuthStore';
 
@@ -43,6 +43,10 @@ interface MyTeamState {
   removeGroup: (playerId: string, groupId: string) => void;
   renameGroup: (playerId: string, groupId: string, newName: string) => void;
   reorderGroups: (playerId: string, groupIds: string[]) => void;
+  // Notepad management
+  addNote: () => void;
+  updateNote: (noteId: string, content: string) => void;
+  deleteNote: (noteId: string) => void;
 }
 
 // Helper to get selected team and update it
@@ -415,6 +419,43 @@ export const useMyTeamStore = create<MyTeamState>()(
                 .filter((g): g is NonNullable<typeof g> => g !== undefined);
               return { ...p, championGroups: reordered };
             }),
+            updatedAt: Date.now(),
+          }))
+        );
+      },
+
+      addNote: () => {
+        set((state) => {
+          const newNote: Note = {
+            id: generateId(),
+            content: '',
+            createdAt: Date.now(),
+          };
+          return updateSelectedTeam(state, (team) => ({
+            ...team,
+            notepad: [...(team.notepad || []), newNote],
+            updatedAt: Date.now(),
+          }));
+        });
+      },
+
+      updateNote: (noteId: string, content: string) => {
+        set((state) =>
+          updateSelectedTeam(state, (team) => ({
+            ...team,
+            notepad: (team.notepad || []).map((note) =>
+              note.id === noteId ? { ...note, content } : note
+            ),
+            updatedAt: Date.now(),
+          }))
+        );
+      },
+
+      deleteNote: (noteId: string) => {
+        set((state) =>
+          updateSelectedTeam(state, (team) => ({
+            ...team,
+            notepad: (team.notepad || []).filter((note) => note.id !== noteId),
             updatedAt: Date.now(),
           }))
         );
