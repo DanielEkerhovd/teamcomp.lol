@@ -5,7 +5,29 @@ import { SharedDraftData, DbPlayer, DbEnemyPlayer } from '../types/database';
 import { Card } from '../components/ui';
 import { ChampionIcon } from '../components/champion';
 import { useChampionData } from '../hooks/useChampionData';
-import { ROLES, Role, Note } from '../types';
+import { ROLES, Role, Note, DEFAULT_REGION } from '../types';
+
+// Helper to generate op.gg URLs for DB player types
+function getPlayerOpggUrl(player: DbPlayer | DbEnemyPlayer): string {
+  if (!player.summoner_name) return '';
+  const name = encodeURIComponent(player.summoner_name);
+  const tag = player.tag_line ? encodeURIComponent(player.tag_line) : '';
+  const region = player.region || DEFAULT_REGION;
+  if (tag) {
+    return `https://www.op.gg/summoners/${region}/${name}-${tag}`;
+  }
+  return `https://www.op.gg/summoners/${region}/${name}`;
+}
+
+function getMultiSearchUrl(players: (DbPlayer | DbEnemyPlayer)[]): string {
+  const validPlayers = players.filter((p) => p.summoner_name);
+  if (validPlayers.length === 0) return '';
+  const region = validPlayers[0]?.region || DEFAULT_REGION;
+  const names = validPlayers
+    .map((p) => p.tag_line ? `${p.summoner_name}#${p.tag_line}` : p.summoner_name)
+    .join(',');
+  return `https://www.op.gg/multisearch/${region}?summoners=${encodeURIComponent(names)}`;
+}
 
 export default function SharedDraftPage() {
   const { token } = useParams<{ token: string }>();
@@ -101,29 +123,10 @@ export default function SharedDraftPage() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-8 space-y-6">
-        {/* VS Team Bar */}
+        {/* Draft Title */}
         <Card variant="bordered" padding="md">
-          <div className="flex items-center justify-between">
-            <div className="flex-1">
-              <h1 className="text-2xl font-bold text-white">{draft.name}</h1>
-              <p className="text-gray-500 text-sm mt-1">Shared draft - Read only</p>
-            </div>
-            {myTeam && enemyTeam && (
-              <div className="flex items-center gap-4">
-                <div className="text-right">
-                  <p className="text-blue-400 font-semibold">{myTeam.team.name}</p>
-                  <p className="text-xs text-gray-500">{myTeam.players.filter(p => !p.is_sub).length} players</p>
-                </div>
-                <div className="px-4 py-2 bg-lol-surface rounded-lg">
-                  <span className="text-xl font-bold text-gray-400">VS</span>
-                </div>
-                <div className="text-left">
-                  <p className="text-red-400 font-semibold">{enemyTeam.team.name}</p>
-                  <p className="text-xs text-gray-500">{enemyTeam.players.filter(p => !p.is_sub).length} players</p>
-                </div>
-              </div>
-            )}
-          </div>
+          <h1 className="text-2xl font-bold text-white">{draft.name}</h1>
+          <p className="text-gray-500 text-sm mt-1">Shared draft - Read only</p>
         </Card>
 
         {/* Team VS Display - Players by Role */}
@@ -414,9 +417,10 @@ interface SharedPlayerCardProps {
   side: 'my' | 'enemy';
   roleLabel: string;
   hasTeam: boolean;
+  showOpggLink?: boolean;
 }
 
-function SharedPlayerCard({ player, side, roleLabel, hasTeam }: SharedPlayerCardProps) {
+function SharedPlayerCard({ player, side, roleLabel, hasTeam, showOpggLink }: SharedPlayerCardProps) {
   // Get champion IDs from player's champion groups
   const championIds = useMemo(() => {
     if (!player) return [];
@@ -453,6 +457,19 @@ function SharedPlayerCard({ player, side, roleLabel, hasTeam }: SharedPlayerCard
       {/* Player Info */}
       <div className="flex-1 min-w-0">
         <div className={`flex items-center gap-2 ${side === 'enemy' ? 'justify-end' : ''}`}>
+          {showOpggLink && side === 'enemy' && player.summoner_name && (
+            <a
+              href={getPlayerOpggUrl(player)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-1 rounded hover:bg-lol-surface text-gray-500 hover:text-lol-gold transition-colors shrink-0"
+              title="Open OP.GG profile"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+            </a>
+          )}
           <span className="text-white text-sm font-medium truncate">
             {player.summoner_name || 'Unknown'}
           </span>
@@ -556,11 +573,29 @@ function SharedTeamVsDisplay({ myTeam, enemyTeam }: SharedTeamVsDisplayProps) {
                   side="enemy"
                   roleLabel={roleLabel}
                   hasTeam={!!enemyTeam}
+                  showOpggLink
                 />
               </div>
             );
           })}
         </div>
+
+        {/* Enemy Team OP.GG Link */}
+        {enemyTeam?.players.some(p => p.summoner_name) && (
+          <div className="mt-4 pt-4 border-t border-lol-border flex justify-end">
+            <a
+              href={getMultiSearchUrl(enemyTeam.players)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-lol-gold hover:text-lol-gold-light transition-colors text-sm font-medium flex items-center gap-1.5"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+              Open enemy team in OP.GG
+            </a>
+          </div>
+        )}
       </div>
     </div>
   );

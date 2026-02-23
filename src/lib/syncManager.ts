@@ -246,6 +246,197 @@ export const syncManager = {
   },
 
   /**
+   * Sync all stores to cloud (called on login to upload guest data)
+   */
+  async syncAllStores(): Promise<void> {
+    if (!this.isAvailable() || !supabase) return;
+
+    const { user } = useAuthStore.getState();
+    if (!user) return;
+
+    // Import stores dynamically to avoid circular deps at module load
+    const { useMyTeamStore } = await import('../stores/useMyTeamStore');
+    const { useEnemyTeamStore } = await import('../stores/useEnemyTeamStore');
+    const { useDraftStore } = await import('../stores/useDraftStore');
+    const { usePlayerPoolStore } = await import('../stores/usePlayerPoolStore');
+
+    // Sync my teams
+    const myTeams = useMyTeamStore.getState().teams;
+    if (myTeams.length > 0) {
+      await this.syncArrayToCloudImmediate('my-teams', 'my_teams', myTeams, {
+        transformItem: (team, userId, index) => ({
+          id: team.id,
+          user_id: userId,
+          name: team.name,
+          notes: team.notes,
+          champion_pool: team.championPool || [],
+          sort_order: index,
+        }),
+      });
+
+      // Sync players for each team
+      const { findPool } = usePlayerPoolStore.getState();
+      for (const team of myTeams) {
+        const enrichedPlayers = team.players.map((player) => {
+          const pool = player.summonerName ? findPool(player.summonerName, player.role) : null;
+          return {
+            ...player,
+            championGroups: pool?.championGroups || player.championGroups || [],
+          };
+        });
+        await this.syncPlayersToCloudImmediate('players', team.id, enrichedPlayers);
+      }
+    }
+
+    // Sync enemy teams
+    const enemyTeams = useEnemyTeamStore.getState().teams;
+    if (enemyTeams.length > 0) {
+      await this.syncArrayToCloudImmediate('enemy-teams', 'enemy_teams', enemyTeams, {
+        transformItem: (team, userId, index) => ({
+          id: team.id,
+          user_id: userId,
+          name: team.name,
+          notes: team.notes,
+        }),
+      });
+
+      // Sync players for each enemy team
+      for (const team of enemyTeams) {
+        await this.syncPlayersToCloudImmediate('enemy_players', team.id, team.players);
+      }
+    }
+
+    // Sync draft sessions
+    const sessions = useDraftStore.getState().sessions;
+    if (sessions.length > 0) {
+      await this.syncArrayToCloudImmediate('draft-sessions', 'draft_sessions', sessions, {
+        transformItem: (session, userId, index) => ({
+          id: session.id,
+          user_id: userId,
+          name: session.name,
+          enemy_team_id: session.enemyTeamId || null,
+          my_team_id: session.myTeamId || null,
+          ban_groups: session.banGroups || [],
+          priority_groups: session.priorityGroups || [],
+          priority_picks: (session.priorityGroups || []).flatMap((g: { championIds: string[] }) => g.championIds),
+          potential_bans: (session.banGroups || []).flatMap((g: { championIds: string[] }) => g.championIds),
+          notes: session.notes,
+          notepad: session.notepad || [],
+          sort_order: index,
+        }),
+      });
+    }
+
+    console.log('All stores synced to cloud');
+  },
+
+  /**
+   * Sync array data immediately (no debounce) - used by syncAllStores
+   */
+  async syncArrayToCloudImmediate<T extends { id: string }>(
+    storeKey: string,
+    tableName: string,
+    items: T[],
+    options: {
+      transformItem?: (item: T, userId: string, index: number) => unknown;
+    } = {}
+  ): Promise<void> {
+    if (!this.isAvailable() || !supabase) return;
+
+    const { user } = useAuthStore.getState();
+    if (!user) return;
+
+    const { transformItem } = options;
+
+    try {
+      const cloudItems = items.map((item, index) =>
+        transformItem
+          ? transformItem(item, user.id, index)
+          : { ...item, user_id: user.id, sort_order: index }
+      );
+
+      if (cloudItems.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error: upsertError } = await (supabase.from(tableName) as any)
+          .upsert(cloudItems as Record<string, unknown>[]);
+
+        if (upsertError) throw upsertError;
+      }
+    } catch (error) {
+      console.error(`Immediate sync error for ${storeKey}:`, error);
+    }
+  },
+
+  /**
+   * Sync players immediately (no debounce) - used by syncAllStores
+   */
+  async syncPlayersToCloudImmediate(
+    tableName: 'players' | 'enemy_players',
+    teamId: string,
+    players: Array<{
+      id: string;
+      summonerName: string;
+      tagLine?: string;
+      role: string;
+      notes?: string;
+      region?: string;
+      isSub?: boolean;
+      championPool?: unknown;
+      championGroups?: unknown;
+    }>
+  ): Promise<void> {
+    if (!this.isAvailable() || !supabase) return;
+
+    const validRoles = ['top', 'jungle', 'mid', 'adc', 'support'];
+
+    try {
+      const cloudPlayers = players.map((player, index) => {
+        let championGroups = player.championGroups || [];
+        const championPool = player.championPool || [];
+
+        if ((!championGroups || (championGroups as unknown[]).length === 0) &&
+            Array.isArray(championPool) && championPool.length > 0) {
+          const championIds = championPool.map((item: unknown) => {
+            if (typeof item === 'string') return item;
+            if (item && typeof item === 'object' && 'championId' in item) {
+              return (item as { championId: string }).championId;
+            }
+            return null;
+          }).filter((id): id is string => id !== null);
+
+          if (championIds.length > 0) {
+            championGroups = [{ id: `pool-${player.id}`, name: 'Pool', championIds }];
+          }
+        }
+
+        return {
+          id: player.id,
+          team_id: teamId,
+          summoner_name: player.summonerName,
+          tag_line: player.tagLine || '',
+          role: validRoles.includes(player.role) ? player.role : 'mid',
+          notes: player.notes || '',
+          region: player.region || 'euw',
+          is_sub: player.isSub || false,
+          champion_pool: championPool,
+          champion_groups: championGroups,
+          sort_order: index,
+        };
+      });
+
+      if (cloudPlayers.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error: upsertError } = await (supabase.from(tableName) as any)
+          .upsert(cloudPlayers as Record<string, unknown>[]);
+
+        if (upsertError) throw upsertError;
+      }
+    } catch (error) {
+      console.error(`Immediate player sync error for ${tableName}:`, error);
+    }
+  },
+
+  /**
    * Sync players for a team to the cloud
    * This handles the separate players/enemy_players tables
    */

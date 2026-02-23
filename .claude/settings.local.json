@@ -26,7 +26,8 @@
       "Bash(cmd /c \"fnm --version 2>nul || echo fnm_not_found\")",
       "Bash(npx supabase db push:*)",
       "Bash(npx supabase:*)",
-      "Bash(node -e:*)"
+      "Bash(node -e:*)",
+      "Bash(supabase db push:*)"
     ],
     "defaultMode": "acceptEdits"
   }

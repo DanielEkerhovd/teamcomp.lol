@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, ReactNode } from 'react';
 import { useAuthStore } from '../stores/useAuthStore';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { syncManager } from '../lib/syncManager';
 
 interface AuthContextValue {
   isConfigured: boolean;
@@ -23,6 +24,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
           if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
             setSession(session);
+            // On sign in, sync any local guest data to the cloud
+            if (event === 'SIGNED_IN') {
+              syncManager.syncAllStores();
+            }
           } else if (event === 'SIGNED_OUT') {
             setSession(null);
           }

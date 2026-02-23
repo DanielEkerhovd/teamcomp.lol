@@ -3,10 +3,11 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useDraftStore } from '../stores/useDraftStore';
 import { useEnemyTeamStore } from '../stores/useEnemyTeamStore';
 import { useMyTeamStore } from '../stores/useMyTeamStore';
+import { useAuthStore } from '../stores/useAuthStore';
 import { Button, Card, Input, Modal } from '../components/ui';
-import { OpggLinks } from '../components/team';
 import { DraftPlanningHub, TeamVsDisplay } from '../components/draft';
 import ShareModal from '../components/share/ShareModal';
+import LoginModal from '../components/auth/LoginModal';
 
 function SettingsDropdown({ onDelete }: { onDelete: () => void }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -28,7 +29,7 @@ function SettingsDropdown({ onDelete }: { onDelete: () => void }) {
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="p-2 rounded-lg bg-lol-dark border border-lol-border text-gray-400 hover:text-white hover:border-lol-border-light transition-all"
+        className="p-4.5 flex items-center justify-center rounded-xl bg-lol-dark border border-lol-border text-gray-400 hover:text-white hover:border-lol-border-light transition-all"
       >
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -48,7 +49,7 @@ function SettingsDropdown({ onDelete }: { onDelete: () => void }) {
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
             </svg>
-            Delete
+            Delete draft
           </button>
         </div>
       )}
@@ -99,7 +100,10 @@ export default function DraftDetailPage() {
 
   const [isNewSessionModalOpen, setIsNewSessionModalOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [newSessionName, setNewSessionName] = useState('');
+
+  const isAuthenticated = useAuthStore((state) => !!state.user);
   const [selectedEnemyTeamId, setSelectedEnemyTeamId] = useState('');
   const [isEditingName, setIsEditingName] = useState(false);
 
@@ -209,17 +213,36 @@ export default function DraftDetailPage() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            <Button onClick={() => setIsShareModalOpen(true)} variant="ghost">
-              <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-              </svg>
-              Share
-            </Button>
-            <Button onClick={() => setIsNewSessionModalOpen(true)} variant="secondary">
-              + New Draft
-            </Button>
-            {currentEnemyTeam && (
-              <OpggLinks team={currentEnemyTeam} compact />
+            {isAuthenticated ? (
+              <button
+                onClick={() => setIsShareModalOpen(true)}
+                className="group flex items-center gap-3 px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-500/10 to-blue-500/5 border border-blue-500/30 hover:border-blue-500/60 hover:from-blue-500/20 hover:to-blue-500/10 transition-all"
+              >
+                <div className="p-1.5 rounded-lg bg-blue-500/20 group-hover:bg-blue-500/30 transition-colors">
+                  <svg className="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                  </svg>
+                </div>
+                <div className="text-left">
+                  <div className="text-xs text-gray-400">Share with your team</div>
+                  <div className="text-sm text-blue-400 font-medium group-hover:text-blue-300 transition-colors">Get shareable link</div>
+                </div>
+              </button>
+            ) : (
+              <button
+                onClick={() => setIsLoginModalOpen(true)}
+                className="group flex items-center gap-3 px-4 py-2.5 rounded-xl bg-gradient-to-r from-lol-gold/10 to-lol-gold/5 border border-lol-gold/30 hover:border-lol-gold/60 hover:from-lol-gold/20 hover:to-lol-gold/10 transition-all"
+              >
+                <div className="p-1.5 rounded-lg bg-lol-gold/20 group-hover:bg-lol-gold/30 transition-colors">
+                  <svg className="w-4 h-4 text-lol-gold" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                  </svg>
+                </div>
+                <div className="text-left">
+                  <div className="text-xs text-gray-400">Want to share this draft?</div>
+                  <div className="text-sm text-lol-gold font-medium group-hover:text-lol-gold-light transition-colors">Log in to share</div>
+                </div>
+              </button>
             )}
             <SettingsDropdown onDelete={handleDeleteSession} />
           </div>
@@ -386,6 +409,12 @@ export default function DraftDetailPage() {
         onClose={() => setIsShareModalOpen(false)}
         draftSessionId={currentSession.id}
         draftName={currentSession.name}
+      />
+
+      {/* Login modal */}
+      <LoginModal
+        isOpen={isLoginModalOpen}
+        onClose={() => setIsLoginModalOpen(false)}
       />
     </div>
   );

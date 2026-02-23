@@ -7,6 +7,7 @@ import BanPlanningPanel from './BanPlanningPanel';
 import ContestedAnalysis from './ContestedAnalysis';
 import PoolOverview from './PoolOverview';
 import GroupedChampionList from './GroupedChampionList';
+import { OpggLinks } from '../team';
 
 type ViewType = 'bans' | 'pools';
 
@@ -134,6 +135,10 @@ export default function DraftPlanningHub({
               </button>
             ))}
           </div>
+
+          {enemyTeam && (
+            <OpggLinks team={enemyTeam} compact />
+          )}
         </div>
 
         {/* Quick Stats */}

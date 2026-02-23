@@ -1,8 +1,9 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Team, Player, Role, ROLES } from '../../types';
+import { Team, Player, Role, ROLES, DEFAULT_REGION } from '../../types';
 import { useEnemyTeamStore } from '../../stores/useEnemyTeamStore';
 import { useRankStore } from '../../stores/useRankStore';
 import { usePlayerPoolStore } from '../../stores/usePlayerPoolStore';
+import { useOpgg } from '../../hooks/useOpgg';
 import { ChampionIcon } from '../champion';
 
 interface TeamVsDisplayProps {
@@ -34,10 +35,11 @@ function formatRank(tier: string, division: string, lp?: number): string {
   return `${tier.charAt(0) + tier.slice(1).toLowerCase()} ${division}`;
 }
 
-function PlayerCard({ player, side }: { player: Player | undefined; side: 'my' | 'enemy' }) {
+function PlayerCard({ player, side, showOpggLink }: { player: Player | undefined; side: 'my' | 'enemy'; showOpggLink?: boolean }) {
   const roleInfo = ROLES.find((r) => r.value === player?.role);
   const { getRank } = useRankStore();
   const { findPool } = usePlayerPoolStore();
+  const { openPlayerProfile } = useOpgg();
 
   // Get rank from store
   const cachedRank = player?.summonerName && player?.tagLine
@@ -93,6 +95,17 @@ function PlayerCard({ player, side }: { player: Player | undefined; side: 'my' |
       {/* Player Info */}
       <div className="flex-1 min-w-0">
         <div className={`flex items-center gap-2 ${side === 'enemy' ? 'justify-end' : ''}`}>
+          {showOpggLink && side === 'enemy' && player.summonerName && (
+            <button
+              onClick={() => openPlayerProfile(player)}
+              className="p-1 rounded hover:bg-lol-surface text-gray-500 hover:text-lol-gold transition-colors shrink-0"
+              title="Open OP.GG profile"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+            </button>
+          )}
           <span className="text-white text-sm font-medium truncate">
             {player.summonerName || 'Unknown'}
           </span>
@@ -242,7 +255,11 @@ export default function TeamVsDisplay({
 }: TeamVsDisplayProps) {
   const { teams: enemyTeams } = useEnemyTeamStore();
   const { fetchRanksFromCache } = useRankStore();
+  const { openMultiSearch } = useOpgg();
   const mainRoles: Role[] = ['top', 'jungle', 'mid', 'adc', 'support'];
+
+  const enemyRegion = enemyTeam?.players[0]?.region || DEFAULT_REGION;
+  const hasValidEnemyPlayers = enemyTeam?.players.some((p) => p.summonerName);
 
   // Fetch ranks from cache when teams change
   useEffect(() => {
@@ -288,11 +305,25 @@ export default function TeamVsDisplay({
           <div className="text-red-400 text-xs font-medium uppercase tracking-wide mb-1">
             Enemy Team
           </div>
-          <EnemyTeamSearch
-            teams={enemyTeams}
-            selectedTeamId={selectedEnemyTeamId}
-            onSelect={onSelectEnemyTeam}
-          />
+          <div className="flex items-center gap-2">
+            <EnemyTeamSearch
+              teams={enemyTeams}
+              selectedTeamId={selectedEnemyTeamId}
+              onSelect={onSelectEnemyTeam}
+            />
+            {hasValidEnemyPlayers && (
+              <button
+                onClick={() => openMultiSearch(enemyTeam!.players, enemyRegion)}
+                className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/50 text-red-400 hover:bg-red-500/20 hover:border-red-500 transition-all flex items-center gap-1.5 text-sm font-medium"
+                title="Open OP.GG Multi-Search"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+                OP.GG
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -317,7 +348,7 @@ export default function TeamVsDisplay({
                 </div>
 
                 {/* Enemy Player */}
-                <PlayerCard player={enemyPlayer} side="enemy" />
+                <PlayerCard player={enemyPlayer} side="enemy" showOpggLink />
               </div>
             );
           })}
