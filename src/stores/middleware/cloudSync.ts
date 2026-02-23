@@ -94,10 +94,8 @@ const cloudSyncImpl: CloudSyncImpl = (f, options) => (set, get, store) => {
 
     // Check if sync is available (user authenticated + Supabase configured)
     if (!syncManager.isAvailable()) {
-      console.log('[CloudSync] Sync not available - skipping');
       return;
     }
-    console.log('[CloudSync] Sync available, proceeding with', storeKey);
 
     // Get the data to sync
     const state = get();
@@ -118,7 +116,6 @@ const cloudSyncImpl: CloudSyncImpl = (f, options) => (set, get, store) => {
 
     // Trigger related data sync (e.g., players for teams)
     if (onAfterSync) {
-      console.log('[CloudSync] Calling onAfterSync for', storeKey);
       onAfterSync(dataToSync, storeKey, debounceMs);
     }
   };

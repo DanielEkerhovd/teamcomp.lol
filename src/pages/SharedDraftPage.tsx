@@ -24,11 +24,6 @@ export default function SharedDraftPage() {
     setError(null);
     try {
       const result = await shareService.getSharedDraft(shareToken);
-      console.log('Shared draft result:', result);
-      console.log('Draft my_team_id:', result?.draft?.my_team_id);
-      console.log('MyTeam from result:', result?.myTeam);
-      console.log('MyTeam players:', result?.myTeam?.players);
-      console.log('MyTeam players count:', result?.myTeam?.players?.length);
       if (!result) {
         setError('This share link is invalid or has expired.');
       } else {
@@ -76,7 +71,7 @@ export default function SharedDraftPage() {
     );
   }
 
-  const { draft, enemyTeam, myTeam, shareInfo } = data;
+  const { draft, enemyTeam, myTeam } = data;
 
   // Read from groups (source of truth) with fallback to legacy flat arrays
   const banGroups = (draft.ban_groups || []) as { id: string; name: string; championIds: string[] }[];
@@ -95,20 +90,13 @@ export default function SharedDraftPage() {
     <div className="min-h-screen bg-lol-gray">
       {/* Header */}
       <header className="bg-lol-dark border-b border-lol-border">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-4 py-4">
           <Link to="/" className="flex items-center gap-2 text-lol-gold font-bold">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-lol-gold-light to-lol-gold flex items-center justify-center text-lol-dark font-bold text-sm">
               TC
             </div>
             <span>Teamcomp.lol</span>
           </Link>
-          <div className="text-sm text-gray-500 flex items-center gap-2">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-            </svg>
-            {shareInfo.viewCount} views
-          </div>
         </div>
       </header>
 
@@ -252,7 +240,10 @@ export default function SharedDraftPage() {
           <Card variant="bordered" padding="md">
             <h2 className="text-lg font-semibold text-white mb-4">Enemy Champion Pools</h2>
             <div className="space-y-4">
-              {enemyTeam.players.filter(p => !p.is_sub).map((player) => {
+              {(['top', 'jungle', 'mid', 'adc', 'support'] as Role[]).map((role) => {
+                const player = enemyTeam.players.find(p => p.role === role && !p.is_sub);
+                if (!player) return null;
+
                 const groups = (player.champion_groups || []) as { id: string; name: string; championIds: string[] }[];
                 const hasChampions = groups.some(g => g.championIds.length > 0);
 
@@ -260,19 +251,21 @@ export default function SharedDraftPage() {
 
                 return (
                   <div key={player.id} className="p-3 bg-lol-surface rounded-lg">
-                    <div className="flex items-center gap-2 mb-2">
+                    <div className="flex items-center gap-2 mb-3">
                       <span className="text-xs font-medium text-gray-500 uppercase w-14">{player.role}</span>
                       <span className="text-white font-medium">{player.summoner_name}</span>
                     </div>
-                    <div className="flex flex-wrap gap-1">
-                      {groups.flatMap(g => g.championIds).slice(0, 15).map((champId, idx) => (
-                        <ChampionBadge key={`${champId}-${idx}`} championId={champId} size="sm" />
+                    <div className="space-y-2">
+                      {groups.filter(g => g.championIds.length > 0).map((group) => (
+                        <div key={group.id}>
+                          <div className="text-xs text-gray-500 mb-1">{group.name}</div>
+                          <div className="flex flex-wrap gap-1">
+                            {group.championIds.map((champId, idx) => (
+                              <ChampionIcon key={`${champId}-${idx}`} championId={champId} size="sm" />
+                            ))}
+                          </div>
+                        </div>
                       ))}
-                      {groups.flatMap(g => g.championIds).length > 15 && (
-                        <span className="text-xs text-gray-500 self-center ml-1">
-                          +{groups.flatMap(g => g.championIds).length - 15} more
-                        </span>
-                      )}
                     </div>
                   </div>
                 );

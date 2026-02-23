@@ -480,7 +480,6 @@ export const useMyTeamStore = create<MyTeamState>()(
         }),
         // Sync players to the players table after team sync
         onAfterSync: (teams: Team[], storeKey: string, debounceMs: number) => {
-          console.log('[MyTeamStore] onAfterSync called with', teams.length, 'teams');
           // Get champion pools from the separate store
           const { findPool } = usePlayerPoolStore.getState();
 
@@ -489,8 +488,6 @@ export const useMyTeamStore = create<MyTeamState>()(
             const enrichedPlayers = team.players.map((player) => {
               // Look up pool by summoner name and role
               const pool = player.summonerName ? findPool(player.summonerName, player.role) : null;
-              console.log('[MyTeamStore] Player', player.summonerName, 'role', player.role, 'pool:', pool?.championGroups?.length ?? 0, 'groups');
-
               return {
                 ...player,
                 // Use pool's championGroups if available, otherwise keep player's (which may be empty)
@@ -498,7 +495,6 @@ export const useMyTeamStore = create<MyTeamState>()(
               };
             });
 
-            console.log('[MyTeamStore] Syncing team', team.id, 'with', enrichedPlayers.length, 'enriched players');
             syncManager.syncPlayersToCloud(storeKey, 'players', team.id, enrichedPlayers, {
               debounceMs,
             });

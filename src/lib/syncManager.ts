@@ -278,18 +278,8 @@ export const syncManager = {
 
     const timer = setTimeout(async () => {
       if (!this.isAvailable() || !supabase) {
-        console.log(`[Sync] Players sync skipped - not available. Table: ${tableName}, TeamId: ${teamId}`);
         return;
       }
-
-      console.log(`[Sync] Syncing ${players.length} players to ${tableName} for team ${teamId}`);
-      console.log(`[Sync] Player data:`, players.map(p => ({
-        name: p.summonerName,
-        role: p.role,
-        isSub: p.isSub,
-        championPoolLength: Array.isArray(p.championPool) ? p.championPool.length : 0,
-        championGroupsLength: Array.isArray(p.championGroups) ? p.championGroups.length : 0,
-      })));
 
       // Valid roles that match database constraint
       const validRoles = ['top', 'jungle', 'mid', 'adc', 'support'];
@@ -334,13 +324,6 @@ export const syncManager = {
           };
         });
 
-        // Log what we're about to sync
-        console.log(`[Sync] Cloud players (after conversion):`, cloudPlayers.map(p => ({
-          name: p.summoner_name,
-          championGroupsCount: (p.champion_groups as unknown[]).length,
-          championIds: (p.champion_groups as { championIds: string[] }[]).flatMap(g => g.championIds).length,
-        })));
-
         // Upsert all players
         if (cloudPlayers.length > 0) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -348,7 +331,6 @@ export const syncManager = {
             .upsert(cloudPlayers as Record<string, unknown>[]);
 
           if (upsertError) throw upsertError;
-          console.log(`[Sync] Successfully synced ${cloudPlayers.length} players to ${tableName}`);
         }
 
         // Delete orphan players (players in cloud but not in local for this team)
