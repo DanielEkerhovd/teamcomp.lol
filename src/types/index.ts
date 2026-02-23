@@ -149,9 +149,12 @@ export interface DraftSession {
   name: string;
   enemyTeamId: string | null;
   myTeamId: string | null;
-  contestedPicks: string[];
-  potentialBans: string[];
-  ourPriorities: string[]; // simplified to just champion IDs
+  // Grouped bans and priorities (new format)
+  banGroups: ChampionGroup[];
+  priorityGroups: ChampionGroup[];
+  // Legacy flat arrays (for backwards compatibility - migrated to groups on load)
+  potentialBans?: string[];
+  ourPriorities?: string[];
   notes: string;
   notepad?: Note[];
   createdAt: number;

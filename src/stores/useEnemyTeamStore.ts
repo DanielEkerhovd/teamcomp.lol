@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import { Team, Player, createEmptyTeam, createSubPlayer, generateId, Region, Role, ROLES, ChampionTier, TieredChampion, Note } from '../types';
 import { useSettingsStore } from './useSettingsStore';
 import { cloudSync } from './middleware/cloudSync';
+import { syncManager } from '../lib/syncManager';
 
 interface EnemyTeamState {
   teams: Team[];
@@ -626,8 +627,15 @@ export const useEnemyTeamStore = create<EnemyTeamState>()(
           user_id: userId,
           name: team.name,
           notes: team.notes,
-          // Enemy players are synced separately
         }),
+        // Sync players to the enemy_players table after team sync
+        onAfterSync: (teams: Team[], storeKey: string, debounceMs: number) => {
+          teams.forEach((team) => {
+            syncManager.syncPlayersToCloud(storeKey, 'enemy_players', team.id, team.players, {
+              debounceMs,
+            });
+          });
+        },
       }
     ),
     {

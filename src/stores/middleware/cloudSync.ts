@@ -54,6 +54,10 @@ export interface CloudSyncOptions<T, D = any> {
 
   /** Skip certain actions from triggering sync */
   skipActions?: string[];
+
+  /** Callback to sync related data after main sync (e.g., players for teams) */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onAfterSync?: (data: any, storeKey: string, debounceMs: number) => void;
 }
 
 type CloudSync = <
@@ -79,6 +83,7 @@ const cloudSyncImpl: CloudSyncImpl = (f, options) => (set, get, store) => {
     transformForCloud,
     isArraySync = false,
     transformItem,
+    onAfterSync,
   } = options;
 
   // Wrap the set function to trigger sync after state changes
@@ -89,8 +94,10 @@ const cloudSyncImpl: CloudSyncImpl = (f, options) => (set, get, store) => {
 
     // Check if sync is available (user authenticated + Supabase configured)
     if (!syncManager.isAvailable()) {
+      console.log('[CloudSync] Sync not available - skipping');
       return;
     }
+    console.log('[CloudSync] Sync available, proceeding with', storeKey);
 
     // Get the data to sync
     const state = get();
@@ -107,6 +114,12 @@ const cloudSyncImpl: CloudSyncImpl = (f, options) => (set, get, store) => {
         debounceMs,
         transform: transformForCloud as (data: unknown, userId: string) => unknown,
       });
+    }
+
+    // Trigger related data sync (e.g., players for teams)
+    if (onAfterSync) {
+      console.log('[CloudSync] Calling onAfterSync for', storeKey);
+      onAfterSync(dataToSync, storeKey, debounceMs);
     }
   };
 

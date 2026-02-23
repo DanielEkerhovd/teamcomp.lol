@@ -65,8 +65,6 @@ export default function DraftDetailPage() {
     setCurrentSession,
     updateSession,
     deleteSession,
-    addContestedPick,
-    removeContestedPick,
     addPotentialBan,
     removePotentialBan,
     addPriority,
@@ -75,6 +73,24 @@ export default function DraftDetailPage() {
     addNote,
     updateNote,
     deleteNote,
+    // Ban group actions
+    addBanGroup,
+    renameBanGroup,
+    deleteBanGroup,
+    reorderBanGroups,
+    addChampionToBanGroup,
+    removeChampionFromBanGroup,
+    reorderChampionsInBanGroup,
+    moveChampionBetweenBanGroups,
+    // Priority group actions
+    addPriorityGroup,
+    renamePriorityGroup,
+    deletePriorityGroup,
+    reorderPriorityGroups,
+    addChampionToPriorityGroup,
+    removeChampionFromPriorityGroup,
+    reorderChampionsInPriorityGroup,
+    moveChampionBetweenPriorityGroups,
   } = useDraftStore();
 
   const { teams: enemyTeams, getTeam } = useEnemyTeamStore();
@@ -100,6 +116,13 @@ export default function DraftDetailPage() {
     }
   }, [draftId, setCurrentSession]);
 
+  // Ensure session has myTeamId set (for shared drafts to work properly)
+  useEffect(() => {
+    if (currentSession && myTeam && !currentSession.myTeamId) {
+      updateSession(currentSession.id, { myTeamId: myTeam.id });
+    }
+  }, [currentSession, myTeam, updateSession]);
+
   // Redirect to list if session not found
   useEffect(() => {
     if (draftId && sessions.length > 0 && !currentSession) {
@@ -111,7 +134,8 @@ export default function DraftDetailPage() {
     if (newSessionName.trim()) {
       const session = createSession(
         newSessionName.trim(),
-        selectedEnemyTeamId || undefined
+        selectedEnemyTeamId || undefined,
+        myTeam?.id // Pass my team ID for shared drafts
       );
       setNewSessionName('');
       setSelectedEnemyTeamId('');
@@ -224,12 +248,29 @@ export default function DraftDetailPage() {
         myTeam={myTeam}
         enemyTeam={currentEnemyTeam || null}
         session={currentSession}
+        // Legacy actions (for panels)
         onAddBan={addPotentialBan}
         onRemoveBan={removePotentialBan}
-        onAddContested={addContestedPick}
-        onRemoveContested={removeContestedPick}
         onAddPriority={addPriority}
         onRemovePriority={removePriority}
+        // Ban group actions
+        onAddBanGroup={addBanGroup}
+        onRenameBanGroup={renameBanGroup}
+        onDeleteBanGroup={deleteBanGroup}
+        onReorderBanGroups={reorderBanGroups}
+        onAddChampionToBanGroup={addChampionToBanGroup}
+        onRemoveChampionFromBanGroup={removeChampionFromBanGroup}
+        onReorderChampionsInBanGroup={reorderChampionsInBanGroup}
+        onMoveChampionBetweenBanGroups={moveChampionBetweenBanGroups}
+        // Priority group actions
+        onAddPriorityGroup={addPriorityGroup}
+        onRenamePriorityGroup={renamePriorityGroup}
+        onDeletePriorityGroup={deletePriorityGroup}
+        onReorderPriorityGroups={reorderPriorityGroups}
+        onAddChampionToPriorityGroup={addChampionToPriorityGroup}
+        onRemoveChampionFromPriorityGroup={removeChampionFromPriorityGroup}
+        onReorderChampionsInPriorityGroup={reorderChampionsInPriorityGroup}
+        onMoveChampionBetweenPriorityGroups={moveChampionBetweenPriorityGroups}
       />
 
       {/* Session notes */}

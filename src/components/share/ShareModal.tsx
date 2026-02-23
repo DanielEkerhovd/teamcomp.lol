@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import Modal from '../ui/Modal';
 import { shareService, DraftShare } from '../../lib/shareService';
+import { useMyTeamStore } from '../../stores/useMyTeamStore';
+import { useDraftStore } from '../../stores/useDraftStore';
 
 interface ShareModalProps {
   isOpen: boolean;
@@ -15,6 +17,31 @@ export default function ShareModal({ isOpen, onClose, draftSessionId, draftName 
   const [creating, setCreating] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  // Get store functions to trigger sync
+  const { teams: myTeams, selectedTeamId, updateTeam } = useMyTeamStore();
+  const { sessions, updateSession } = useDraftStore();
+  const myTeam = myTeams.find((t) => t.id === selectedTeamId) || myTeams[0];
+  const currentSession = sessions.find((s) => s.id === draftSessionId);
+
+  // Force sync team data when modal opens
+  useEffect(() => {
+    if (isOpen && myTeam && currentSession) {
+      setSyncing(true);
+      // Trigger team sync by updating with same data (forces the sync middleware)
+      updateTeam({ notes: myTeam.notes ?? '' });
+      // Ensure draft session has myTeamId set and trigger sync
+      if (!currentSession.myTeamId || currentSession.myTeamId !== myTeam.id) {
+        updateSession(draftSessionId, { myTeamId: myTeam.id });
+      } else {
+        // Force sync by updating with same notes
+        updateSession(draftSessionId, { notes: currentSession.notes ?? '' });
+      }
+      // Wait for debounced sync to complete
+      setTimeout(() => setSyncing(false), 1500);
+    }
+  }, [isOpen]);
 
   // Load existing shares when modal opens
   useEffect(() => {
@@ -105,6 +132,17 @@ export default function ShareModal({ isOpen, onClose, draftSessionId, draftName 
           Anyone with the link can view this draft without signing in.
         </p>
 
+        {/* Syncing indicator */}
+        {syncing && (
+          <div className="flex items-center gap-2 p-2 bg-blue-500/10 border border-blue-500/30 rounded-lg text-blue-400 text-sm">
+            <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+            Syncing team data to cloud...
+          </div>
+        )}
+
         {/* Error message */}
         {error && (
           <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
@@ -115,7 +153,7 @@ export default function ShareModal({ isOpen, onClose, draftSessionId, draftName 
         {/* Create new share button */}
         <button
           onClick={handleCreateShare}
-          disabled={creating}
+          disabled={creating || syncing}
           className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-lol-gold/10 hover:bg-lol-gold/20 border border-lol-gold/30 text-lol-gold rounded-xl font-medium transition-colors disabled:opacity-50"
         >
           {creating ? (
@@ -206,14 +244,14 @@ function ShareLinkItem({ share, copiedId, onCopy, onRevoke }: ShareLinkItemProps
   return (
     <div className="flex items-center gap-2 p-3 bg-lol-surface rounded-lg border border-lol-border">
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            readOnly
-            value={shareUrl}
-            className="flex-1 bg-transparent text-sm text-gray-300 truncate focus:outline-none"
-          />
-        </div>
+        <a
+          href={shareUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block text-sm text-lol-gold hover:text-lol-gold-light truncate transition-colors"
+        >
+          {shareUrl}
+        </a>
         <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
           <span>{share.viewCount} views</span>
           <span>Created {new Date(share.createdAt).toLocaleDateString()}</span>

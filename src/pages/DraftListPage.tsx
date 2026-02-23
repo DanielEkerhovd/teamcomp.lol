@@ -2,12 +2,14 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDraftStore } from '../stores/useDraftStore';
 import { useEnemyTeamStore } from '../stores/useEnemyTeamStore';
+import { useMyTeamStore } from '../stores/useMyTeamStore';
 import { Button, Card, Input, Modal } from '../components/ui';
 
 export default function DraftListPage() {
   const navigate = useNavigate();
   const { sessions, createSession, deleteSession } = useDraftStore();
   const { teams: enemyTeams, getTeam } = useEnemyTeamStore();
+  const { selectedTeamId: myTeamId } = useMyTeamStore();
 
   const [isNewSessionModalOpen, setIsNewSessionModalOpen] = useState(false);
   const [newSessionName, setNewSessionName] = useState('');
@@ -17,7 +19,8 @@ export default function DraftListPage() {
     if (newSessionName.trim()) {
       const session = createSession(
         newSessionName.trim(),
-        selectedEnemyTeamId || undefined
+        selectedEnemyTeamId || undefined,
+        myTeamId || undefined
       );
       setNewSessionName('');
       setSelectedEnemyTeamId('');
@@ -98,21 +101,22 @@ export default function DraftListPage() {
                 )}
 
                 <div className="flex flex-wrap gap-2 mb-4">
-                  {session.potentialBans.length > 0 && (
-                    <span className="px-2 py-1 text-xs rounded-lg bg-red-500/10 text-red-400 border border-red-500/20">
-                      {session.potentialBans.length} bans
-                    </span>
-                  )}
-                  {session.contestedPicks.length > 0 && (
-                    <span className="px-2 py-1 text-xs rounded-lg bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
-                      {session.contestedPicks.length} contested
-                    </span>
-                  )}
-                  {session.ourPriorities.length > 0 && (
-                    <span className="px-2 py-1 text-xs rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                      {session.ourPriorities.length} priorities
-                    </span>
-                  )}
+                  {(() => {
+                    const banCount = (session.banGroups || []).reduce((sum, g) => sum + g.championIds.length, 0);
+                    return banCount > 0 && (
+                      <span className="px-2 py-1 text-xs rounded-lg bg-red-500/10 text-red-400 border border-red-500/20">
+                        {banCount} bans
+                      </span>
+                    );
+                  })()}
+                  {(() => {
+                    const priorityCount = (session.priorityGroups || []).reduce((sum, g) => sum + g.championIds.length, 0);
+                    return priorityCount > 0 && (
+                      <span className="px-2 py-1 text-xs rounded-lg bg-lol-gold/10 text-lol-gold border border-lol-gold/20">
+                        {priorityCount} priorities
+                      </span>
+                    );
+                  })()}
                 </div>
 
                 <div className="text-xs text-gray-500">

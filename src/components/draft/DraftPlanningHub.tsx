@@ -1,15 +1,12 @@
 import { useState } from 'react';
-import { Card } from '../ui';
-import { ChampionIcon, ChampionSearch } from '../champion';
-import { Team, DraftSession } from '../../types';
-import { useChampionData } from '../../hooks/useChampionData';
+import { Team, DraftSession, ChampionGroup } from '../../types';
 import { useCustomPoolStore } from '../../stores/useCustomPoolStore';
 import { usePlayerPoolStore } from '../../stores/usePlayerPoolStore';
 import { useDraftAnalytics } from './hooks/useDraftAnalytics';
 import BanPlanningPanel from './BanPlanningPanel';
 import ContestedAnalysis from './ContestedAnalysis';
 import PoolOverview from './PoolOverview';
-import PriorityList from './PriorityList';
+import GroupedChampionList from './GroupedChampionList';
 
 type ViewType = 'bans' | 'pools';
 
@@ -17,10 +14,34 @@ interface DraftPlanningHubProps {
   myTeam: Team;
   enemyTeam: Team | null;
   session: DraftSession;
+  // Legacy actions (for panels that add bans/priorities)
   onAddBan: (championId: string) => void;
   onRemoveBan: (championId: string) => void;
   onAddPriority: (championId: string) => void;
   onRemovePriority: (championId: string) => void;
+  // Ban group actions
+  onAddBanGroup: (name: string) => void;
+  onRenameBanGroup: (groupId: string, name: string) => void;
+  onDeleteBanGroup: (groupId: string) => void;
+  onReorderBanGroups: (groupIds: string[]) => void;
+  onAddChampionToBanGroup: (groupId: string, championId: string) => void;
+  onRemoveChampionFromBanGroup: (groupId: string, championId: string) => void;
+  onReorderChampionsInBanGroup: (groupId: string, championIds: string[]) => void;
+  onMoveChampionBetweenBanGroups: (fromGroupId: string, toGroupId: string, championId: string, toIndex?: number) => void;
+  // Priority group actions
+  onAddPriorityGroup: (name: string) => void;
+  onRenamePriorityGroup: (groupId: string, name: string) => void;
+  onDeletePriorityGroup: (groupId: string) => void;
+  onReorderPriorityGroups: (groupIds: string[]) => void;
+  onAddChampionToPriorityGroup: (groupId: string, championId: string) => void;
+  onRemoveChampionFromPriorityGroup: (groupId: string, championId: string) => void;
+  onReorderChampionsInPriorityGroup: (groupId: string, championIds: string[]) => void;
+  onMoveChampionBetweenPriorityGroups: (fromGroupId: string, toGroupId: string, championId: string, toIndex?: number) => void;
+}
+
+// Helper to get all champion IDs from groups
+function getAllChampionIds(groups: ChampionGroup[]): string[] {
+  return groups.flatMap(g => g.championIds);
 }
 
 export default function DraftPlanningHub({
@@ -31,9 +52,23 @@ export default function DraftPlanningHub({
   onRemoveBan,
   onAddPriority,
   onRemovePriority,
+  onAddBanGroup,
+  onRenameBanGroup,
+  onDeleteBanGroup,
+  onReorderBanGroups,
+  onAddChampionToBanGroup,
+  onRemoveChampionFromBanGroup,
+  onReorderChampionsInBanGroup,
+  onMoveChampionBetweenBanGroups,
+  onAddPriorityGroup,
+  onRenamePriorityGroup,
+  onDeletePriorityGroup,
+  onReorderPriorityGroups,
+  onAddChampionToPriorityGroup,
+  onRemoveChampionFromPriorityGroup,
+  onReorderChampionsInPriorityGroup,
+  onMoveChampionBetweenPriorityGroups,
 }: DraftPlanningHubProps) {
-  const { getChampionById } = useChampionData();
-
   // View state
   const [activeView, setActiveView] = useState<ViewType>('bans');
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -41,6 +76,13 @@ export default function DraftPlanningHub({
   // Stores
   const { pools: customPools } = useCustomPoolStore();
   const { pools: playerPools } = usePlayerPoolStore();
+
+  // Get groups (with fallback for migration)
+  const banGroups = session.banGroups || [];
+  const priorityGroups = session.priorityGroups || [];
+
+  // Get flat arrays for panels that need them
+  const currentBans = getAllChampionIds(banGroups);
 
   // Analytics
   const analytics = useDraftAnalytics({
@@ -117,14 +159,14 @@ export default function DraftPlanningHub({
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
               <BanPlanningPanel
                 banCandidates={analytics.banCandidates}
-                currentBans={session.potentialBans}
+                currentBans={currentBans}
                 onAddBan={onAddBan}
                 onRemoveBan={onRemoveBan}
               />
               <ContestedAnalysis
                 contested={analytics.contested}
                 onAddBan={onAddBan}
-                onAddPriority={handleAddPriorityFromChampion}
+                onAddPriority={onAddPriority}
               />
             </div>
           )}
@@ -137,56 +179,44 @@ export default function DraftPlanningHub({
               contestedChampions={new Set(analytics.contested.map((c) => c.championId))}
               tierFilter={['S', 'A', 'B', 'C']}
               onAddBan={onAddBan}
-              onAddPriority={handleAddPriorityFromChampion}
+              onAddPriority={onAddPriority}
             />
           )}
         </>
       )}
 
       {/* Current Bans & Priorities - Always visible */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
         {/* Current Bans */}
-        <Card variant="bordered" padding="md">
-          <h3 className="text-lg font-semibold text-red-400 mb-3">Current Bans</h3>
-          <ChampionSearch
-            onSelect={(champion) => onAddBan(champion.id)}
-            placeholder="Add ban..."
-            excludeIds={session.potentialBans}
-            variant="minimal"
-          />
-          {session.potentialBans.length === 0 ? (
-            <p className="text-gray-500 text-sm py-4 text-center mt-3">No bans added yet</p>
-          ) : (
-            <div className="flex flex-wrap gap-2 mt-3">
-              {session.potentialBans.map((championId) => {
-                const champion = getChampionById(championId);
-                return (
-                  <div
-                    key={championId}
-                    className="flex items-center gap-2 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg group"
-                  >
-                    <ChampionIcon championId={championId} size="md" />
-                    <span className="text-sm text-red-400">{champion?.name}</span>
-                    <button
-                      onClick={() => onRemoveBan(championId)}
-                      className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 transition-opacity"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Card>
+        <GroupedChampionList
+          title="Bans"
+          groups={banGroups}
+          variant="ban"
+          onAddGroup={onAddBanGroup}
+          onRenameGroup={onRenameBanGroup}
+          onDeleteGroup={onDeleteBanGroup}
+          onReorderGroups={onReorderBanGroups}
+          onAddChampion={onAddChampionToBanGroup}
+          onRemoveChampion={onRemoveChampionFromBanGroup}
+          onReorderChampions={onReorderChampionsInBanGroup}
+          onMoveChampion={onMoveChampionBetweenBanGroups}
+          onAddToFirstGroup={onAddBan}
+        />
 
         {/* Priorities */}
-        <PriorityList
-          priorities={session.ourPriorities}
-          onAdd={onAddPriority}
-          onRemove={onRemovePriority}
+        <GroupedChampionList
+          title="Our priorities"
+          groups={priorityGroups}
+          variant="priority"
+          onAddGroup={onAddPriorityGroup}
+          onRenameGroup={onRenamePriorityGroup}
+          onDeleteGroup={onDeletePriorityGroup}
+          onReorderGroups={onReorderPriorityGroups}
+          onAddChampion={onAddChampionToPriorityGroup}
+          onRemoveChampion={onRemoveChampionFromPriorityGroup}
+          onReorderChampions={onReorderChampionsInPriorityGroup}
+          onMoveChampion={onMoveChampionBetweenPriorityGroups}
+          onAddToFirstGroup={onAddPriority}
         />
       </div>
     </div>

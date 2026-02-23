@@ -4,6 +4,8 @@ import { Team, Player, createEmptyTeam, createSubPlayer, generateId, Region, Rol
 import { useSettingsStore } from './useSettingsStore';
 import { useAuthStore } from './useAuthStore';
 import { cloudSync } from './middleware/cloudSync';
+import { syncManager } from '../lib/syncManager';
+import { usePlayerPoolStore } from './usePlayerPoolStore';
 
 // Guest mode limit (MAX_TEAMS exported for backward compatibility)
 export const MAX_TEAMS_GUEST = 3;
@@ -475,8 +477,33 @@ export const useMyTeamStore = create<MyTeamState>()(
           notes: team.notes,
           champion_pool: team.championPool || [],
           sort_order: index,
-          // Players are synced separately to the players table
         }),
+        // Sync players to the players table after team sync
+        onAfterSync: (teams: Team[], storeKey: string, debounceMs: number) => {
+          console.log('[MyTeamStore] onAfterSync called with', teams.length, 'teams');
+          // Get champion pools from the separate store
+          const { findPool } = usePlayerPoolStore.getState();
+
+          teams.forEach((team) => {
+            // Enrich players with their champion pools from usePlayerPoolStore
+            const enrichedPlayers = team.players.map((player) => {
+              // Look up pool by summoner name and role
+              const pool = player.summonerName ? findPool(player.summonerName, player.role) : null;
+              console.log('[MyTeamStore] Player', player.summonerName, 'role', player.role, 'pool:', pool?.championGroups?.length ?? 0, 'groups');
+
+              return {
+                ...player,
+                // Use pool's championGroups if available, otherwise keep player's (which may be empty)
+                championGroups: pool?.championGroups || player.championGroups || [],
+              };
+            });
+
+            console.log('[MyTeamStore] Syncing team', team.id, 'with', enrichedPlayers.length, 'enriched players');
+            syncManager.syncPlayersToCloud(storeKey, 'players', team.id, enrichedPlayers, {
+              debounceMs,
+            });
+          });
+        },
       }
     ),
     {

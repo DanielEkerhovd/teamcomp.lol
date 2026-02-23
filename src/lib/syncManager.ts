@@ -244,4 +244,131 @@ export const syncManager = {
     }
     // The actual sync logic would need to be triggered from the store
   },
+
+  /**
+   * Sync players for a team to the cloud
+   * This handles the separate players/enemy_players tables
+   */
+  async syncPlayersToCloud(
+    storeKey: string,
+    tableName: 'players' | 'enemy_players',
+    teamId: string,
+    players: Array<{
+      id: string;
+      summonerName: string;
+      tagLine?: string;
+      role: string;
+      notes?: string;
+      region?: string;
+      isSub?: boolean;
+      championPool?: unknown;
+      championGroups?: unknown;
+    }>,
+    options: {
+      debounceMs?: number;
+    } = {}
+  ): Promise<void> {
+    const { debounceMs = 1000 } = options;
+    const fullKey = `${storeKey}:players:${teamId}`;
+
+    const existingTimer = debounceTimers.get(fullKey);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+
+    const timer = setTimeout(async () => {
+      if (!this.isAvailable() || !supabase) {
+        console.log(`[Sync] Players sync skipped - not available. Table: ${tableName}, TeamId: ${teamId}`);
+        return;
+      }
+
+      console.log(`[Sync] Syncing ${players.length} players to ${tableName} for team ${teamId}`);
+      console.log(`[Sync] Player data:`, players.map(p => ({
+        name: p.summonerName,
+        role: p.role,
+        isSub: p.isSub,
+        championPoolLength: Array.isArray(p.championPool) ? p.championPool.length : 0,
+        championGroupsLength: Array.isArray(p.championGroups) ? p.championGroups.length : 0,
+      })));
+
+      // Valid roles that match database constraint
+      const validRoles = ['top', 'jungle', 'mid', 'adc', 'support'];
+
+      try {
+        // Transform players for the database
+        const cloudPlayers = players.map((player, index) => {
+          // Get champion groups - if empty but old championPool has data, convert it
+          let championGroups = player.championGroups || [];
+          const championPool = player.championPool || [];
+
+          // Convert old tiered championPool to groups format if needed
+          if ((!championGroups || (championGroups as unknown[]).length === 0) &&
+              Array.isArray(championPool) && championPool.length > 0) {
+            // championPool is array of { championId, tier } or just strings
+            const championIds = championPool.map((item: unknown) => {
+              if (typeof item === 'string') return item;
+              if (item && typeof item === 'object' && 'championId' in item) {
+                return (item as { championId: string }).championId;
+              }
+              return null;
+            }).filter((id): id is string => id !== null);
+
+            if (championIds.length > 0) {
+              championGroups = [{ id: `pool-${player.id}`, name: 'Pool', championIds }];
+            }
+          }
+
+          return {
+            id: player.id,
+            team_id: teamId,
+            summoner_name: player.summonerName,
+            tag_line: player.tagLine || '',
+            // Ensure role is valid, default to 'mid' if not
+            role: validRoles.includes(player.role) ? player.role : 'mid',
+            notes: player.notes || '',
+            region: player.region || 'euw',
+            is_sub: player.isSub || false,
+            champion_pool: championPool,
+            champion_groups: championGroups,
+            sort_order: index,
+          };
+        });
+
+        // Log what we're about to sync
+        console.log(`[Sync] Cloud players (after conversion):`, cloudPlayers.map(p => ({
+          name: p.summoner_name,
+          championGroupsCount: (p.champion_groups as unknown[]).length,
+          championIds: (p.champion_groups as { championIds: string[] }[]).flatMap(g => g.championIds).length,
+        })));
+
+        // Upsert all players
+        if (cloudPlayers.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const { error: upsertError } = await (supabase.from(tableName) as any)
+            .upsert(cloudPlayers as Record<string, unknown>[]);
+
+          if (upsertError) throw upsertError;
+          console.log(`[Sync] Successfully synced ${cloudPlayers.length} players to ${tableName}`);
+        }
+
+        // Delete orphan players (players in cloud but not in local for this team)
+        const localIds = players.map((p) => p.id);
+        if (localIds.length > 0) {
+          const { error: deleteError } = await supabase
+            .from(tableName)
+            .delete()
+            .eq('team_id', teamId)
+            .not('id', 'in', `(${localIds.join(',')})`);
+
+          if (deleteError && !deleteError.message.includes('no rows')) {
+            console.warn(`Delete orphan players warning for ${fullKey}:`, deleteError);
+          }
+        }
+      } catch (error) {
+        console.error(`Player sync error for ${fullKey}:`, error);
+      }
+    }, debounceMs);
+
+    debounceTimers.set(fullKey, timer);
+  },
 };

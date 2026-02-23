@@ -77,11 +77,77 @@ const STORAGE_KEYS = [
 ];
 
 const MIGRATION_KEY = 'teamcomp-lol-uuid-migration-v2';
+const PRIORITIES_MIGRATION_KEY = 'teamcomp-lol-priorities-migration-v1';
+
+/**
+ * Migrate ourPriorities from object format to simple string array
+ * Old: [{ championId: "Ahri", role: "mid", priority: "high", notes: "" }]
+ * New: ["Ahri"]
+ */
+function migratePrioritiesFormat(): boolean {
+  if (localStorage.getItem(PRIORITIES_MIGRATION_KEY)) {
+    return false;
+  }
+
+  const draftsKey = 'teamcomp-lol-drafts';
+  const data = localStorage.getItem(draftsKey);
+  if (!data) {
+    localStorage.setItem(PRIORITIES_MIGRATION_KEY, new Date().toISOString());
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(data);
+    let changed = false;
+
+    // Handle zustand persist format: { state: { sessions: [...] }, version: N }
+    const sessions = parsed.state?.sessions || parsed.sessions || [];
+
+    for (const session of sessions) {
+      // Migrate ourPriorities from objects to strings
+      if (session.ourPriorities && Array.isArray(session.ourPriorities)) {
+        const migrated = session.ourPriorities.map((item: unknown) => {
+          if (typeof item === 'string') return item;
+          if (item && typeof item === 'object' && 'championId' in item) {
+            return (item as { championId: string }).championId;
+          }
+          return null;
+        }).filter(Boolean);
+
+        if (JSON.stringify(migrated) !== JSON.stringify(session.ourPriorities)) {
+          session.ourPriorities = migrated;
+          changed = true;
+        }
+      }
+
+      // Also remove contestedPicks if it exists (legacy field)
+      if ('contestedPicks' in session) {
+        delete session.contestedPicks;
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      localStorage.setItem(draftsKey, JSON.stringify(parsed));
+      console.log('Migrated ourPriorities format in drafts');
+    }
+
+    localStorage.setItem(PRIORITIES_MIGRATION_KEY, new Date().toISOString());
+    return changed;
+  } catch (e) {
+    console.error('Failed to migrate priorities format:', e);
+    localStorage.setItem(PRIORITIES_MIGRATION_KEY, new Date().toISOString());
+    return false;
+  }
+}
 
 export function migrateLocalStorageIds(): boolean {
-  // Check if migration already done
+  // Run priorities format migration first
+  const prioritiesMigrated = migratePrioritiesFormat();
+
+  // Check if UUID migration already done
   if (localStorage.getItem(MIGRATION_KEY)) {
-    return false;
+    return prioritiesMigrated;
   }
 
   let migrated = false;

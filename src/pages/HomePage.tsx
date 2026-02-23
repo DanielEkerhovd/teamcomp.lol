@@ -122,9 +122,9 @@ export default function HomePage() {
                   <div className="text-sm text-gray-500 mt-1.5 flex items-center gap-2">
                     <span>{new Date(session.updatedAt).toLocaleDateString('en-GB')}</span>
                     <span className="text-gray-600">·</span>
-                    <span className="text-yellow-500">{session.ourPriorities.length} priorities</span>
+                    <span className="text-yellow-500">{(session.priorityGroups || []).reduce((sum, g) => sum + g.championIds.length, 0)} priorities</span>
                     <span className="text-gray-600">·</span>
-                    <span className="text-red-400">{session.potentialBans.length} bans</span>
+                    <span className="text-red-400">{(session.banGroups || []).reduce((sum, g) => sum + g.championIds.length, 0)} bans</span>
                   </div>
                 </Link>
               ))}
