@@ -26,7 +26,8 @@ import { syncManager } from '../../lib/syncManager';
  * ```
  */
 
-export interface CloudSyncOptions<T, D = T> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export interface CloudSyncOptions<T, D = any> {
   /** Unique identifier for this store's sync state */
   storeKey: string;
 
@@ -37,16 +38,19 @@ export interface CloudSyncOptions<T, D = T> {
   debounceMs?: number;
 
   /** Select which part of state to sync (default: entire state) */
-  selectSyncData?: (state: T) => D;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  selectSyncData?: (state: T) => any;
 
   /** Transform data before sending to Supabase */
-  transformForCloud?: (data: D, userId: string) => unknown;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  transformForCloud?: (data: D, userId: string) => any;
 
   /** Whether this is an array sync (uses syncArrayToCloud) */
   isArraySync?: boolean;
 
   /** For array sync: transform each item */
-  transformItem?: (item: unknown, userId: string, index: number) => unknown;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  transformItem?: (item: any, userId: string, index: number) => any;
 
   /** Skip certain actions from triggering sync */
   skipActions?: string[];

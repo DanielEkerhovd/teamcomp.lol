@@ -46,6 +46,19 @@ export function getChampionIconUrlSync(version: string, championId: string): str
   return `${DDRAGON_BASE}/cdn/${version}/img/champion/${championId}.png`;
 }
 
+// Get a champion by ID from cache (returns null if cache not loaded)
+export function getChampionById(championId: string): Champion | null {
+  if (!cachedChampions) return null;
+  return cachedChampions.find(c => c.id === championId) || null;
+}
+
+// Get champion icon URL using a default version (for sync usage)
+const DEFAULT_VERSION = '14.1.1';
+export function getChampionIconUrlDefault(championId: string): string {
+  const version = cachedVersion || DEFAULT_VERSION;
+  return `${DDRAGON_BASE}/cdn/${version}/img/champion/${championId}.png`;
+}
+
 export async function getChampionSplashUrl(championId: string, skinNum: number = 0): Promise<string> {
   return `${DDRAGON_BASE}/cdn/img/champion/splash/${championId}_${skinNum}.jpg`;
 }

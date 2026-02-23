@@ -115,14 +115,14 @@ export default function HomePage() {
               {recentSessions.map((session) => (
                 <Link
                   key={session.id}
-                  to="/draft"
+                  to={`/draft/${session.id}`}
                   className="block p-4 bg-lol-dark rounded-xl border border-lol-border hover:bg-lol-card-hover hover:border-lol-border-light transition-all duration-200"
                 >
                   <div className="text-white font-semibold">{session.name}</div>
                   <div className="text-sm text-gray-500 mt-1.5 flex items-center gap-2">
                     <span>{new Date(session.updatedAt).toLocaleDateString('en-GB')}</span>
                     <span className="text-gray-600">·</span>
-                    <span className="text-yellow-500">{session.contestedPicks.length} contested</span>
+                    <span className="text-yellow-500">{session.ourPriorities.length} priorities</span>
                     <span className="text-gray-600">·</span>
                     <span className="text-red-400">{session.potentialBans.length} bans</span>
                   </div>

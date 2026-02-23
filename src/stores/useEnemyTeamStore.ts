@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { Team, Player, createEmptyTeam, createSubPlayer, generateId, Region, Role, ROLES, ChampionTier, TieredChampion, Note } from '../types';
 import { useSettingsStore } from './useSettingsStore';
+import { cloudSync } from './middleware/cloudSync';
 
 interface EnemyTeamState {
   teams: Team[];
@@ -43,8 +44,9 @@ interface EnemyTeamState {
 
 export const useEnemyTeamStore = create<EnemyTeamState>()(
   persist(
-    (set, get) => ({
-      teams: [],
+    cloudSync(
+      (set, get) => ({
+        teams: [],
 
       addTeam: (name: string) => {
         const newTeam = createEmptyTeam(name);
@@ -614,6 +616,20 @@ export const useEnemyTeamStore = create<EnemyTeamState>()(
         }));
       },
     }),
+      {
+        storeKey: 'enemy-teams',
+        tableName: 'enemy_teams',
+        isArraySync: true,
+        selectSyncData: (state) => state.teams,
+        transformItem: (team: Team, userId: string, index: number) => ({
+          id: team.id,
+          user_id: userId,
+          name: team.name,
+          notes: team.notes,
+          // Enemy players are synced separately
+        }),
+      }
+    ),
     {
       name: 'teamcomp-lol-enemy-teams',
     }

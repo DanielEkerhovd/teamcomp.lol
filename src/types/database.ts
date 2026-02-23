@@ -202,6 +202,7 @@ export interface Database {
           user_id: string;
           name: string;
           enemy_team_id: string | null;
+          my_team_id: string | null;
           contested_picks: string[];
           potential_bans: string[];
           our_priorities: unknown;
@@ -214,6 +215,7 @@ export interface Database {
           user_id: string;
           name: string;
           enemy_team_id?: string | null;
+          my_team_id?: string | null;
           contested_picks?: string[];
           potential_bans?: string[];
           our_priorities?: unknown;
@@ -224,6 +226,7 @@ export interface Database {
         Update: {
           name?: string;
           enemy_team_id?: string | null;
+          my_team_id?: string | null;
           contested_picks?: string[];
           potential_bans?: string[];
           our_priorities?: unknown;
@@ -354,6 +357,96 @@ export interface Database {
           updated_at?: string;
         };
       };
+      team_members: {
+        Row: {
+          id: string;
+          team_id: string;
+          user_id: string;
+          role: 'owner' | 'player' | 'viewer';
+          player_slot_id: string | null;
+          invited_by: string | null;
+          joined_at: string;
+        };
+        Insert: {
+          id?: string;
+          team_id: string;
+          user_id: string;
+          role?: 'owner' | 'player' | 'viewer';
+          player_slot_id?: string | null;
+          invited_by?: string | null;
+          joined_at?: string;
+        };
+        Update: {
+          role?: 'owner' | 'player' | 'viewer';
+          player_slot_id?: string | null;
+        };
+      };
+      team_invites: {
+        Row: {
+          id: string;
+          team_id: string;
+          token: string;
+          invited_email: string | null;
+          role: 'player' | 'viewer';
+          player_slot_id: string | null;
+          created_by: string;
+          expires_at: string;
+          accepted_at: string | null;
+          accepted_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          team_id: string;
+          token?: string;
+          invited_email?: string | null;
+          role?: 'player' | 'viewer';
+          player_slot_id?: string | null;
+          created_by: string;
+          expires_at?: string;
+          accepted_at?: string | null;
+          accepted_by?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          invited_email?: string | null;
+          role?: 'player' | 'viewer';
+          player_slot_id?: string | null;
+          expires_at?: string;
+          accepted_at?: string | null;
+          accepted_by?: string | null;
+        };
+      };
+      draft_shares: {
+        Row: {
+          id: string;
+          draft_session_id: string;
+          token: string;
+          created_by: string;
+          is_active: boolean;
+          view_count: number;
+          last_viewed_at: string | null;
+          expires_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          draft_session_id: string;
+          token?: string;
+          created_by: string;
+          is_active?: boolean;
+          view_count?: number;
+          last_viewed_at?: string | null;
+          expires_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          is_active?: boolean;
+          view_count?: number;
+          last_viewed_at?: string | null;
+          expires_at?: string | null;
+        };
+      };
     };
   };
 }
@@ -371,3 +464,37 @@ export type DbCustomPool = Database['public']['Tables']['custom_pools']['Row'];
 export type DbCustomTemplate = Database['public']['Tables']['custom_templates']['Row'];
 export type DbDraftTheory = Database['public']['Tables']['draft_theory']['Row'];
 export type DbChampionPoolState = Database['public']['Tables']['champion_pool_state']['Row'];
+export type DbTeamMember = Database['public']['Tables']['team_members']['Row'];
+export type DbTeamInvite = Database['public']['Tables']['team_invites']['Row'];
+export type DbDraftShare = Database['public']['Tables']['draft_shares']['Row'];
+
+// Types for RPC responses
+export interface SharedDraftData {
+  draft: DbDraftSession & { my_team_id?: string | null };
+  enemyTeam: {
+    team: DbEnemyTeam;
+    players: DbEnemyPlayer[];
+  } | null;
+  myTeam: {
+    team: DbMyTeam;
+    players: DbPlayer[];
+  } | null;
+  shareInfo: {
+    viewCount: number;
+    createdAt: string;
+  };
+}
+
+export interface InviteDetails {
+  id: string;
+  teamName: string;
+  role: 'player' | 'viewer';
+  playerSlot: {
+    id: string;
+    summonerName: string;
+    role: string;
+  } | null;
+  expiresAt: string;
+  isExpired: boolean;
+  isAccepted: boolean;
+}

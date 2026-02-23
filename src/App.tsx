@@ -4,8 +4,11 @@ import HomePage from './pages/HomePage';
 import EnemyTeamPage from './pages/EnemyTeamPage';
 import MyTeamPage from './pages/MyTeamPage';
 import ChampionPoolPage from './pages/ChampionPoolPage';
-import DraftPage from './pages/DraftPage';
+import DraftListPage from './pages/DraftListPage';
+import DraftDetailPage from './pages/DraftDetailPage';
 import ToolsPage from './pages/ToolsPage';
+import SharedDraftPage from './pages/SharedDraftPage';
+import AcceptInvitePage from './pages/AcceptInvitePage';
 import FirstTimeSetupModal from './components/onboarding/FirstTimeSetupModal';
 import SettingsModal from './components/settings/SettingsModal';
 import { AuthProvider } from './contexts/AuthContext';
@@ -200,16 +203,29 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <Layout>
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/draft" element={<DraftPage />} />
-            <Route path="/enemy-teams" element={<EnemyTeamPage />} />
-            <Route path="/my-teams" element={<MyTeamPage />} />
-            <Route path="/champion-pool" element={<ChampionPoolPage />} />
-            <Route path="/tools" element={<ToolsPage />} />
-          </Routes>
-        </Layout>
+        <Routes>
+          {/* Public routes (no sidebar) */}
+          <Route path="/share/:token" element={<SharedDraftPage />} />
+          <Route path="/invite/:token" element={<AcceptInvitePage />} />
+
+          {/* App routes (with sidebar layout) */}
+          <Route
+            path="*"
+            element={
+              <Layout>
+                <Routes>
+                  <Route path="/" element={<HomePage />} />
+                  <Route path="/draft" element={<DraftListPage />} />
+                  <Route path="/draft/:draftId" element={<DraftDetailPage />} />
+                  <Route path="/enemy-teams" element={<EnemyTeamPage />} />
+                  <Route path="/my-teams" element={<MyTeamPage />} />
+                  <Route path="/champion-pool" element={<ChampionPoolPage />} />
+                  <Route path="/tools" element={<ToolsPage />} />
+                </Routes>
+              </Layout>
+            }
+          />
+        </Routes>
       </BrowserRouter>
     </AuthProvider>
   );

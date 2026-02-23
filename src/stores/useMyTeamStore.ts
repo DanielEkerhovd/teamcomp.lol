@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import { Team, Player, createEmptyTeam, createSubPlayer, generateId, Region, Role, ROLES, ChampionTier, TieredChampion, Note } from '../types';
 import { useSettingsStore } from './useSettingsStore';
 import { useAuthStore } from './useAuthStore';
+import { cloudSync } from './middleware/cloudSync';
 
 // Guest mode limit (MAX_TEAMS exported for backward compatibility)
 export const MAX_TEAMS_GUEST = 3;
@@ -63,9 +64,10 @@ const initialTeam = createEmptyTeam('My Team');
 
 export const useMyTeamStore = create<MyTeamState>()(
   persist(
-    (set, get) => ({
-      teams: [initialTeam],
-      selectedTeamId: initialTeam.id,
+    cloudSync(
+      (set, get) => ({
+        teams: [initialTeam],
+        selectedTeamId: initialTeam.id,
 
       addTeam: (name: string) => {
         const state = get();
@@ -461,6 +463,22 @@ export const useMyTeamStore = create<MyTeamState>()(
         );
       },
     }),
+      {
+        storeKey: 'my-teams',
+        tableName: 'my_teams',
+        isArraySync: true,
+        selectSyncData: (state) => state.teams,
+        transformItem: (team: Team, userId: string, index: number) => ({
+          id: team.id,
+          user_id: userId,
+          name: team.name,
+          notes: team.notes,
+          champion_pool: team.championPool || [],
+          sort_order: index,
+          // Players are synced separately to the players table
+        }),
+      }
+    ),
     {
       name: 'teamcomp-lol-my-team',
       version: 4,

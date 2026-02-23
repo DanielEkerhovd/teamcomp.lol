@@ -24,6 +24,8 @@ interface RankState {
   ranks: Map<string, CachedRank>;
   // Set of player keys currently being fetched
   fetching: Set<string>;
+  // Set of player keys currently being fetched from cache
+  fetchingFromCache: Set<string>;
   // Set of context IDs currently fetching
   fetchingContexts: Set<string>;
   // Last error message
@@ -35,6 +37,7 @@ interface RankState {
   fetchRanksFromCache: (players: PlayerKey[]) => Promise<void>;
   getRank: (player: PlayerKey) => CachedRank | null;
   isFetching: (player: PlayerKey) => boolean;
+  isFetchingFromCache: (player: PlayerKey) => boolean;
   isFetchingContext: (contextId: string) => boolean;
   clearCache: () => void;
   isConfigured: () => boolean;
@@ -47,6 +50,7 @@ interface RankState {
 export const useRankStore = create<RankState>((set, get) => ({
   ranks: new Map(),
   fetching: new Set(),
+  fetchingFromCache: new Set(),
   fetchingContexts: new Set(),
   lastError: null,
 
@@ -160,6 +164,23 @@ export const useRankStore = create<RankState>((set, get) => ({
     const validPlayers = players.filter((p) => p.summonerName && p.tagLine);
     if (validPlayers.length === 0) return;
 
+    // Get keys for players that need fetching (not already in memory)
+    const playersToFetch = validPlayers.filter((player) => {
+      const key = getKey(player);
+      return !get().ranks.has(key);
+    });
+
+    // Mark players as fetching from cache
+    if (playersToFetch.length > 0) {
+      set((state) => {
+        const newFetchingFromCache = new Set(state.fetchingFromCache);
+        for (const player of playersToFetch) {
+          newFetchingFromCache.add(getKey(player));
+        }
+        return { fetchingFromCache: newFetchingFromCache };
+      });
+    }
+
     // Fetch from cache in parallel (no rate limiting needed for cache)
     const results = await Promise.all(
       validPlayers.map(async (player) => {
@@ -177,15 +198,17 @@ export const useRankStore = create<RankState>((set, get) => ({
       })
     );
 
-    // Update store with all results
+    // Update store with all results and clear fetching state
     set((state) => {
       const newRanks = new Map(state.ranks);
+      const newFetchingFromCache = new Set(state.fetchingFromCache);
       for (const { key, result } of results) {
         if (result) {
           newRanks.set(key, result);
         }
+        newFetchingFromCache.delete(key);
       }
-      return { ranks: newRanks };
+      return { ranks: newRanks, fetchingFromCache: newFetchingFromCache };
     });
   },
 
@@ -197,6 +220,11 @@ export const useRankStore = create<RankState>((set, get) => ({
   isFetching: (player) => {
     const key = getKey(player);
     return get().fetching.has(key);
+  },
+
+  isFetchingFromCache: (player) => {
+    const key = getKey(player);
+    return get().fetchingFromCache.has(key);
   },
 
   isFetchingContext: (contextId) => {

@@ -144,28 +144,32 @@ export const TIERS: { value: ChampionTier; label: string; color: string }[] = [
   { value: 'C', label: 'C Tier', color: 'text-gray-400' },
 ];
 
-export interface ChampionPriority {
-  championId: string;
-  role: Role;
-  priority: Priority;
-  notes: string;
-}
-
 export interface DraftSession {
   id: string;
   name: string;
   enemyTeamId: string | null;
+  myTeamId: string | null;
   contestedPicks: string[];
   potentialBans: string[];
-  ourPriorities: ChampionPriority[];
+  ourPriorities: string[]; // simplified to just champion IDs
   notes: string;
+  notepad?: Note[];
   createdAt: number;
   updatedAt: number;
 }
 
-// Helper function to generate unique IDs
+// Helper function to generate unique IDs (UUID format for database compatibility)
 export function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+  // Use crypto.randomUUID if available (modern browsers), fallback to manual UUID v4
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback UUID v4 generation
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }
 
 // Helper function to create an empty player

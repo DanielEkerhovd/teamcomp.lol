@@ -5,10 +5,11 @@ import { Button } from '../ui';
 interface OpggLinksProps {
   team: Team;
   region?: Region;
+  compact?: boolean;
 }
 
-export default function OpggLinks({ team, region }: OpggLinksProps) {
-  const { openPlayerProfile, openMultiSearch, getPlayerUrl, getTeamMultiSearchUrl } = useOpgg();
+export default function OpggLinks({ team, region, compact }: OpggLinksProps) {
+  const { openMultiSearch, getPlayerUrl, getTeamMultiSearchUrl } = useOpgg();
 
   // Use the first player's region or default
   const teamRegion = region || team.players[0]?.region || DEFAULT_REGION;
@@ -16,11 +17,20 @@ export default function OpggLinks({ team, region }: OpggLinksProps) {
   const multiSearchUrl = getTeamMultiSearchUrl(team.players, teamRegion);
 
   if (validPlayers.length === 0) {
-    return (
-      <div className="text-gray-500 text-sm">
-        Add player names to generate OP.GG links
-      </div>
-    );
+    return null;
+  }
+
+  // Compact mode: just show multi-search button
+  if (compact) {
+    return multiSearchUrl ? (
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => openMultiSearch(team.players, teamRegion)}
+      >
+        OP.GG →
+      </Button>
+    ) : null;
   }
 
   return (

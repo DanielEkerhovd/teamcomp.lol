@@ -1,10 +1,13 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useMyTeamStore } from '../stores/useMyTeamStore';
 import { usePlayerPoolStore } from '../stores/usePlayerPoolStore';
 import { useCustomPoolStore } from '../stores/useCustomPoolStore';
+import { useRankStore } from '../stores/useRankStore';
 import { PlayerTierList } from '../components/champion';
 import { Card } from '../components/ui';
+import RankBadge from '../components/team/RankBadge';
 import { ROLES, Role, Player } from '../types';
+import { useOpgg } from '../hooks/useOpgg';
 
 const ROLE_ICON_URLS: Record<Role, string> = {
   top: 'https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-clash/global/default/assets/images/position-selector/positions/icon-position-top.png',
@@ -80,6 +83,8 @@ export default function ChampionPoolPage() {
   const { teams, selectedTeamId, updatePlayer } = useMyTeamStore();
   const playerPoolStore = usePlayerPoolStore();
   const customPoolStore = useCustomPoolStore();
+  const { fetchRanksFromCache, isConfigured: isRankApiConfigured } = useRankStore();
+  const { openPlayerProfile } = useOpgg();
 
   const team = teams.find((t) => t.id === selectedTeamId) || teams[0];
 
@@ -101,6 +106,15 @@ export default function ChampionPoolPage() {
 
   const selectedPlayer = allPlayers.find((p) => p.id === selectedPlayerId) ?? allPlayers[0];
   const selectedCustomPool = customPoolStore.pools.find((p) => p.id === customPoolStore.selectedPoolId);
+
+  // Fetch ranks from cache on mount
+  useEffect(() => {
+    if (!isRankApiConfigured()) return;
+    const players = allPlayers.filter((p) => p.summonerName && p.tagLine);
+    if (players.length > 0) {
+      fetchRanksFromCache(players);
+    }
+  }, [team?.id, fetchRanksFromCache, isRankApiConfigured]);
 
   const handleCreateCustomPool = () => {
     if (newPoolName.trim()) {
@@ -374,25 +388,41 @@ export default function ChampionPoolPage() {
           ) : (
             <>
               {/* Player header */}
-              <div className="flex items-center gap-3 mb-4">
-                <RoleIcon role={selectedPlayer.role} className="w-6 h-6" />
-                <div>
-                  <h2 className="text-lg font-bold text-white leading-tight">
-                    {selectedPlayer.summonerName}
-                    {selectedPlayer.tagLine && (
-                      <span className="text-gray-500 font-normal text-sm ml-1">
-                        #{selectedPlayer.tagLine}
-                      </span>
-                    )}
-                  </h2>
-                  <p className="text-xs text-gray-500">
-                    {ROLES.find(r => r.value === selectedPlayer.role)?.label}
-                    {selectedPlayer.isSub && ' · Sub'}
-                    {playerPool
-                      ? ` · ${playerPool.championGroups.reduce((n: number, g: { championIds: string[] }) => n + g.championIds.length, 0)} champions`
-                      : ' · no pool yet'}
-                  </p>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <RoleIcon role={selectedPlayer.role} className="w-6 h-6" />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-lg font-bold text-white leading-tight">
+                        {selectedPlayer.summonerName}
+                        {selectedPlayer.tagLine && (
+                          <span className="text-gray-500 font-normal text-sm ml-1">
+                            #{selectedPlayer.tagLine}
+                          </span>
+                        )}
+                      </h2>
+                      <RankBadge player={selectedPlayer} />
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      {ROLES.find(r => r.value === selectedPlayer.role)?.label}
+                      {selectedPlayer.isSub && ' · Sub'}
+                      {playerPool
+                        ? ` · ${playerPool.championGroups.reduce((n: number, g: { championIds: string[] }) => n + g.championIds.length, 0)} champions`
+                        : ' · no pool yet'}
+                    </p>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => openPlayerProfile(selectedPlayer)}
+                  className="px-3 py-1.5 text-sm bg-lol-surface hover:bg-lol-gold/20 text-gray-300 hover:text-lol-gold rounded-lg transition-colors flex items-center gap-1.5"
+                  title="Open OP.GG"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                  OP.GG
+                </button>
               </div>
 
               <Card variant="bordered" padding="lg">

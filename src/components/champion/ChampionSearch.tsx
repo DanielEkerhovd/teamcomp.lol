@@ -7,12 +7,16 @@ interface ChampionSearchProps {
   onSelect: (champion: Champion) => void;
   placeholder?: string;
   excludeIds?: string[];
+  size?: 'sm' | 'md' | 'lg';
+  variant?: 'default' | 'minimal';
 }
 
 export default function ChampionSearch({
   onSelect,
   placeholder = 'Search champions...',
   excludeIds = [],
+  size = 'sm',
+  variant = 'default',
 }: ChampionSearchProps) {
   const [query, setQuery] = useState('');
   const [isOpen, setIsOpen] = useState(false);
@@ -41,7 +45,7 @@ export default function ChampionSearch({
   };
 
   if (loading) {
-    return <Input placeholder="Loading champions..." disabled />;
+    return <Input placeholder="Loading champions..." disabled size={size} variant={variant} />;
   }
 
   return (
@@ -60,6 +64,8 @@ export default function ChampionSearch({
           }
         }}
         placeholder={placeholder}
+        size={size}
+        variant={variant}
       />
       {isOpen && query && results.length > 0 && (
         <div className="absolute z-50 w-full mt-1 bg-lol-gray border border-gray-600 rounded-lg shadow-lg max-h-64 overflow-y-auto">

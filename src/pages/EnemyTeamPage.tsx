@@ -903,7 +903,9 @@ export default function EnemyTeamPage() {
                       {/* Selected Player's Champion Groups */}
                       {(() => {
                         const selectedId =
-                          selectedPlayerIds[team.id] || mainRoster[0]?.id;
+                          selectedPlayerIds[team.id] ||
+                          mainRoster.find((p) => p.role === "top")?.id ||
+                          mainRoster[0]?.id;
                         const selectedPlayer = team.players.find(
                           (p) => p.id === selectedId,
                         );

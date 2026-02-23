@@ -13,11 +13,13 @@ import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortabl
 import { useMyTeamStore, MAX_TEAMS } from '../stores/useMyTeamStore';
 import { useRankStore } from '../stores/useRankStore';
 import { useMasteryStore } from '../stores/useMasteryStore';
+import { useAuthStore } from '../stores/useAuthStore';
 import { parseOpggMultiSearchUrl, Player, Role, ROLES } from '../types';
 import { Card, Input, Button, Modal } from '../components/ui';
-import { RoleSlot, SubSlot } from '../components/team';
+import { RoleSlot, SubSlot, TeamMembersPanel } from '../components/team';
 import { useOpgg } from '../hooks/useOpgg';
 import { useDroppable } from '@dnd-kit/core';
+import { teamMembershipService } from '../lib/teamMembershipService';
 
 function SubsDropZone({ children }: { children: React.ReactNode }) {
   const { isOver, setNodeRef } = useDroppable({
@@ -100,6 +102,18 @@ export default function MyTeamPage() {
   const [isEditingName, setIsEditingName] = useState(false);
   const [editingName, setEditingName] = useState(team?.name || '');
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const [isOwner, setIsOwner] = useState(false);
+
+  const { user } = useAuthStore();
+
+  // Check if user is the team owner
+  useEffect(() => {
+    if (!user || !team) {
+      setIsOwner(false);
+      return;
+    }
+    teamMembershipService.isTeamOwner(team.id).then(setIsOwner);
+  }, [user, team?.id]);
 
   // Sync editingName when team changes
   useEffect(() => {
@@ -443,6 +457,18 @@ export default function MyTeamPage() {
             </button>
           </div>
         </Card>
+
+        {/* Team Members - only show when authenticated */}
+        {user && (
+          <Card variant="bordered" padding="lg">
+            <TeamMembersPanel
+              teamId={team.id}
+              teamName={team.name}
+              players={team.players}
+              isOwner={isOwner}
+            />
+          </Card>
+        )}
 
         {/* Import Modal */}
         <Modal

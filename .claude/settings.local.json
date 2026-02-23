@@ -24,7 +24,8 @@
       "Bash(cmd /c \"nvm version 2>nul || echo nvm_not_found\")",
       "Bash(cmd /c \"winget --version 2>nul || echo winget_not_found\")",
       "Bash(cmd /c \"fnm --version 2>nul || echo fnm_not_found\")",
-      "Bash(npx supabase db push:*)"
+      "Bash(npx supabase db push:*)",
+      "Bash(npx supabase:*)"
     ],
     "defaultMode": "acceptEdits"
   }

@@ -5,3 +5,5 @@ export { default as RoleSlot } from './RoleSlot';
 export { default as SubSlot } from './SubSlot';
 export { default as RankBadge } from './RankBadge';
 export { default as RoleIcon } from './RoleIcon';
+export { default as TeamMembersPanel } from './TeamMembersPanel';
+export { default as InviteModal } from './InviteModal';

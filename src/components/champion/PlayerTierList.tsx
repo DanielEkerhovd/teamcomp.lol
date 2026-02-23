@@ -27,10 +27,12 @@ import { CSS } from "@dnd-kit/utilities";
 import { Card } from "../ui";
 import ChampionIcon from "./ChampionIcon";
 import MasteryDisplay from "./MasteryDisplay";
+import RankBadge from "../team/RankBadge";
 import { Champion, ChampionGroup, Role, ROLES, Region } from "../../types";
 import { useChampionData } from "../../hooks/useChampionData";
 import { getChampionRoles } from "../../data/championRoles";
 import { useCustomTemplatesStore } from "../../stores/useCustomTemplatesStore";
+import { useOpgg } from "../../hooks/useOpgg";
 
 // Template definitions
 interface GroupTemplate {
@@ -48,6 +50,7 @@ const PLAYSTYLE_BY_ROLE: Record<Role, string[]> = {
   mid: ["Assassin", "Mage", "Control Mage", "Roamer"],
   adc: ["Hypercarry", "Lane Bully", "Utility", "Safe", "Mage"],
   support: ["Engage", "Enchanter", "Mage", "Tank"],
+  flex: ["Multi-Role", "Utility", "Carry"],
 };
 
 const getTemplates = (role: Role): GroupTemplate[] => [
@@ -273,15 +276,13 @@ interface AddGroupButtonProps {
 
 function AddGroupButton({ onAddGroup, groupCount }: AddGroupButtonProps) {
   return (
-    <div className="mt-4">
-      <button
-        type="button"
-        onClick={() => onAddGroup(`Group ${groupCount + 1}`)}
-        className="px-2 py-1 rounded border border-dashed border-gray-600/50 text-gray-500 hover:text-gray-300 hover:border-gray-500 text-xs transition-colors"
-      >
-        + add group
-      </button>
-    </div>
+    <button
+      type="button"
+      onClick={() => onAddGroup(`Group ${groupCount + 1}`)}
+      className="px-2 py-1 rounded border border-dashed border-gray-600/50 text-gray-500 hover:text-gray-300 hover:border-gray-500 text-xs transition-colors"
+    >
+      + add group
+    </button>
   );
 }
 
@@ -320,6 +321,7 @@ const ROLE_ICON_URLS: Record<Role, string> = {
   mid: "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-clash/global/default/assets/images/position-selector/positions/icon-position-middle.png",
   adc: "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-clash/global/default/assets/images/position-selector/positions/icon-position-bottom.png",
   support: "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-clash/global/default/assets/images/position-selector/positions/icon-position-utility.png",
+  flex: "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-clash/global/default/assets/images/position-selector/positions/icon-position-fill.png",
 };
 
 function RoleIcon({ role, className = "w-5 h-5" }: { role: Role; className?: string }) {
@@ -338,6 +340,7 @@ const ROLE_LABELS: Record<Role, string> = {
   mid: "Mid",
   adc: "ADC",
   support: "Support",
+  flex: "Flex",
 };
 
 interface ChampionPoolSectionProps {
@@ -732,6 +735,7 @@ export default function PlayerTierList({
   const [saveAsTemplate, setSaveAsTemplate] = useState(false);
   const [allowDuplicates, setAllowDuplicates] = useState(false);
   const { templates: customTemplates, addTemplate, removeTemplate } = useCustomTemplatesStore();
+  const { openPlayerProfile } = useOpgg();
 
   const primaryRole: Role = player.role ?? 'mid';
 
@@ -1285,6 +1289,46 @@ export default function PlayerTierList({
         {/* Mastery display and Player Notes on the right */}
         {hasPlayerInfo && (
           <div className="w-100 shrink-0 space-y-4">
+            {/* Player Header with OP.GG button */}
+            <Card variant="bordered" className="p-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-white font-medium">{player.summonerName}</span>
+                  <span className="text-gray-500 text-sm">#{player.tagLine}</span>
+                  <RankBadge
+                    player={{
+                      id: '',
+                      summonerName: player.summonerName!,
+                      tagLine: player.tagLine!,
+                      region: player.region!,
+                      role: player.role || 'mid',
+                      notes: '',
+                      championPool: [],
+                    }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => openPlayerProfile({
+                    id: '',
+                    summonerName: player.summonerName!,
+                    tagLine: player.tagLine!,
+                    region: player.region!,
+                    role: player.role || 'mid',
+                    notes: '',
+                    championPool: [],
+                  })}
+                  className="px-3 py-1.5 text-sm bg-lol-surface hover:bg-lol-gold/20 text-gray-300 hover:text-lol-gold rounded-lg transition-colors flex items-center gap-1.5"
+                  title="Open OP.GG"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                  OP.GG
+                </button>
+              </div>
+            </Card>
+
             <MasteryDisplay
               player={{
                 id: '',
