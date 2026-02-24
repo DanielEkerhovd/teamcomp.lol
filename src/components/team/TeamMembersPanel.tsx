@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { teamMembershipService, TeamMember, MemberRole } from '../../lib/teamMembershipService';
 import InviteModal from './InviteModal';
+import { ConfirmationModal } from '../ui';
 import type { Player } from '../../types';
 
 interface TeamMembersPanelProps {
@@ -15,6 +16,7 @@ export default function TeamMembersPanel({ teamId, teamName, players, isOwner }:
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const [memberToRemove, setMemberToRemove] = useState<string | null>(null);
 
   useEffect(() => {
     loadMembers();
@@ -34,13 +36,15 @@ export default function TeamMembersPanel({ teamId, teamName, players, isOwner }:
     }
   };
 
-  const handleRemoveMember = async (memberId: string) => {
-    if (!confirm('Are you sure you want to remove this member from the team?')) {
-      return;
-    }
+  const handleRemoveMember = (memberId: string) => {
+    setMemberToRemove(memberId);
+  };
+
+  const confirmRemoveMember = async () => {
+    if (!memberToRemove) return;
     try {
-      await teamMembershipService.removeMember(memberId);
-      setMembers(members.filter(m => m.id !== memberId));
+      await teamMembershipService.removeMember(memberToRemove);
+      setMembers(members.filter(m => m.id !== memberToRemove));
     } catch (err) {
       setError('Failed to remove member');
       console.error(err);
@@ -188,6 +192,16 @@ export default function TeamMembersPanel({ teamId, teamName, players, isOwner }:
         teamId={teamId}
         teamName={teamName}
         players={players}
+      />
+
+      {/* Remove Member Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={!!memberToRemove}
+        onClose={() => setMemberToRemove(null)}
+        onConfirm={confirmRemoveMember}
+        title="Remove Member"
+        message="Are you sure you want to remove this member from the team?"
+        confirmText="Remove"
       />
     </div>
   );

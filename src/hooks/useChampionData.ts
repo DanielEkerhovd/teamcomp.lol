@@ -58,10 +58,37 @@ export function useChampionData(): UseChampionDataReturn {
 
   const searchChampions = (query: string): Champion[] => {
     if (!query.trim()) return champions;
-    const lowerQuery = query.toLowerCase();
-    return champions.filter((c) =>
-      c.name.toLowerCase().includes(lowerQuery)
-    );
+
+    // Normalize: lowercase and remove apostrophes/special characters
+    const normalize = (str: string) => str.toLowerCase().replace(/['\s-]/g, '');
+    const normalizedQuery = normalize(query);
+
+    // Filter champions that match
+    const matches = champions.filter((c) => {
+      const normalizedName = normalize(c.name);
+      return normalizedName.includes(normalizedQuery);
+    });
+
+    // Sort: exact matches first, then prefix matches, then contains matches
+    return matches.sort((a, b) => {
+      const aNorm = normalize(a.name);
+      const bNorm = normalize(b.name);
+
+      // Exact match gets highest priority
+      const aExact = aNorm === normalizedQuery;
+      const bExact = bNorm === normalizedQuery;
+      if (aExact && !bExact) return -1;
+      if (bExact && !aExact) return 1;
+
+      // Prefix match gets second priority
+      const aPrefix = aNorm.startsWith(normalizedQuery);
+      const bPrefix = bNorm.startsWith(normalizedQuery);
+      if (aPrefix && !bPrefix) return -1;
+      if (bPrefix && !aPrefix) return 1;
+
+      // Otherwise alphabetical
+      return a.name.localeCompare(b.name);
+    });
   };
 
   return {

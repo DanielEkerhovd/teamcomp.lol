@@ -9,8 +9,9 @@ import DraftDetailPage from './pages/DraftDetailPage';
 import ToolsPage from './pages/ToolsPage';
 import SharedDraftPage from './pages/SharedDraftPage';
 import AcceptInvitePage from './pages/AcceptInvitePage';
+import ProfilePage from './pages/ProfilePage';
 import FirstTimeSetupModal from './components/onboarding/FirstTimeSetupModal';
-import SettingsModal from './components/settings/SettingsModal';
+import UsernameSetupModal from './components/onboarding/UsernameSetupModal';
 import { AuthProvider } from './contexts/AuthContext';
 import UserMenu from './components/auth/UserMenu';
 
@@ -51,13 +52,6 @@ const ToolsIcon = () => (
   </svg>
 );
 
-const SettingsIcon = () => (
-  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-  </svg>
-);
-
 const CollapseIcon = ({ collapsed }: { collapsed: boolean }) => (
   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
     {/* Sidebar panel icon */}
@@ -74,7 +68,7 @@ const CollapseIcon = ({ collapsed }: { collapsed: boolean }) => (
   </svg>
 );
 
-function Sidebar({ collapsed, setCollapsed, onSettingsClick }: { collapsed: boolean; setCollapsed: (v: boolean) => void; onSettingsClick: () => void }) {
+function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed: (v: boolean) => void }) {
   const navItems = [
     { to: '/', label: 'Home', icon: HomeIcon },
     { to: '/draft', label: 'Draft', icon: DraftIcon },
@@ -146,20 +140,6 @@ function Sidebar({ collapsed, setCollapsed, onSettingsClick }: { collapsed: bool
 
       {/* Bottom section */}
       <div className="border-t border-lol-border p-3 space-y-1">
-        {/* Settings */}
-        <button
-          onClick={onSettingsClick}
-          className="flex items-center gap-3 w-full px-3 py-3 rounded-xl font-medium text-gray-400 hover:text-white hover:bg-lol-surface transition-all duration-200 group relative"
-        >
-          <span className="shrink-0"><SettingsIcon /></span>
-          <span className={`whitespace-nowrap transition-all duration-300 ${collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100'}`}>Settings</span>
-          {collapsed && (
-            <div className="absolute left-full ml-3 px-3 py-2 bg-lol-card border border-lol-border rounded-lg text-sm text-white whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 shadow-xl z-50">
-              Settings
-            </div>
-          )}
-        </button>
-
         {/* Collapse toggle */}
         <button
           onClick={() => setCollapsed(!collapsed)}
@@ -175,14 +155,12 @@ function Sidebar({ collapsed, setCollapsed, onSettingsClick }: { collapsed: bool
 
 function Layout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-lol-gray">
       <Sidebar
         collapsed={collapsed}
         setCollapsed={setCollapsed}
-        onSettingsClick={() => setIsSettingsOpen(true)}
       />
       <main
         className={`transition-all duration-300 ease-in-out min-h-screen ${
@@ -194,7 +172,7 @@ function Layout({ children }: { children: React.ReactNode }) {
 
       {/* Modals */}
       <FirstTimeSetupModal />
-      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+      <UsernameSetupModal />
     </div>
   );
 }
@@ -221,6 +199,7 @@ export default function App() {
                   <Route path="/my-teams" element={<MyTeamPage />} />
                   <Route path="/champion-pool" element={<ChampionPoolPage />} />
                   <Route path="/tools" element={<ToolsPage />} />
+                  <Route path="/profile" element={<ProfilePage />} />
                 </Routes>
               </Layout>
             }

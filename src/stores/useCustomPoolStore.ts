@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { CustomPool, ChampionGroup, generateId } from '../types';
+import { cloudSync } from './middleware/cloudSync';
 
 interface CustomPoolState {
   pools: CustomPool[];
@@ -30,11 +31,12 @@ const updatePool = (
 
 export const useCustomPoolStore = create<CustomPoolState>()(
   persist(
-    (set, get) => ({
-      pools: [],
-      selectedPoolId: null,
+    cloudSync(
+      (set, get) => ({
+        pools: [],
+        selectedPoolId: null,
 
-      createPool: (name) => {
+        createPool: (name) => {
         const newPool: CustomPool = {
           id: generateId(),
           name,
@@ -186,6 +188,21 @@ export const useCustomPoolStore = create<CustomPoolState>()(
         }));
       },
     }),
+      {
+        storeKey: 'custom-pools',
+        tableName: 'custom_pools',
+        isArraySync: true,
+        selectSyncData: (state) => state.pools,
+        transformItem: (pool: CustomPool, userId: string, index: number) => ({
+          id: pool.id,
+          user_id: userId,
+          name: pool.name,
+          champion_groups: pool.championGroups,
+          allow_duplicate_champions: pool.allowDuplicateChampions ?? false,
+          sort_order: index,
+        }),
+      }
+    ),
     {
       name: 'teamcomp-lol-custom-pools',
       version: 1,

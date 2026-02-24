@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { cloudSync } from './middleware/cloudSync';
 
 type DraftSide = 'blue' | 'red';
 type SlotType = 'ban' | 'pick';
@@ -47,7 +48,8 @@ const getSlotKey = (side: DraftSide, type: SlotType): SlotKey => {
 
 export const useDraftTheoryStore = create<DraftTheoryState>()(
   persist(
-    (set, get) => ({
+    cloudSync(
+      (set, get) => ({
       ...initialState,
 
       setSlot: (side, type, index, championId) => {
@@ -116,6 +118,29 @@ export const useDraftTheoryStore = create<DraftTheoryState>()(
         set({ [`${side}TeamName`]: name });
       },
     }),
+      {
+        storeKey: 'draft-theory',
+        tableName: 'draft_theory',
+        debounceMs: 2000,
+        selectSyncData: (state) => ({
+          blueBans: state.blueBans,
+          bluePicks: state.bluePicks,
+          redBans: state.redBans,
+          redPicks: state.redPicks,
+          blueTeamName: state.blueTeamName,
+          redTeamName: state.redTeamName,
+        }),
+        transformForCloud: (data, userId) => ({
+          user_id: userId,
+          blue_bans: data.blueBans,
+          blue_picks: data.bluePicks,
+          red_bans: data.redBans,
+          red_picks: data.redPicks,
+          blue_team_name: data.blueTeamName,
+          red_team_name: data.redTeamName,
+        }),
+      }
+    ),
     {
       name: 'teamcomp-lol-draft-theory',
     }

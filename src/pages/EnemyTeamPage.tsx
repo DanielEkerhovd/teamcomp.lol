@@ -14,11 +14,11 @@ import {
   horizontalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { useDroppable } from "@dnd-kit/core";
-import { useEnemyTeamStore } from "../stores/useEnemyTeamStore";
+import { useEnemyTeamStore, MAX_SUBS } from "../stores/useEnemyTeamStore";
 import { useRankStore } from "../stores/useRankStore";
 import { useMasteryStore } from "../stores/useMasteryStore";
 import { parseOpggMultiSearchUrl, ROLES, Role, Player } from "../types";
-import { Button, Card, Input, Modal } from "../components/ui";
+import { Button, Card, ConfirmationModal, Input, Modal } from "../components/ui";
 import { RoleSlot, SubSlot, RoleIcon } from "../components/team";
 import { useOpgg } from "../hooks/useOpgg";
 import { PlayerTierList } from "../components/champion";
@@ -99,6 +99,7 @@ export default function EnemyTeamPage() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+  const [teamToDelete, setTeamToDelete] = useState<string | null>(null);
 
   const {
     fetchRanksForContext,
@@ -267,11 +268,16 @@ export default function EnemyTeamPage() {
   };
 
   const handleDeleteTeam = (id: string) => {
-    if (confirm("Are you sure you want to delete this team?")) {
-      deleteTeam(id);
-      if (expandedTeamId === id) {
+    setTeamToDelete(id);
+  };
+
+  const confirmDeleteTeam = () => {
+    if (teamToDelete) {
+      deleteTeam(teamToDelete);
+      if (expandedTeamId === teamToDelete) {
         setExpandedTeamId(null);
       }
+      setTeamToDelete(null);
     }
   };
 
@@ -713,12 +719,13 @@ export default function EnemyTeamPage() {
                       <div>
                         <div className="flex items-center justify-between mb-3">
                           <h3 className="text-sm font-medium text-gray-300">
-                            Substitutes
+                            Substitutes ({subs.length}/{MAX_SUBS})
                           </h3>
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => addSub(team.id)}
+                            disabled={subs.length >= MAX_SUBS}
                           >
                             + Add Sub
                           </Button>
@@ -1085,6 +1092,16 @@ export default function EnemyTeamPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Delete confirmation modal */}
+      <ConfirmationModal
+        isOpen={!!teamToDelete}
+        onClose={() => setTeamToDelete(null)}
+        onConfirm={confirmDeleteTeam}
+        title="Delete Team"
+        message="Are you sure you want to delete this team?"
+        confirmText="Delete"
+      />
     </div>
   );
 }

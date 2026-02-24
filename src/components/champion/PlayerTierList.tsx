@@ -161,9 +161,11 @@ function SortableChampion({
       <button
         type="button"
         onClick={onRemove}
-        className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+        className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-linear-to-br from-red-400 to-red-600 rounded-full text-white opacity-0 group-hover:opacity-100 transition-all duration-200 flex items-center justify-center shadow-lg ring-2 ring-lol-dark/80 hover:scale-110 hover:from-red-500 hover:to-red-700"
       >
-        ×
+        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
       </button>
     </div>
   );
@@ -205,10 +207,12 @@ function AddChampionButton({ onSelect, excludeIds }: AddChampionButtonProps) {
     }
   }, [isOpen]);
 
-  const handleSelect = (champion: Champion) => {
+  const handleSelect = (champion: Champion, keepOpen = false) => {
     onSelect(champion);
     setQuery("");
-    setIsOpen(false);
+    if (!keepOpen) {
+      setIsOpen(false);
+    }
   };
 
   return (
@@ -230,7 +234,7 @@ function AddChampionButton({ onSelect, excludeIds }: AddChampionButtonProps) {
             onKeyDown={(e) => {
               if (e.key === "Enter" && results.length > 0) {
                 e.preventDefault();
-                handleSelect(results[0]);
+                handleSelect(results[0], true);
               }
               if (e.key === "Escape") {
                 setIsOpen(false);

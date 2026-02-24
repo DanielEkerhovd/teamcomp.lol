@@ -4,7 +4,7 @@ import { usePlayerPoolStore } from '../stores/usePlayerPoolStore';
 import { useCustomPoolStore } from '../stores/useCustomPoolStore';
 import { useRankStore } from '../stores/useRankStore';
 import { PlayerTierList } from '../components/champion';
-import { Card } from '../components/ui';
+import { Card, ConfirmationModal } from '../components/ui';
 import RankBadge from '../components/team/RankBadge';
 import { ROLES, Role, Player } from '../types';
 import { useOpgg } from '../hooks/useOpgg';
@@ -103,6 +103,7 @@ export default function ChampionPoolPage() {
   const [selectionMode, setSelectionMode] = useState<SelectionMode>('player');
   const [isCreatingCustomPool, setIsCreatingCustomPool] = useState(false);
   const [newPoolName, setNewPoolName] = useState('');
+  const [poolToDelete, setPoolToDelete] = useState<string | null>(null);
 
   const selectedPlayer = allPlayers.find((p) => p.id === selectedPlayerId) ?? allPlayers[0];
   const selectedCustomPool = customPoolStore.pools.find((p) => p.id === customPoolStore.selectedPoolId);
@@ -324,11 +325,7 @@ export default function ChampionPoolPage() {
                   </p>
                 </div>
                 <button
-                  onClick={() => {
-                    if (confirm(`Delete "${selectedCustomPool.name}"?`)) {
-                      customPoolStore.deletePool(selectedCustomPool.id);
-                    }
-                  }}
+                  onClick={() => setPoolToDelete(selectedCustomPool.id)}
                   className="px-3 py-1.5 rounded text-red-400 hover:text-red-300 hover:bg-red-900/20 text-sm transition-colors"
                 >
                   Delete
@@ -465,6 +462,20 @@ export default function ChampionPoolPage() {
           )}
         </div>
       </div>
+
+      <ConfirmationModal
+        isOpen={!!poolToDelete}
+        onClose={() => setPoolToDelete(null)}
+        onConfirm={() => {
+          if (poolToDelete) {
+            customPoolStore.deletePool(poolToDelete);
+            setPoolToDelete(null);
+          }
+        }}
+        title="Delete Pool"
+        message={`Are you sure you want to delete "${selectedCustomPool?.name}"?`}
+        confirmText="Delete"
+      />
     </div>
   );
 }

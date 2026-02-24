@@ -27,7 +27,16 @@
       "Bash(npx supabase db push:*)",
       "Bash(npx supabase:*)",
       "Bash(node -e:*)",
-      "Bash(supabase db push:*)"
+      "Bash(supabase db push:*)",
+      "Bash(timeout:*)",
+      "Bash(supabase migration list:*)",
+      "Bash(where:*)",
+      "Bash(npx dotenv:*)",
+      "Bash(npx tsx --version)",
+      "Bash(npm ls:*)",
+      "Bash(npx tsx:*)",
+      "Bash(grep:*)",
+      "Bash(supabase functions deploy:*)"
     ],
     "defaultMode": "acceptEdits"
   }

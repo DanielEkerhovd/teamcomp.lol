@@ -78,7 +78,7 @@ export const syncManager = {
       upsertKey?: string;
     } = {}
   ): Promise<void> {
-    const { debounceMs = 1000, transform, upsertKey = 'user_id' } = options;
+    const { debounceMs = 3000, transform, upsertKey = 'user_id' } = options;
 
     // Clear existing timer
     const existingTimer = debounceTimers.get(storeKey);
@@ -134,7 +134,7 @@ export const syncManager = {
       deleteOrphans?: boolean;
     } = {}
   ): Promise<void> {
-    const { debounceMs = 1000, transformItem, deleteOrphans = true } = options;
+    const { debounceMs = 3000, transformItem, deleteOrphans = true } = options;
 
     const existingTimer = debounceTimers.get(storeKey);
     if (existingTimer) {
@@ -297,6 +297,7 @@ export const syncManager = {
           user_id: userId,
           name: team.name,
           notes: team.notes,
+          is_favorite: team.isFavorite ?? false,
         }),
       });
 
@@ -327,7 +328,98 @@ export const syncManager = {
       });
     }
 
+    // Sync player pools
+    const playerPools = usePlayerPoolStore.getState().pools;
+    if (playerPools.length > 0) {
+      await this.syncArrayToCloudImmediate('player-pools', 'player_pools', playerPools, {
+        transformItem: (pool, userId) => ({
+          id: pool.id,
+          user_id: userId,
+          summoner_name: pool.summonerName,
+          tag_line: pool.tagLine || '',
+          role: pool.role,
+          champion_groups: pool.championGroups || [],
+          allow_duplicate_champions: pool.allowDuplicateChampions || false,
+        }),
+      });
+    }
+
+    // Sync custom pools
+    const { useCustomPoolStore } = await import('../stores/useCustomPoolStore');
+    const customPools = useCustomPoolStore.getState().pools;
+    if (customPools.length > 0) {
+      await this.syncArrayToCloudImmediate('custom-pools', 'custom_pools', customPools, {
+        transformItem: (pool, userId, index) => ({
+          id: pool.id,
+          user_id: userId,
+          name: pool.name,
+          champion_groups: pool.championGroups || [],
+          allow_duplicate_champions: pool.allowDuplicateChampions || false,
+          sort_order: index,
+        }),
+      });
+    }
+
+    // Sync custom templates
+    const { useCustomTemplatesStore } = await import('../stores/useCustomTemplatesStore');
+    const templates = useCustomTemplatesStore.getState().templates;
+    if (templates.length > 0) {
+      await this.syncArrayToCloudImmediate('custom-templates', 'custom_templates', templates, {
+        transformItem: (template, userId, index) => ({
+          id: template.id,
+          user_id: userId,
+          name: template.name,
+          groups: template.groups || [],
+          allow_duplicates: template.allowDuplicates || false,
+          sort_order: index,
+        }),
+      });
+    }
+
+    // Sync user settings
+    const { useSettingsStore } = await import('../stores/useSettingsStore');
+    const settings = useSettingsStore.getState();
+    await this.syncToCloudImmediate('settings', 'user_settings', {
+      user_id: user.id,
+      default_region: settings.defaultRegion,
+      has_completed_onboarding: settings.hasCompletedOnboarding,
+    });
+
+    // Sync draft theory state
+    const { useDraftTheoryStore } = await import('../stores/useDraftTheoryStore');
+    const draftTheory = useDraftTheoryStore.getState();
+    await this.syncToCloudImmediate('draft-theory', 'draft_theory', {
+      user_id: user.id,
+      blue_bans: draftTheory.blueBans,
+      blue_picks: draftTheory.bluePicks,
+      red_bans: draftTheory.redBans,
+      red_picks: draftTheory.redPicks,
+      blue_team_name: draftTheory.blueTeamName,
+      red_team_name: draftTheory.redTeamName,
+    });
+
     console.log('All stores synced to cloud');
+  },
+
+  /**
+   * Sync single object immediately (no debounce) - used by syncAllStores
+   */
+  async syncToCloudImmediate(
+    storeKey: string,
+    tableName: string,
+    data: Record<string, unknown>
+  ): Promise<void> {
+    if (!this.isAvailable() || !supabase) return;
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase.from(tableName) as any)
+        .upsert(data, { onConflict: 'user_id' });
+
+      if (error) throw error;
+    } catch (error) {
+      console.error(`Immediate sync error for ${storeKey}:`, error);
+    }
   },
 
   /**
@@ -437,6 +529,435 @@ export const syncManager = {
   },
 
   /**
+   * Load all data from cloud and reset local stores
+   * Called after login when user chooses to discard local data
+   */
+  async loadAllFromCloud(): Promise<void> {
+    if (!this.isAvailable() || !supabase) return;
+
+    const { user } = useAuthStore.getState();
+    if (!user) return;
+
+    try {
+      // Import stores dynamically
+      const { useMyTeamStore } = await import('../stores/useMyTeamStore');
+      const { useEnemyTeamStore } = await import('../stores/useEnemyTeamStore');
+      const { useDraftStore } = await import('../stores/useDraftStore');
+      const { usePlayerPoolStore } = await import('../stores/usePlayerPoolStore');
+
+      // Load my teams with players
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: myTeams } = await (supabase as any)
+        .from('my_teams')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('sort_order');
+
+      if (myTeams && myTeams.length > 0) {
+        const teamsWithPlayers = await Promise.all(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          myTeams.map(async (team: any) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { data: players } = await (supabase as any)
+              .from('players')
+              .select('*')
+              .eq('team_id', team.id)
+              .order('sort_order');
+
+            return {
+              id: team.id,
+              name: team.name,
+              notes: team.notes || '',
+              championPool: team.champion_pool || [],
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              players: (players || []).map((p: any) => ({
+                id: p.id,
+                summonerName: p.summoner_name,
+                tagLine: p.tag_line || '',
+                role: p.role,
+                notes: p.notes || '',
+                region: p.region || 'euw',
+                isSub: p.is_sub || false,
+                championPool: p.champion_pool || [],
+                championGroups: p.champion_groups || [],
+              })),
+              createdAt: new Date(team.created_at).getTime(),
+              updatedAt: new Date(team.updated_at).getTime(),
+            };
+          })
+        );
+
+        // Reset the store with cloud data
+        useMyTeamStore.setState({
+          teams: teamsWithPlayers,
+          selectedTeamId: teamsWithPlayers[0]?.id || '',
+        });
+      } else {
+        // No cloud data - create a fresh default team
+        const { createEmptyTeam } = await import('../types');
+        const defaultTeam = createEmptyTeam('My Team');
+        useMyTeamStore.setState({
+          teams: [defaultTeam],
+          selectedTeamId: defaultTeam.id,
+        });
+      }
+
+      // Load enemy teams with players
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: enemyTeams } = await (supabase as any)
+        .from('enemy_teams')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('sort_order');
+
+      if (enemyTeams && enemyTeams.length > 0) {
+        const teamsWithPlayers = await Promise.all(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          enemyTeams.map(async (team: any) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { data: players } = await (supabase as any)
+              .from('enemy_players')
+              .select('*')
+              .eq('team_id', team.id)
+              .order('sort_order');
+
+            return {
+              id: team.id,
+              name: team.name,
+              notes: team.notes || '',
+              isFavorite: team.is_favorite || false,
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              players: (players || []).map((p: any) => ({
+                id: p.id,
+                summonerName: p.summoner_name,
+                tagLine: p.tag_line || '',
+                role: p.role,
+                notes: p.notes || '',
+                region: p.region || 'euw',
+                isSub: p.is_sub || false,
+                championPool: p.champion_pool || [],
+                championGroups: p.champion_groups || [],
+              })),
+              createdAt: new Date(team.created_at).getTime(),
+              updatedAt: new Date(team.updated_at).getTime(),
+            };
+          })
+        );
+
+        useEnemyTeamStore.setState({ teams: teamsWithPlayers });
+      } else {
+        useEnemyTeamStore.setState({ teams: [] });
+      }
+
+      // Load draft sessions
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: sessions } = await (supabase as any)
+        .from('draft_sessions')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('sort_order');
+
+      if (sessions && sessions.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const transformedSessions = sessions.map((s: any) => ({
+          id: s.id,
+          name: s.name,
+          enemyTeamId: s.enemy_team_id,
+          myTeamId: s.my_team_id,
+          banGroups: s.ban_groups || [],
+          priorityGroups: s.priority_groups || [],
+          notes: s.notes || '',
+          notepad: s.notepad || [],
+          createdAt: new Date(s.created_at).getTime(),
+          updatedAt: new Date(s.updated_at).getTime(),
+        }));
+
+        useDraftStore.setState({
+          sessions: transformedSessions,
+          currentSessionId: null,
+        });
+      } else {
+        useDraftStore.setState({ sessions: [], currentSessionId: null });
+      }
+
+      // Load player pools (if table exists)
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: pools } = await (supabase as any)
+          .from('player_pools')
+          .select('*')
+          .eq('user_id', user.id);
+
+        if (pools && pools.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const transformedPools = pools.map((p: any) => ({
+            id: p.id,
+            summonerName: p.summoner_name,
+            tagLine: p.tag_line || '',
+            role: p.role,
+            championGroups: p.champion_groups || [],
+            allowDuplicateChampions: p.allow_duplicate_champions || false,
+            updatedAt: Date.now(),
+          }));
+
+          usePlayerPoolStore.setState({ pools: transformedPools });
+        } else {
+          usePlayerPoolStore.setState({ pools: [] });
+        }
+      } catch {
+        // Player pools table might not exist, that's OK
+        usePlayerPoolStore.setState({ pools: [] });
+      }
+
+      // Load custom pools
+      try {
+        const { useCustomPoolStore } = await import('../stores/useCustomPoolStore');
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: customPools } = await (supabase as any)
+          .from('custom_pools')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('sort_order');
+
+        if (customPools && customPools.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const transformedPools = customPools.map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            championGroups: p.champion_groups || [],
+            allowDuplicateChampions: p.allow_duplicate_champions || false,
+            createdAt: new Date(p.created_at).getTime(),
+            updatedAt: new Date(p.updated_at).getTime(),
+          }));
+
+          useCustomPoolStore.setState({ pools: transformedPools, selectedPoolId: null });
+        } else {
+          useCustomPoolStore.setState({ pools: [], selectedPoolId: null });
+        }
+      } catch {
+        // Custom pools table might not exist, that's OK
+      }
+
+      // Load custom templates
+      try {
+        const { useCustomTemplatesStore } = await import('../stores/useCustomTemplatesStore');
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: templates } = await (supabase as any)
+          .from('custom_templates')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('sort_order');
+
+        if (templates && templates.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const transformedTemplates = templates.map((t: any) => ({
+            id: t.id,
+            name: t.name,
+            groups: t.groups || [],
+            allowDuplicates: t.allow_duplicates || false,
+          }));
+
+          useCustomTemplatesStore.setState({ templates: transformedTemplates });
+        } else {
+          useCustomTemplatesStore.setState({ templates: [] });
+        }
+      } catch {
+        // Custom templates table might not exist, that's OK
+      }
+
+      // Load user settings
+      try {
+        const { useSettingsStore } = await import('../stores/useSettingsStore');
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: settings } = await (supabase as any)
+          .from('user_settings')
+          .select('*')
+          .eq('user_id', user.id)
+          .single();
+
+        if (settings) {
+          useSettingsStore.setState({
+            defaultRegion: settings.default_region || 'euw',
+            hasCompletedOnboarding: settings.has_completed_onboarding || false,
+          });
+        }
+      } catch {
+        // Settings table might not exist or no settings yet, that's OK
+      }
+
+      // Load draft theory state
+      try {
+        const { useDraftTheoryStore } = await import('../stores/useDraftTheoryStore');
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: draftTheory } = await (supabase as any)
+          .from('draft_theory')
+          .select('*')
+          .eq('user_id', user.id)
+          .single();
+
+        if (draftTheory) {
+          useDraftTheoryStore.setState({
+            blueBans: draftTheory.blue_bans || [null, null, null, null, null],
+            bluePicks: draftTheory.blue_picks || [null, null, null, null, null],
+            redBans: draftTheory.red_bans || [null, null, null, null, null],
+            redPicks: draftTheory.red_picks || [null, null, null, null, null],
+            blueTeamName: draftTheory.blue_team_name || 'Blue Side',
+            redTeamName: draftTheory.red_team_name || 'Red Side',
+          });
+        }
+      } catch {
+        // Draft theory table might not exist or no state yet, that's OK
+      }
+
+      console.log('All data loaded from cloud');
+    } catch (error) {
+      console.error('Error loading from cloud:', error);
+    }
+  },
+
+  /**
+   * Fetch full cloud data for deep comparison during merge
+   * Used to identify which local items are identical to cloud data
+   */
+  async fetchCloudDataForComparison(userId: string): Promise<{
+    myTeams: Map<string, { name: string; notes: string; players: Array<{ summonerName: string; role: string; championGroups: unknown }> }>;
+    enemyTeams: Map<string, { name: string; notes: string; players: Array<{ summonerName: string; role: string; championGroups: unknown }> }>;
+    drafts: Map<string, { name: string; enemyTeamId: string | null; myTeamId: string | null; banGroups: unknown; priorityGroups: unknown }>;
+    playerPools: Map<string, { summonerName: string; role: string; championGroups: unknown }>;
+    customPools: Map<string, { name: string; championGroups: unknown }>;
+    templates: Map<string, { name: string; groups: unknown }>;
+  } | null> {
+    if (!isSupabaseConfigured() || !supabase) {
+      return null;
+    }
+
+    try {
+      // Fetch all data in parallel
+      const [
+        myTeamsRes,
+        enemyTeamsRes,
+        draftsRes,
+        playerPoolsRes,
+        customPoolsRes,
+        templatesRes,
+      ] = await Promise.all([
+        supabase.from('my_teams').select('id, name, notes').eq('user_id', userId),
+        supabase.from('enemy_teams').select('id, name, notes').eq('user_id', userId),
+        supabase.from('draft_sessions').select('id, name, enemy_team_id, my_team_id, ban_groups, priority_groups').eq('user_id', userId),
+        supabase.from('player_pools').select('id, summoner_name, role, champion_groups').eq('user_id', userId),
+        supabase.from('custom_pools').select('id, name, champion_groups').eq('user_id', userId),
+        supabase.from('custom_templates').select('id, name, groups').eq('user_id', userId),
+      ]);
+
+      // Fetch players for each team
+      const myTeamIds = (myTeamsRes.data || []).map((t: { id: string }) => t.id);
+      const enemyTeamIds = (enemyTeamsRes.data || []).map((t: { id: string }) => t.id);
+
+      const [playersRes, enemyPlayersRes] = await Promise.all([
+        myTeamIds.length > 0
+          ? supabase.from('players').select('team_id, summoner_name, role, champion_groups').in('team_id', myTeamIds)
+          : Promise.resolve({ data: [] }),
+        enemyTeamIds.length > 0
+          ? supabase.from('enemy_players').select('team_id, summoner_name, role, champion_groups').in('team_id', enemyTeamIds)
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      // Group players by team
+      const playersByTeam = new Map<string, Array<{ summonerName: string; role: string; championGroups: unknown }>>();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (playersRes.data || []).forEach((p: any) => {
+        if (!playersByTeam.has(p.team_id)) {
+          playersByTeam.set(p.team_id, []);
+        }
+        playersByTeam.get(p.team_id)!.push({
+          summonerName: p.summoner_name,
+          role: p.role,
+          championGroups: p.champion_groups,
+        });
+      });
+
+      const enemyPlayersByTeam = new Map<string, Array<{ summonerName: string; role: string; championGroups: unknown }>>();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (enemyPlayersRes.data || []).forEach((p: any) => {
+        if (!enemyPlayersByTeam.has(p.team_id)) {
+          enemyPlayersByTeam.set(p.team_id, []);
+        }
+        enemyPlayersByTeam.get(p.team_id)!.push({
+          summonerName: p.summoner_name,
+          role: p.role,
+          championGroups: p.champion_groups,
+        });
+      });
+
+      // Build result maps
+      const myTeams = new Map();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (myTeamsRes.data || []).forEach((t: any) => {
+        myTeams.set(t.id, {
+          name: t.name,
+          notes: t.notes || '',
+          players: playersByTeam.get(t.id) || [],
+        });
+      });
+
+      const enemyTeams = new Map();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (enemyTeamsRes.data || []).forEach((t: any) => {
+        enemyTeams.set(t.id, {
+          name: t.name,
+          notes: t.notes || '',
+          players: enemyPlayersByTeam.get(t.id) || [],
+        });
+      });
+
+      const drafts = new Map();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (draftsRes.data || []).forEach((d: any) => {
+        drafts.set(d.id, {
+          name: d.name,
+          enemyTeamId: d.enemy_team_id,
+          myTeamId: d.my_team_id,
+          banGroups: d.ban_groups,
+          priorityGroups: d.priority_groups,
+        });
+      });
+
+      const playerPools = new Map();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (playerPoolsRes.data || []).forEach((p: any) => {
+        playerPools.set(p.id, {
+          summonerName: p.summoner_name,
+          role: p.role,
+          championGroups: p.champion_groups,
+        });
+      });
+
+      const customPools = new Map();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (customPoolsRes.data || []).forEach((p: any) => {
+        customPools.set(p.id, {
+          name: p.name,
+          championGroups: p.champion_groups,
+        });
+      });
+
+      const templates = new Map();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (templatesRes.data || []).forEach((t: any) => {
+        templates.set(t.id, {
+          name: t.name,
+          groups: t.groups,
+        });
+      });
+
+      return { myTeams, enemyTeams, drafts, playerPools, customPools, templates };
+    } catch (error) {
+      console.error('Error fetching cloud data for comparison:', error);
+      return null;
+    }
+  },
+
+  /**
    * Sync players for a team to the cloud
    * This handles the separate players/enemy_players tables
    */
@@ -459,7 +980,7 @@ export const syncManager = {
       debounceMs?: number;
     } = {}
   ): Promise<void> {
-    const { debounceMs = 1000 } = options;
+    const { debounceMs = 3000 } = options;
     const fullKey = `${storeKey}:players:${teamId}`;
 
     const existingTimer = debounceTimers.get(fullKey);
@@ -476,8 +997,11 @@ export const syncManager = {
       const validRoles = ['top', 'jungle', 'mid', 'adc', 'support'];
 
       try {
+        // Filter out empty players (no summoner name) - they shouldn't be synced to cloud
+        const nonEmptyPlayers = players.filter(p => p.summonerName.trim() !== '');
+
         // Transform players for the database
-        const cloudPlayers = players.map((player, index) => {
+        const cloudPlayers = nonEmptyPlayers.map((player, index) => {
           // Get champion groups - if empty but old championPool has data, convert it
           let championGroups = player.championGroups || [];
           const championPool = player.championPool || [];
@@ -524,8 +1048,9 @@ export const syncManager = {
           if (upsertError) throw upsertError;
         }
 
-        // Delete orphan players (players in cloud but not in local for this team)
-        const localIds = players.map((p) => p.id);
+        // Delete orphan players and empty players from cloud
+        // Only keep non-empty player IDs - this ensures empty players get deleted from cloud
+        const localIds = nonEmptyPlayers.map((p) => p.id);
         if (localIds.length > 0) {
           const { error: deleteError } = await supabase
             .from(tableName)
@@ -535,6 +1060,16 @@ export const syncManager = {
 
           if (deleteError && !deleteError.message.includes('no rows')) {
             console.warn(`Delete orphan players warning for ${fullKey}:`, deleteError);
+          }
+        } else {
+          // If all players are empty, delete all players for this team from cloud
+          const { error: deleteError } = await supabase
+            .from(tableName)
+            .delete()
+            .eq('team_id', teamId);
+
+          if (deleteError && !deleteError.message.includes('no rows')) {
+            console.warn(`Delete all players warning for ${fullKey}:`, deleteError);
           }
         }
       } catch (error) {

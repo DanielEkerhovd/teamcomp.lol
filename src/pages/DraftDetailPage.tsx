@@ -4,7 +4,7 @@ import { useDraftStore } from '../stores/useDraftStore';
 import { useEnemyTeamStore } from '../stores/useEnemyTeamStore';
 import { useMyTeamStore } from '../stores/useMyTeamStore';
 import { useAuthStore } from '../stores/useAuthStore';
-import { Button, Card, Input, Modal } from '../components/ui';
+import { Button, Card, ConfirmationModal, Input, Modal } from '../components/ui';
 import { DraftPlanningHub, TeamVsDisplay } from '../components/draft';
 import ShareModal from '../components/share/ShareModal';
 import LoginModal from '../components/auth/LoginModal';
@@ -101,6 +101,7 @@ export default function DraftDetailPage() {
   const [isNewSessionModalOpen, setIsNewSessionModalOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [newSessionName, setNewSessionName] = useState('');
 
   const isAuthenticated = useAuthStore((state) => !!state.user);
@@ -149,7 +150,11 @@ export default function DraftDetailPage() {
   };
 
   const handleDeleteSession = () => {
-    if (currentSession && confirm('Are you sure you want to delete this draft session?')) {
+    setIsDeleteModalOpen(true);
+  };
+
+  const confirmDeleteSession = () => {
+    if (currentSession) {
       deleteSession(currentSession.id);
       navigate('/draft');
     }
@@ -415,6 +420,16 @@ export default function DraftDetailPage() {
       <LoginModal
         isOpen={isLoginModalOpen}
         onClose={() => setIsLoginModalOpen(false)}
+      />
+
+      {/* Delete confirmation modal */}
+      <ConfirmationModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+        onConfirm={confirmDeleteSession}
+        title="Delete Draft"
+        message="Are you sure you want to delete this draft session?"
+        confirmText="Delete"
       />
     </div>
   );

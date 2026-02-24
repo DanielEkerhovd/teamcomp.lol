@@ -1,7 +1,7 @@
 // Supabase database types
 // These match the schema in supabase/schema.sql
 
-export type UserTier = 'free' | 'paid' | 'admin';
+export type UserTier = 'free' | 'paid' | 'supporter' | 'admin';
 
 export interface Database {
   public: {
@@ -251,6 +251,7 @@ export interface Database {
           tag_line: string;
           role: string;
           champion_groups: unknown;
+          allow_duplicate_champions: boolean;
           updated_at: string;
         };
         Insert: {
@@ -260,6 +261,7 @@ export interface Database {
           tag_line?: string;
           role: string;
           champion_groups?: unknown;
+          allow_duplicate_champions?: boolean;
           updated_at?: string;
         };
         Update: {
@@ -267,6 +269,7 @@ export interface Database {
           tag_line?: string;
           role?: string;
           champion_groups?: unknown;
+          allow_duplicate_champions?: boolean;
           updated_at?: string;
         };
       };
@@ -276,6 +279,8 @@ export interface Database {
           user_id: string;
           name: string;
           champion_groups: unknown;
+          allow_duplicate_champions: boolean;
+          sort_order: number;
           created_at: string;
           updated_at: string;
         };
@@ -284,12 +289,16 @@ export interface Database {
           user_id: string;
           name: string;
           champion_groups?: unknown;
+          allow_duplicate_champions?: boolean;
+          sort_order?: number;
           created_at?: string;
           updated_at?: string;
         };
         Update: {
           name?: string;
           champion_groups?: unknown;
+          allow_duplicate_champions?: boolean;
+          sort_order?: number;
           updated_at?: string;
         };
       };
@@ -299,6 +308,8 @@ export interface Database {
           user_id: string;
           name: string;
           groups: string[];
+          allow_duplicates: boolean;
+          sort_order: number;
           created_at: string;
         };
         Insert: {
@@ -306,11 +317,15 @@ export interface Database {
           user_id: string;
           name: string;
           groups?: string[];
+          allow_duplicates?: boolean;
+          sort_order?: number;
           created_at?: string;
         };
         Update: {
           name?: string;
           groups?: string[];
+          allow_duplicates?: boolean;
+          sort_order?: number;
         };
       };
       draft_theory: {

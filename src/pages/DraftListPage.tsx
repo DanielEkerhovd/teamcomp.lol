@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useDraftStore } from '../stores/useDraftStore';
 import { useEnemyTeamStore } from '../stores/useEnemyTeamStore';
 import { useMyTeamStore } from '../stores/useMyTeamStore';
-import { Button, Card, Input, Modal } from '../components/ui';
+import { Button, Card, ConfirmationModal, Input, Modal } from '../components/ui';
 
 export default function DraftListPage() {
   const navigate = useNavigate();
@@ -14,6 +14,7 @@ export default function DraftListPage() {
   const [isNewSessionModalOpen, setIsNewSessionModalOpen] = useState(false);
   const [newSessionName, setNewSessionName] = useState('');
   const [selectedEnemyTeamId, setSelectedEnemyTeamId] = useState('');
+  const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
 
   const handleCreateSession = () => {
     if (newSessionName.trim()) {
@@ -32,8 +33,13 @@ export default function DraftListPage() {
 
   const handleDeleteSession = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (confirm('Are you sure you want to delete this draft session?')) {
-      deleteSession(id);
+    setSessionToDelete(id);
+  };
+
+  const confirmDeleteSession = () => {
+    if (sessionToDelete) {
+      deleteSession(sessionToDelete);
+      setSessionToDelete(null);
     }
   };
 
@@ -200,6 +206,16 @@ export default function DraftListPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Delete confirmation modal */}
+      <ConfirmationModal
+        isOpen={!!sessionToDelete}
+        onClose={() => setSessionToDelete(null)}
+        onConfirm={confirmDeleteSession}
+        title="Delete Draft"
+        message="Are you sure you want to delete this draft session?"
+        confirmText="Delete"
+      />
     </div>
   );
 }

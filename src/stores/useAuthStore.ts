@@ -1,8 +1,10 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 import type { User, Session, AuthError } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import type { Profile, UserTier } from '../types/database';
+
+// Guard against multiple initialization calls (React Strict Mode)
+let isInitializing = false;
 
 export interface UserProfile {
   id: string;
@@ -35,6 +37,10 @@ interface AuthState {
   refreshProfile: () => Promise<void>;
   setSession: (session: Session | null) => void;
   clearError: () => void;
+  updateDisplayName: (displayName: string) => Promise<{ error: string | null }>;
+  updateAvatar: (file: File) => Promise<{ error: string | null }>;
+  removeAvatar: () => Promise<{ error: string | null }>;
+  deleteAccount: () => Promise<{ error: string | null }>;
 }
 
 const transformProfile = (dbProfile: Profile): UserProfile => ({
@@ -46,69 +52,41 @@ const transformProfile = (dbProfile: Profile): UserProfile => ({
   maxTeams: dbProfile.max_teams,
 });
 
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set, get) => ({
-      user: null,
-      session: null,
-      profile: null,
-      isLoading: false,
-      isInitialized: false,
-      error: null,
+export const useAuthStore = create<AuthState>()((set, get) => ({
+  user: null,
+  session: null,
+  profile: null,
+  isLoading: false,
+  isInitialized: false,
+  error: null,
 
-      get isAuthenticated() {
-        return !!get().user;
-      },
+  get isAuthenticated() {
+    return !!get().user;
+  },
 
-      get isGuest() {
-        return !get().user;
-      },
+  get isGuest() {
+    return !get().user;
+  },
 
-      initialize: async () => {
-        if (!isSupabaseConfigured() || !supabase) {
-          set({ isInitialized: true, isLoading: false });
-          return;
-        }
+  initialize: async () => {
+    // Prevent double initialization (React Strict Mode)
+    if (isInitializing || get().isInitialized) {
+      return;
+    }
+    isInitializing = true;
 
-        set({ isLoading: true });
+    if (!isSupabaseConfigured() || !supabase) {
+      set({ isInitialized: true, isLoading: false });
+      isInitializing = false;
+      return;
+    }
 
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-
-          if (session?.user) {
-            const { data: profileData } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('id', session.user.id)
-              .single();
-
-            set({
-              user: session.user,
-              session,
-              profile: profileData ? transformProfile(profileData) : null,
-              isLoading: false,
-              isInitialized: true,
-              error: null,
-            });
-          } else {
-            set({
-              user: null,
-              session: null,
-              profile: null,
-              isLoading: false,
-              isInitialized: true,
-              error: null,
-            });
-          }
-        } catch (error) {
-          console.error('Auth initialization error:', error);
-          set({
-            isLoading: false,
-            isInitialized: true,
-            error: 'Failed to initialize authentication',
-          });
-        }
-      },
+    // Don't call getSession() here - it can hang indefinitely
+    // Instead, we rely on onAuthStateChange INITIAL_SESSION event in AuthContext
+    // Just mark as initialized so the app can render
+    set({ isLoading: true });
+    isInitializing = false;
+  },
 
       signInWithEmail: async (email: string, password: string) => {
         if (!supabase) {
@@ -196,6 +174,9 @@ export const useAuthStore = create<AuthState>()(
           provider: 'google',
           options: {
             redirectTo: window.location.origin,
+            queryParams: {
+              prompt: 'select_account',
+            },
           },
         });
 
@@ -238,6 +219,18 @@ export const useAuthStore = create<AuthState>()(
 
         await supabase.auth.signOut();
 
+        // Clear all local data stores
+        const storeKeys = [
+          'teamcomp-lol-my-team',
+          'teamcomp-lol-enemy-teams',
+          'teamcomp-lol-drafts',
+          'teamcomp-lol-player-pools',
+          'teamcomp-lol-custom-pools',
+          'teamcomp-lol-draft-theory',
+          'teamcomp-lol-custom-templates',
+        ];
+        storeKeys.forEach((key) => localStorage.removeItem(key));
+
         set({
           user: null,
           session: null,
@@ -245,6 +238,9 @@ export const useAuthStore = create<AuthState>()(
           isLoading: false,
           error: null,
         });
+
+        // Reload to reset all Zustand stores to initial state
+        window.location.reload();
       },
 
       refreshProfile: async () => {
@@ -282,16 +278,171 @@ export const useAuthStore = create<AuthState>()(
       clearError: () => {
         set({ error: null });
       },
-    }),
-    {
-      name: 'teamcomp-lol-auth',
-      partialize: (state) => ({
-        // Only persist minimal auth state - session is managed by Supabase
-        // We just need to know if we should attempt to restore
-      }),
-    }
-  )
-);
+
+      updateDisplayName: async (displayName: string) => {
+        const { user } = get();
+        if (!user || !supabase) {
+          return { error: 'Not authenticated' };
+        }
+
+        const trimmedName = displayName.trim();
+        if (!trimmedName) {
+          return { error: 'Display name cannot be empty' };
+        }
+
+        const client = supabase;
+
+        // Check if display name is taken by another user
+        const { data: existing } = await client
+          .from('profiles')
+          .select('id')
+          .eq('display_name', trimmedName)
+          .neq('id', user.id)
+          .single();
+
+        if (existing) {
+          return { error: 'Username is already taken' };
+        }
+
+        // Update the display name
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error } = await (client as any)
+          .from('profiles')
+          .update({ display_name: trimmedName })
+          .eq('id', user.id);
+
+        if (error) {
+          return { error: error.message };
+        }
+
+        // Refresh the profile to get updated data
+        await get().refreshProfile();
+
+        return { error: null };
+      },
+
+      updateAvatar: async (file: File) => {
+        const { user } = get();
+        if (!user || !supabase) {
+          return { error: 'Not authenticated' };
+        }
+
+        // Validate file type
+        if (!file.type.startsWith('image/')) {
+          return { error: 'File must be an image' };
+        }
+
+        // Validate file size (max 2MB)
+        if (file.size > 2 * 1024 * 1024) {
+          return { error: 'Image must be less than 2MB' };
+        }
+
+        const client = supabase;
+        const fileExt = file.name.split('.').pop();
+        const filePath = `${user.id}/avatar.${fileExt}`;
+
+        // Upload to Supabase Storage
+        const { error: uploadError } = await client.storage
+          .from('avatars')
+          .upload(filePath, file, { upsert: true });
+
+        if (uploadError) {
+          return { error: uploadError.message };
+        }
+
+        // Get public URL
+        const { data: { publicUrl } } = client.storage
+          .from('avatars')
+          .getPublicUrl(filePath);
+
+        // Update profile with new avatar URL (add cache buster)
+        const avatarUrl = `${publicUrl}?t=${Date.now()}`;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error: updateError } = await (client as any)
+          .from('profiles')
+          .update({ avatar_url: avatarUrl })
+          .eq('id', user.id);
+
+        if (updateError) {
+          return { error: updateError.message };
+        }
+
+        // Refresh the profile to get updated data
+        await get().refreshProfile();
+
+        return { error: null };
+      },
+
+      removeAvatar: async () => {
+        const { user } = get();
+        if (!user || !supabase) {
+          return { error: 'Not authenticated' };
+        }
+
+        const client = supabase;
+
+        // List and delete all avatar files for this user
+        const { data: files } = await client.storage
+          .from('avatars')
+          .list(user.id);
+
+        if (files && files.length > 0) {
+          const filePaths = files.map(f => `${user.id}/${f.name}`);
+          await client.storage.from('avatars').remove(filePaths);
+        }
+
+        // Update profile to remove avatar URL
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error: updateError } = await (client as any)
+          .from('profiles')
+          .update({ avatar_url: null })
+          .eq('id', user.id);
+
+        if (updateError) {
+          return { error: updateError.message };
+        }
+
+        // Refresh the profile to get updated data
+        await get().refreshProfile();
+
+        return { error: null };
+      },
+
+      deleteAccount: async () => {
+        const { user } = get();
+        if (!user || !supabase) {
+          return { error: 'Not authenticated' };
+        }
+
+        const client = supabase;
+
+        // Call the delete-account Edge Function using Supabase client
+        const { data, error: invokeError } = await client.functions.invoke('delete-account', {
+          method: 'POST',
+        });
+
+        if (invokeError) {
+          return { error: invokeError.message || 'Failed to delete account' };
+        }
+
+        if (data?.error) {
+          return { error: data.error };
+        }
+
+        // Sign out after successful deletion
+        await client.auth.signOut();
+
+        set({
+          user: null,
+          session: null,
+          profile: null,
+          isLoading: false,
+          error: null,
+        });
+
+        return { error: null };
+      },
+    }));
 
 // Helper hook for checking team limits
 export const useTeamLimit = () => {

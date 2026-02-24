@@ -10,12 +10,12 @@ import {
   DragEndEvent,
 } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
-import { useMyTeamStore, MAX_TEAMS } from '../stores/useMyTeamStore';
+import { useMyTeamStore, MAX_TEAMS, MAX_SUBS } from '../stores/useMyTeamStore';
 import { useRankStore } from '../stores/useRankStore';
 import { useMasteryStore } from '../stores/useMasteryStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import { parseOpggMultiSearchUrl, Player, Role, ROLES } from '../types';
-import { Card, Input, Button, Modal } from '../components/ui';
+import { Card, ConfirmationModal, Input, Button, Modal } from '../components/ui';
 import { RoleSlot, SubSlot, TeamMembersPanel } from '../components/team';
 import { useOpgg } from '../hooks/useOpgg';
 import { useDroppable } from '@dnd-kit/core';
@@ -103,6 +103,8 @@ export default function MyTeamPage() {
   const [editingName, setEditingName] = useState(team?.name || '');
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [isOwner, setIsOwner] = useState(false);
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [teamToDelete, setTeamToDelete] = useState<string | null>(null);
 
   const { user } = useAuthStore();
 
@@ -153,9 +155,11 @@ export default function MyTeamPage() {
   );
 
   const handleReset = () => {
-    if (confirm('Are you sure you want to reset this team? This will clear all player data.')) {
-      resetTeam();
-    }
+    setIsResetModalOpen(true);
+  };
+
+  const confirmReset = () => {
+    resetTeam();
   };
 
   const handleRefreshRanks = async () => {
@@ -169,8 +173,13 @@ export default function MyTeamPage() {
 
   const handleDeleteTeam = (teamId: string) => {
     if (teams.length <= 1) return;
-    if (confirm('Are you sure you want to delete this team?')) {
-      deleteTeam(teamId);
+    setTeamToDelete(teamId);
+  };
+
+  const confirmDeleteTeam = () => {
+    if (teamToDelete) {
+      deleteTeam(teamToDelete);
+      setTeamToDelete(null);
     }
   };
 
@@ -395,8 +404,8 @@ export default function MyTeamPage() {
         {/* Subs */}
         <Card variant="bordered" padding="lg">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">Substitutes</h2>
-            <Button variant="ghost" size="sm" onClick={addSub}>
+            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">Substitutes ({subs.length}/{MAX_SUBS})</h2>
+            <Button variant="ghost" size="sm" onClick={addSub} disabled={subs.length >= MAX_SUBS}>
               + Add Sub
             </Button>
           </div>
@@ -507,6 +516,27 @@ export default function MyTeamPage() {
             </div>
           </div>
         </Modal>
+
+        {/* Reset confirmation modal */}
+        <ConfirmationModal
+          isOpen={isResetModalOpen}
+          onClose={() => setIsResetModalOpen(false)}
+          onConfirm={confirmReset}
+          title="Reset Team"
+          message="Are you sure you want to reset this team? This will clear all player data."
+          confirmText="Reset"
+          variant="warning"
+        />
+
+        {/* Delete confirmation modal */}
+        <ConfirmationModal
+          isOpen={!!teamToDelete}
+          onClose={() => setTeamToDelete(null)}
+          onConfirm={confirmDeleteTeam}
+          title="Delete Team"
+          message="Are you sure you want to delete this team?"
+          confirmText="Delete"
+        />
 
         {/* Drag Overlay */}
         <DragOverlay>

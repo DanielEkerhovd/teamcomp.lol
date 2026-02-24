@@ -36,13 +36,18 @@ export const shareService = {
     if (!user.user) throw new Error('Must be authenticated to create share');
 
     // Use type assertion since draft_shares is a new table
+    // Only include expires_at if explicitly provided, otherwise use DB default (30 days)
+    const insertData: Record<string, unknown> = {
+      draft_session_id: draftSessionId,
+      created_by: user.user.id,
+    };
+    if (expiresAt) {
+      insertData.expires_at = expiresAt.toISOString();
+    }
+
     const { data, error } = await (supabase
       .from('draft_shares' as 'profiles') // Type hack for new table
-      .insert({
-        draft_session_id: draftSessionId,
-        created_by: user.user.id,
-        expires_at: expiresAt?.toISOString() || null,
-      } as never)
+      .insert(insertData as never)
       .select()
       .single() as unknown as Promise<{ data: DbDraftShare | null; error: Error | null }>);
 

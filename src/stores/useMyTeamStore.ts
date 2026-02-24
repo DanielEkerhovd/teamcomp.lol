@@ -11,6 +11,9 @@ import { usePlayerPoolStore } from './usePlayerPoolStore';
 export const MAX_TEAMS_GUEST = 3;
 export const MAX_TEAMS = MAX_TEAMS_GUEST;
 
+// Maximum number of subs per team
+export const MAX_SUBS = 5;
+
 // Get the maximum teams allowed based on auth state
 export const getMaxTeams = (): number => {
   const { user, profile } = useAuthStore.getState();
@@ -157,6 +160,10 @@ export const useMyTeamStore = create<MyTeamState>()(
 
       addSub: () => {
         set((state) => {
+          const selectedTeam = state.teams.find((t) => t.id === state.selectedTeamId);
+          const currentSubs = selectedTeam?.players.filter((p) => p.isSub).length || 0;
+          if (currentSubs >= MAX_SUBS) return state;
+
           const defaultRegion = useSettingsStore.getState().defaultRegion;
           return updateSelectedTeam(state, (t) => ({
             ...t,

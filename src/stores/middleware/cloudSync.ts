@@ -34,7 +34,7 @@ export interface CloudSyncOptions<T, D = any> {
   /** Supabase table name to sync to */
   tableName: string;
 
-  /** Debounce time in ms before syncing (default: 1000) */
+  /** Debounce time in ms before syncing (default: 3000) */
   debounceMs?: number;
 
   /** Select which part of state to sync (default: entire state) */
@@ -78,7 +78,7 @@ const cloudSyncImpl: CloudSyncImpl = (f, options) => (set, get, store) => {
   const {
     storeKey,
     tableName,
-    debounceMs = 1000,
+    debounceMs = 3000,
     selectSyncData,
     transformForCloud,
     isArraySync = false,

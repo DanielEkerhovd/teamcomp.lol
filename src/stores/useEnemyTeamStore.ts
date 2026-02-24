@@ -5,6 +5,9 @@ import { useSettingsStore } from './useSettingsStore';
 import { cloudSync } from './middleware/cloudSync';
 import { syncManager } from '../lib/syncManager';
 
+// Maximum number of subs per team
+export const MAX_SUBS = 5;
+
 interface EnemyTeamState {
   teams: Team[];
   addTeam: (name: string) => Team;
@@ -187,6 +190,9 @@ export const useEnemyTeamStore = create<EnemyTeamState>()(
         set((state) => ({
           teams: state.teams.map((team) => {
             if (team.id !== teamId) return team;
+            const currentSubs = team.players.filter((p) => p.isSub).length;
+            if (currentSubs >= MAX_SUBS) return team;
+
             const defaultRegion = useSettingsStore.getState().defaultRegion;
             return {
               ...team,
@@ -627,6 +633,7 @@ export const useEnemyTeamStore = create<EnemyTeamState>()(
           user_id: userId,
           name: team.name,
           notes: team.notes,
+          is_favorite: team.isFavorite ?? false,
         }),
         // Sync players to the enemy_players table after team sync
         onAfterSync: (teams: Team[], storeKey: string, debounceMs: number) => {

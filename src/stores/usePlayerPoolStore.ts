@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { PlayerPool, Role, ChampionGroup, generateId } from '../types';
+import { cloudSync } from './middleware/cloudSync';
 
 // Normalize name for consistent lookups (case-insensitive, trimmed)
 const normalizeName = (name: string) => name.toLowerCase().trim();
@@ -32,10 +33,11 @@ const updatePool = (
 
 export const usePlayerPoolStore = create<PlayerPoolState>()(
   persist(
-    (set, get) => ({
-      pools: [],
+    cloudSync(
+      (set, get) => ({
+        pools: [],
 
-      findPool: (summonerName, role) => {
+        findPool: (summonerName, role) => {
         const normalized = normalizeName(summonerName);
         return (
           get().pools.find(
@@ -179,6 +181,22 @@ export const usePlayerPoolStore = create<PlayerPoolState>()(
         }));
       },
     }),
+      {
+        storeKey: 'player-pools',
+        tableName: 'player_pools',
+        isArraySync: true,
+        selectSyncData: (state) => state.pools,
+        transformItem: (pool: PlayerPool, userId: string) => ({
+          id: pool.id,
+          user_id: userId,
+          summoner_name: pool.summonerName,
+          tag_line: pool.tagLine || '',
+          role: pool.role,
+          champion_groups: pool.championGroups,
+          allow_duplicate_champions: pool.allowDuplicateChampions ?? false,
+        }),
+      }
+    ),
     {
       name: 'teamcomp-lol-player-pools',
       version: 2,
