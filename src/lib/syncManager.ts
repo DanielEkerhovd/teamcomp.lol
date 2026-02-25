@@ -9,12 +9,24 @@ interface SyncState {
   error: string | null;
 }
 
+// Pending sync data - stored so we can flush on page unload
+interface PendingSync {
+  type: 'single' | 'array' | 'players';
+  storeKey: string;
+  tableName: string;
+  data: unknown;
+  options: unknown;
+}
+
 // Global sync state
 const syncStates: Map<string, SyncState> = new Map();
 const syncListeners: Map<string, Set<(state: SyncState) => void>> = new Map();
 
 // Debounce timers
 const debounceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+
+// Pending syncs - keyed by storeKey, stores the data to sync
+const pendingSyncs: Map<string, PendingSync> = new Map();
 
 function notifyListeners(storeKey: string, state: SyncState) {
   const listeners = syncListeners.get(storeKey);
@@ -80,6 +92,15 @@ export const syncManager = {
   ): Promise<void> {
     const { debounceMs = 3000, transform, upsertKey = 'user_id' } = options;
 
+    // Store pending sync data for potential flush on page unload
+    pendingSyncs.set(storeKey, {
+      type: 'single',
+      storeKey,
+      tableName,
+      data,
+      options: { transform, upsertKey },
+    });
+
     // Clear existing timer
     const existingTimer = debounceTimers.get(storeKey);
     if (existingTimer) {
@@ -88,37 +109,56 @@ export const syncManager = {
 
     // Set new debounced sync
     const timer = setTimeout(async () => {
-      if (!this.isAvailable() || !supabase) {
-        return;
-      }
-
-      const { user } = useAuthStore.getState();
-      if (!user) return;
-
-      updateSyncState(storeKey, { status: 'syncing', error: null });
-
-      try {
-        const cloudData = transform ? transform(data, user.id) : { ...data, user_id: user.id };
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { error } = await (supabase.from(tableName) as any)
-          .upsert(cloudData as Record<string, unknown>, { onConflict: upsertKey });
-
-        if (error) {
-          throw error;
-        }
-
-        updateSyncState(storeKey, { status: 'synced', lastSyncedAt: Date.now(), error: null });
-      } catch (error) {
-        console.error(`Sync error for ${storeKey}:`, error);
-        updateSyncState(storeKey, {
-          status: 'error',
-          error: error instanceof Error ? error.message : 'Unknown sync error',
-        });
-      }
+      await this._executeSingleSync(storeKey, tableName, data, { transform, upsertKey });
     }, debounceMs);
 
     debounceTimers.set(storeKey, timer);
+  },
+
+  /**
+   * Internal: Execute a single object sync immediately
+   */
+  async _executeSingleSync<T>(
+    storeKey: string,
+    tableName: string,
+    data: T,
+    options: {
+      transform?: (data: T, userId: string) => unknown;
+      upsertKey?: string;
+    }
+  ): Promise<void> {
+    const { transform, upsertKey = 'user_id' } = options;
+
+    if (!this.isAvailable() || !supabase) {
+      return;
+    }
+
+    const { user } = useAuthStore.getState();
+    if (!user) return;
+
+    updateSyncState(storeKey, { status: 'syncing', error: null });
+
+    try {
+      const cloudData = transform ? transform(data, user.id) : { ...data, user_id: user.id };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase.from(tableName) as any)
+        .upsert(cloudData as Record<string, unknown>, { onConflict: upsertKey });
+
+      if (error) {
+        throw error;
+      }
+
+      // Clear from pending syncs on success
+      pendingSyncs.delete(storeKey);
+      updateSyncState(storeKey, { status: 'synced', lastSyncedAt: Date.now(), error: null });
+    } catch (error) {
+      console.error(`Sync error for ${storeKey}:`, error);
+      updateSyncState(storeKey, {
+        status: 'error',
+        error: error instanceof Error ? error.message : 'Unknown sync error',
+      });
+    }
   },
 
   /**
@@ -136,41 +176,71 @@ export const syncManager = {
   ): Promise<void> {
     const { debounceMs = 3000, transformItem, deleteOrphans = true } = options;
 
+    // Store pending sync data for potential flush on page unload
+    pendingSyncs.set(storeKey, {
+      type: 'array',
+      storeKey,
+      tableName,
+      data: items,
+      options: { transformItem, deleteOrphans },
+    });
+
     const existingTimer = debounceTimers.get(storeKey);
     if (existingTimer) {
       clearTimeout(existingTimer);
     }
 
     const timer = setTimeout(async () => {
-      if (!this.isAvailable() || !supabase) {
-        return;
+      await this._executeArraySync(storeKey, tableName, items, { transformItem, deleteOrphans });
+    }, debounceMs);
+
+    debounceTimers.set(storeKey, timer);
+  },
+
+  /**
+   * Internal: Execute an array sync immediately
+   */
+  async _executeArraySync<T extends { id: string }>(
+    storeKey: string,
+    tableName: string,
+    items: T[],
+    options: {
+      transformItem?: (item: T, userId: string, index: number) => unknown;
+      deleteOrphans?: boolean;
+    }
+  ): Promise<void> {
+    const { transformItem, deleteOrphans = true } = options;
+
+    if (!this.isAvailable() || !supabase) {
+      return;
+    }
+
+    const { user } = useAuthStore.getState();
+    if (!user) return;
+
+    updateSyncState(storeKey, { status: 'syncing', error: null });
+
+    try {
+      // Transform items
+      const cloudItems = items.map((item, index) =>
+        transformItem
+          ? transformItem(item, user.id, index)
+          : { ...item, user_id: user.id, sort_order: index }
+      );
+
+      // Upsert all items with explicit onConflict
+      if (cloudItems.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error: upsertError } = await (supabase.from(tableName) as any)
+          .upsert(cloudItems as Record<string, unknown>[], { onConflict: 'id' });
+
+        if (upsertError) throw upsertError;
       }
 
-      const { user } = useAuthStore.getState();
-      if (!user) return;
-
-      updateSyncState(storeKey, { status: 'syncing', error: null });
-
-      try {
-        // Transform items
-        const cloudItems = items.map((item, index) =>
-          transformItem
-            ? transformItem(item, user.id, index)
-            : { ...item, user_id: user.id, sort_order: index }
-        );
-
-        // Upsert all items
-        if (cloudItems.length > 0) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const { error: upsertError } = await (supabase.from(tableName) as any)
-            .upsert(cloudItems as Record<string, unknown>[]);
-
-          if (upsertError) throw upsertError;
-        }
-
-        // Delete orphans (items in cloud but not in local)
-        if (deleteOrphans) {
-          const localIds = items.map((item) => item.id);
+      // Delete orphans (items in cloud but not in local)
+      if (deleteOrphans) {
+        const localIds = items.map((item) => item.id);
+        if (localIds.length > 0) {
           const { error: deleteError } = await supabase
             .from(tableName)
             .delete()
@@ -181,18 +251,18 @@ export const syncManager = {
             console.warn(`Delete orphans warning for ${storeKey}:`, deleteError);
           }
         }
-
-        updateSyncState(storeKey, { status: 'synced', lastSyncedAt: Date.now(), error: null });
-      } catch (error) {
-        console.error(`Sync error for ${storeKey}:`, error);
-        updateSyncState(storeKey, {
-          status: 'error',
-          error: error instanceof Error ? error.message : 'Unknown sync error',
-        });
       }
-    }, debounceMs);
 
-    debounceTimers.set(storeKey, timer);
+      // Clear from pending syncs on success
+      pendingSyncs.delete(storeKey);
+      updateSyncState(storeKey, { status: 'synced', lastSyncedAt: Date.now(), error: null });
+    } catch (error) {
+      console.error(`Sync error for ${storeKey}:`, error);
+      updateSyncState(storeKey, {
+        status: 'error',
+        error: error instanceof Error ? error.message : 'Unknown sync error',
+      });
+    }
   },
 
   /**
@@ -237,12 +307,67 @@ export const syncManager = {
    * Force immediate sync (bypasses debounce)
    */
   async forceSync(storeKey: string): Promise<void> {
+    // Clear the debounce timer
     const timer = debounceTimers.get(storeKey);
     if (timer) {
       clearTimeout(timer);
       debounceTimers.delete(storeKey);
     }
-    // The actual sync logic would need to be triggered from the store
+
+    // Execute pending sync if there is one
+    const pending = pendingSyncs.get(storeKey);
+    if (!pending) return;
+
+    if (pending.type === 'single') {
+      const opts = pending.options as { transform?: (data: unknown, userId: string) => unknown; upsertKey?: string };
+      await this._executeSingleSync(pending.storeKey, pending.tableName, pending.data, opts);
+    } else if (pending.type === 'array') {
+      const opts = pending.options as { transformItem?: (item: { id: string }, userId: string, index: number) => unknown; deleteOrphans?: boolean };
+      await this._executeArraySync(pending.storeKey, pending.tableName, pending.data as { id: string }[], opts);
+    } else if (pending.type === 'players') {
+      const opts = pending.options as { teamId: string };
+      await this._executePlayersSync(pending.storeKey, pending.tableName as 'players' | 'enemy_players', opts.teamId, pending.data as Parameters<typeof this.syncPlayersToCloud>[3]);
+    }
+  },
+
+  /**
+   * Flush all pending syncs immediately (called on page unload)
+   * Uses navigator.sendBeacon for reliability during page unload
+   */
+  async flushPendingSyncs(): Promise<void> {
+    if (!this.isAvailable() || !supabase) return;
+
+    const promises: Promise<void>[] = [];
+
+    // Clear all debounce timers
+    for (const [key, timer] of debounceTimers) {
+      clearTimeout(timer);
+      debounceTimers.delete(key);
+    }
+
+    // Execute all pending syncs
+    for (const [storeKey, pending] of pendingSyncs) {
+      if (pending.type === 'single') {
+        const opts = pending.options as { transform?: (data: unknown, userId: string) => unknown; upsertKey?: string };
+        promises.push(this._executeSingleSync(storeKey, pending.tableName, pending.data, opts));
+      } else if (pending.type === 'array') {
+        const opts = pending.options as { transformItem?: (item: { id: string }, userId: string, index: number) => unknown; deleteOrphans?: boolean };
+        promises.push(this._executeArraySync(storeKey, pending.tableName, pending.data as { id: string }[], opts));
+      } else if (pending.type === 'players') {
+        const opts = pending.options as { teamId: string };
+        promises.push(this._executePlayersSync(storeKey, pending.tableName as 'players' | 'enemy_players', opts.teamId, pending.data as Parameters<typeof this.syncPlayersToCloud>[3]));
+      }
+    }
+
+    // Wait for all syncs to complete
+    await Promise.allSettled(promises);
+  },
+
+  /**
+   * Check if there are any pending syncs
+   */
+  hasPendingSyncs(): boolean {
+    return pendingSyncs.size > 0;
   },
 
   /**
@@ -319,8 +444,6 @@ export const syncManager = {
           my_team_id: session.myTeamId || null,
           ban_groups: session.banGroups || [],
           priority_groups: session.priorityGroups || [],
-          priority_picks: (session.priorityGroups || []).flatMap((g: { championIds: string[] }) => g.championIds),
-          potential_bans: (session.banGroups || []).flatMap((g: { championIds: string[] }) => g.championIds),
           notes: session.notes,
           notepad: session.notepad || [],
           sort_order: index,
@@ -510,7 +633,6 @@ export const syncManager = {
           notes: player.notes || '',
           region: player.region || 'euw',
           is_sub: player.isSub || false,
-          champion_pool: championPool,
           champion_groups: championGroups,
           sort_order: index,
         };
@@ -593,13 +715,35 @@ export const syncManager = {
           selectedTeamId: teamsWithPlayers[0]?.id || '',
         });
       } else {
-        // No cloud data - create a fresh default team
-        const { createEmptyTeam } = await import('../types');
-        const defaultTeam = createEmptyTeam('My Team');
-        useMyTeamStore.setState({
-          teams: [defaultTeam],
-          selectedTeamId: defaultTeam.id,
-        });
+        // No cloud data - check if we have local data to preserve
+        const localTeams = useMyTeamStore.getState().teams;
+        if (localTeams.length === 0) {
+          // No local data either - create a fresh default team
+          const { createEmptyTeam } = await import('../types');
+          const defaultTeam = createEmptyTeam('My Team');
+          useMyTeamStore.setState({
+            teams: [defaultTeam],
+            selectedTeamId: defaultTeam.id,
+          });
+        } else {
+          // Preserve local data and immediately sync to cloud
+          console.log('Cloud teams empty but local has data, syncing local to cloud');
+          // Trigger immediate sync of local data to cloud
+          await this.syncArrayToCloudImmediate('my-teams', 'my_teams', localTeams, {
+            transformItem: (team, oduserId, index) => ({
+              id: team.id,
+              user_id: oduserId,
+              name: team.name,
+              notes: team.notes,
+              champion_pool: team.championPool || [],
+              sort_order: index,
+            }),
+          });
+          // Also sync players for each team
+          for (const team of localTeams) {
+            await this.syncPlayersToCloudImmediate('players', team.id, team.players);
+          }
+        }
       }
 
       // Load enemy teams with players
@@ -646,7 +790,28 @@ export const syncManager = {
 
         useEnemyTeamStore.setState({ teams: teamsWithPlayers });
       } else {
-        useEnemyTeamStore.setState({ teams: [] });
+        // Cloud is empty - check if we have local data to preserve
+        const localTeams = useEnemyTeamStore.getState().teams;
+        if (localTeams.length === 0) {
+          useEnemyTeamStore.setState({ teams: [] });
+        } else {
+          // Preserve local data and immediately sync to cloud
+          console.log('Cloud enemy teams empty but local has data, syncing local to cloud');
+          await this.syncArrayToCloudImmediate('enemy-teams', 'enemy_teams', localTeams, {
+            transformItem: (team, oduserId, index) => ({
+              id: team.id,
+              user_id: oduserId,
+              name: team.name,
+              notes: team.notes,
+              is_favorite: team.isFavorite ?? false,
+              sort_order: index,
+            }),
+          });
+          // Also sync players for each enemy team
+          for (const team of localTeams) {
+            await this.syncPlayersToCloudImmediate('enemy_players', team.id, team.players);
+          }
+        }
       }
 
       // Load draft sessions
@@ -677,7 +842,28 @@ export const syncManager = {
           currentSessionId: null,
         });
       } else {
-        useDraftStore.setState({ sessions: [], currentSessionId: null });
+        // Cloud is empty - check if we have local data to preserve
+        const localSessions = useDraftStore.getState().sessions;
+        if (localSessions.length === 0) {
+          useDraftStore.setState({ sessions: [], currentSessionId: null });
+        } else {
+          // Preserve local data and immediately sync to cloud
+          console.log('Cloud draft sessions empty but local has data, syncing local to cloud');
+          await this.syncArrayToCloudImmediate('draft-sessions', 'draft_sessions', localSessions, {
+            transformItem: (session, oduserId, index) => ({
+              id: session.id,
+              user_id: oduserId,
+              name: session.name,
+              enemy_team_id: session.enemyTeamId || null,
+              my_team_id: session.myTeamId || null,
+              ban_groups: session.banGroups || [],
+              priority_groups: session.priorityGroups || [],
+              notes: session.notes,
+              notepad: session.notepad || [],
+              sort_order: index,
+            }),
+          });
+        }
       }
 
       // Load player pools (if table exists)
@@ -702,11 +888,33 @@ export const syncManager = {
 
           usePlayerPoolStore.setState({ pools: transformedPools });
         } else {
-          usePlayerPoolStore.setState({ pools: [] });
+          // Cloud is empty - check if we have local data to preserve
+          const localPools = usePlayerPoolStore.getState().pools;
+          if (localPools.length > 0) {
+            // Preserve local data and immediately sync to cloud
+            console.log('Cloud pools empty but local has data, syncing local to cloud');
+            await this.syncArrayToCloudImmediate('player-pools', 'player_pools', localPools, {
+              transformItem: (pool, oduserId) => ({
+                id: pool.id,
+                user_id: oduserId,
+                summoner_name: pool.summonerName,
+                tag_line: pool.tagLine || '',
+                role: pool.role,
+                champion_groups: pool.championGroups || [],
+                allow_duplicate_champions: pool.allowDuplicateChampions || false,
+              }),
+            });
+          } else {
+            usePlayerPoolStore.setState({ pools: [] });
+          }
         }
       } catch {
-        // Player pools table might not exist, that's OK
-        usePlayerPoolStore.setState({ pools: [] });
+        // Player pools table might not exist - preserve local data
+        const localPools = usePlayerPoolStore.getState().pools;
+        if (localPools.length === 0) {
+          usePlayerPoolStore.setState({ pools: [] });
+        }
+        // If local has data, preserve it
       }
 
       // Load custom pools
@@ -732,10 +940,27 @@ export const syncManager = {
 
           useCustomPoolStore.setState({ pools: transformedPools, selectedPoolId: null });
         } else {
-          useCustomPoolStore.setState({ pools: [], selectedPoolId: null });
+          // Cloud is empty - check if we have local data to preserve
+          const localPools = useCustomPoolStore.getState().pools;
+          if (localPools.length === 0) {
+            useCustomPoolStore.setState({ pools: [], selectedPoolId: null });
+          } else {
+            // Preserve local data and immediately sync to cloud
+            console.log('Cloud custom pools empty but local has data, syncing local to cloud');
+            await this.syncArrayToCloudImmediate('custom-pools', 'custom_pools', localPools, {
+              transformItem: (pool, oduserId, index) => ({
+                id: pool.id,
+                user_id: oduserId,
+                name: pool.name,
+                champion_groups: pool.championGroups || [],
+                allow_duplicate_champions: pool.allowDuplicateChampions || false,
+                sort_order: index,
+              }),
+            });
+          }
         }
       } catch {
-        // Custom pools table might not exist, that's OK
+        // Custom pools table might not exist - preserve local data
       }
 
       // Load custom templates
@@ -759,7 +984,24 @@ export const syncManager = {
 
           useCustomTemplatesStore.setState({ templates: transformedTemplates });
         } else {
-          useCustomTemplatesStore.setState({ templates: [] });
+          // Cloud is empty - check if we have local data to preserve
+          const localTemplates = useCustomTemplatesStore.getState().templates;
+          if (localTemplates.length === 0) {
+            useCustomTemplatesStore.setState({ templates: [] });
+          } else {
+            // Preserve local data and immediately sync to cloud
+            console.log('Cloud custom templates empty but local has data, syncing local to cloud');
+            await this.syncArrayToCloudImmediate('custom-templates', 'custom_templates', localTemplates, {
+              transformItem: (template, oduserId, index) => ({
+                id: template.id,
+                user_id: oduserId,
+                name: template.name,
+                groups: template.groups || [],
+                allow_duplicates: template.allowDuplicates || false,
+                sort_order: index,
+              }),
+            });
+          }
         }
       } catch {
         // Custom templates table might not exist, that's OK
@@ -983,100 +1225,159 @@ export const syncManager = {
     const { debounceMs = 3000 } = options;
     const fullKey = `${storeKey}:players:${teamId}`;
 
+    // Store pending sync data for potential flush on page unload
+    pendingSyncs.set(fullKey, {
+      type: 'players',
+      storeKey: fullKey,
+      tableName,
+      data: players,
+      options: { teamId },
+    });
+
     const existingTimer = debounceTimers.get(fullKey);
     if (existingTimer) {
       clearTimeout(existingTimer);
     }
 
     const timer = setTimeout(async () => {
-      if (!this.isAvailable() || !supabase) {
-        return;
-      }
-
-      // Valid roles that match database constraint
-      const validRoles = ['top', 'jungle', 'mid', 'adc', 'support'];
-
-      try {
-        // Filter out empty players (no summoner name) - they shouldn't be synced to cloud
-        const nonEmptyPlayers = players.filter(p => p.summonerName.trim() !== '');
-
-        // Transform players for the database
-        const cloudPlayers = nonEmptyPlayers.map((player, index) => {
-          // Get champion groups - if empty but old championPool has data, convert it
-          let championGroups = player.championGroups || [];
-          const championPool = player.championPool || [];
-
-          // Convert old tiered championPool to groups format if needed
-          if ((!championGroups || (championGroups as unknown[]).length === 0) &&
-              Array.isArray(championPool) && championPool.length > 0) {
-            // championPool is array of { championId, tier } or just strings
-            const championIds = championPool.map((item: unknown) => {
-              if (typeof item === 'string') return item;
-              if (item && typeof item === 'object' && 'championId' in item) {
-                return (item as { championId: string }).championId;
-              }
-              return null;
-            }).filter((id): id is string => id !== null);
-
-            if (championIds.length > 0) {
-              championGroups = [{ id: `pool-${player.id}`, name: 'Pool', championIds }];
-            }
-          }
-
-          return {
-            id: player.id,
-            team_id: teamId,
-            summoner_name: player.summonerName,
-            tag_line: player.tagLine || '',
-            // Ensure role is valid, default to 'mid' if not
-            role: validRoles.includes(player.role) ? player.role : 'mid',
-            notes: player.notes || '',
-            region: player.region || 'euw',
-            is_sub: player.isSub || false,
-            champion_pool: championPool,
-            champion_groups: championGroups,
-            sort_order: index,
-          };
-        });
-
-        // Upsert all players
-        if (cloudPlayers.length > 0) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const { error: upsertError } = await (supabase.from(tableName) as any)
-            .upsert(cloudPlayers as Record<string, unknown>[]);
-
-          if (upsertError) throw upsertError;
-        }
-
-        // Delete orphan players and empty players from cloud
-        // Only keep non-empty player IDs - this ensures empty players get deleted from cloud
-        const localIds = nonEmptyPlayers.map((p) => p.id);
-        if (localIds.length > 0) {
-          const { error: deleteError } = await supabase
-            .from(tableName)
-            .delete()
-            .eq('team_id', teamId)
-            .not('id', 'in', `(${localIds.join(',')})`);
-
-          if (deleteError && !deleteError.message.includes('no rows')) {
-            console.warn(`Delete orphan players warning for ${fullKey}:`, deleteError);
-          }
-        } else {
-          // If all players are empty, delete all players for this team from cloud
-          const { error: deleteError } = await supabase
-            .from(tableName)
-            .delete()
-            .eq('team_id', teamId);
-
-          if (deleteError && !deleteError.message.includes('no rows')) {
-            console.warn(`Delete all players warning for ${fullKey}:`, deleteError);
-          }
-        }
-      } catch (error) {
-        console.error(`Player sync error for ${fullKey}:`, error);
-      }
+      await this._executePlayersSync(fullKey, tableName, teamId, players);
     }, debounceMs);
 
     debounceTimers.set(fullKey, timer);
   },
+
+  /**
+   * Internal: Execute a players sync immediately
+   */
+  async _executePlayersSync(
+    fullKey: string,
+    tableName: 'players' | 'enemy_players',
+    teamId: string,
+    players: Array<{
+      id: string;
+      summonerName: string;
+      tagLine?: string;
+      role: string;
+      notes?: string;
+      region?: string;
+      isSub?: boolean;
+      championPool?: unknown;
+      championGroups?: unknown;
+    }>
+  ): Promise<void> {
+    if (!this.isAvailable() || !supabase) {
+      return;
+    }
+
+    // Valid roles that match database constraint
+    const validRoles = ['top', 'jungle', 'mid', 'adc', 'support'];
+
+    try {
+      // Filter out empty players (no summoner name) - they shouldn't be synced to cloud
+      const nonEmptyPlayers = players.filter(p => p.summonerName.trim() !== '');
+
+      // Transform players for the database
+      const cloudPlayers = nonEmptyPlayers.map((player, index) => {
+        // Get champion groups - if empty but old championPool has data, convert it
+        let championGroups = player.championGroups || [];
+        const championPool = player.championPool || [];
+
+        // Convert old tiered championPool to groups format if needed
+        if ((!championGroups || (championGroups as unknown[]).length === 0) &&
+            Array.isArray(championPool) && championPool.length > 0) {
+          // championPool is array of { championId, tier } or just strings
+          const championIds = championPool.map((item: unknown) => {
+            if (typeof item === 'string') return item;
+            if (item && typeof item === 'object' && 'championId' in item) {
+              return (item as { championId: string }).championId;
+            }
+            return null;
+          }).filter((id): id is string => id !== null);
+
+          if (championIds.length > 0) {
+            championGroups = [{ id: `pool-${player.id}`, name: 'Pool', championIds }];
+          }
+        }
+
+        return {
+          id: player.id,
+          team_id: teamId,
+          summoner_name: player.summonerName,
+          tag_line: player.tagLine || '',
+          // Ensure role is valid, default to 'mid' if not
+          role: validRoles.includes(player.role) ? player.role : 'mid',
+          notes: player.notes || '',
+          region: player.region || 'euw',
+          is_sub: player.isSub || false,
+          champion_groups: championGroups,
+          sort_order: index,
+        };
+      });
+
+      // Upsert all players with explicit onConflict
+      if (cloudPlayers.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error: upsertError } = await (supabase.from(tableName) as any)
+          .upsert(cloudPlayers as Record<string, unknown>[], { onConflict: 'id' });
+
+        if (upsertError) throw upsertError;
+      }
+
+      // Delete orphan players and empty players from cloud
+      // Only keep non-empty player IDs - this ensures empty players get deleted from cloud
+      const localIds = nonEmptyPlayers.map((p) => p.id);
+      if (localIds.length > 0) {
+        const { error: deleteError } = await supabase
+          .from(tableName)
+          .delete()
+          .eq('team_id', teamId)
+          .not('id', 'in', `(${localIds.join(',')})`);
+
+        if (deleteError && !deleteError.message.includes('no rows')) {
+          console.warn(`Delete orphan players warning for ${fullKey}:`, deleteError);
+        }
+      } else {
+        // If all players are empty, delete all players for this team from cloud
+        const { error: deleteError } = await supabase
+          .from(tableName)
+          .delete()
+          .eq('team_id', teamId);
+
+        if (deleteError && !deleteError.message.includes('no rows')) {
+          console.warn(`Delete all players warning for ${fullKey}:`, deleteError);
+        }
+      }
+
+      // Clear from pending syncs on success
+      pendingSyncs.delete(fullKey);
+    } catch (error) {
+      console.error(`Player sync error for ${fullKey}:`, error);
+    }
+  },
 };
+
+// Set up page unload handlers to flush pending syncs
+if (typeof window !== 'undefined') {
+  // Handle page visibility change (user switches tabs or minimizes)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' && syncManager.hasPendingSyncs()) {
+      // Use sendBeacon-friendly approach - trigger sync immediately
+      syncManager.flushPendingSyncs();
+    }
+  });
+
+  // Handle page unload (user closes tab or navigates away)
+  window.addEventListener('beforeunload', () => {
+    if (syncManager.hasPendingSyncs()) {
+      // Flush pending syncs - this may not complete but we try
+      syncManager.flushPendingSyncs();
+    }
+  });
+
+  // Handle page hide (more reliable on mobile)
+  window.addEventListener('pagehide', () => {
+    if (syncManager.hasPendingSyncs()) {
+      syncManager.flushPendingSyncs();
+    }
+  });
+}

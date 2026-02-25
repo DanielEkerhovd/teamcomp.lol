@@ -3,7 +3,16 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { teamMembershipService } from '../lib/teamMembershipService';
 import { InviteDetails } from '../types/database';
 import { Card, Button } from '../components/ui';
+import Modal from '../components/ui/Modal';
 import { useAuthStore } from '../stores/useAuthStore';
+
+interface FreeTierConflict {
+  existingTeamId: string;
+  existingTeamName: string;
+  inviteTeamId: string;
+  inviteTeamName: string;
+  inviteRole: string;
+}
 
 export default function AcceptInvitePage() {
   const { token } = useParams<{ token: string }>();
@@ -15,6 +24,8 @@ export default function AcceptInvitePage() {
   const [accepting, setAccepting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [freeTierConflict, setFreeTierConflict] = useState<FreeTierConflict | null>(null);
+  const [leavingTeam, setLeavingTeam] = useState(false);
 
   useEffect(() => {
     if (token) {
@@ -50,7 +61,27 @@ export default function AcceptInvitePage() {
     setAccepting(true);
     setError(null);
     try {
-      await teamMembershipService.acceptInvite(token);
+      const result = await teamMembershipService.acceptInvite(token);
+
+      if (result.conflict === 'free_tier_team_limit') {
+        // Show conflict modal
+        setFreeTierConflict({
+          existingTeamId: result.existingTeamId!,
+          existingTeamName: result.existingTeamName!,
+          inviteTeamId: result.inviteTeamId!,
+          inviteTeamName: result.inviteTeamName!,
+          inviteRole: result.inviteRole!,
+        });
+        setAccepting(false);
+        return;
+      }
+
+      if (!result.success) {
+        setError(result.error || 'Failed to accept invite. Please try again.');
+        setAccepting(false);
+        return;
+      }
+
       setSuccess(true);
       // Redirect to team page after a short delay
       setTimeout(() => {
@@ -65,6 +96,45 @@ export default function AcceptInvitePage() {
       console.error(err);
     } finally {
       setAccepting(false);
+    }
+  };
+
+  const handleLeaveAndJoin = async () => {
+    if (!token || !freeTierConflict) return;
+
+    setLeavingTeam(true);
+    setError(null);
+    try {
+      // First leave the existing team
+      const leaveResult = await teamMembershipService.leaveTeam(freeTierConflict.existingTeamId);
+      if (!leaveResult.success) {
+        setError(leaveResult.error || 'Failed to leave existing team.');
+        setLeavingTeam(false);
+        return;
+      }
+
+      // Now try to accept the invite again
+      const acceptResult = await teamMembershipService.acceptInvite(token);
+      if (!acceptResult.success) {
+        setError(acceptResult.error || 'Failed to accept invite after leaving team.');
+        setLeavingTeam(false);
+        return;
+      }
+
+      setFreeTierConflict(null);
+      setSuccess(true);
+      setTimeout(() => {
+        navigate('/my-teams');
+      }, 2000);
+    } catch (err) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('Failed to complete the operation. Please try again.');
+      }
+      console.error(err);
+    } finally {
+      setLeavingTeam(false);
     }
   };
 
@@ -287,6 +357,93 @@ export default function AcceptInvitePage() {
           </Button>
         </div>
       </Card>
+
+      {/* Free Tier Conflict Modal */}
+      <Modal
+        isOpen={!!freeTierConflict}
+        onClose={() => setFreeTierConflict(null)}
+        title="Team Limit Reached"
+        size="md"
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+            <svg className="w-6 h-6 text-yellow-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div>
+              <p className="text-yellow-200 font-medium">Free tier limit</p>
+              <p className="text-yellow-200/80 text-sm mt-1">
+                Free accounts can only be a member of one team at a time. You're currently a member of <span className="font-medium text-white">{freeTierConflict?.existingTeamName}</span>.
+              </p>
+            </div>
+          </div>
+
+          <p className="text-gray-400">
+            To join <span className="text-white font-medium">{freeTierConflict?.inviteTeamName}</span> as <span className="text-white">{freeTierConflict?.inviteRole}</span>, you can:
+          </p>
+
+          <div className="space-y-3">
+            {/* Option 1: Leave and Join */}
+            <button
+              onClick={handleLeaveAndJoin}
+              disabled={leavingTeam}
+              className="w-full flex items-center gap-3 p-4 bg-lol-surface hover:bg-lol-border rounded-lg border border-lol-border transition-colors text-left disabled:opacity-50"
+            >
+              <div className="w-10 h-10 rounded-lg bg-red-500/20 flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <p className="text-white font-medium">
+                  {leavingTeam ? 'Switching teams...' : `Leave ${freeTierConflict?.existingTeamName}`}
+                </p>
+                <p className="text-sm text-gray-500">Leave your current team and join {freeTierConflict?.inviteTeamName}</p>
+              </div>
+              {leavingTeam && (
+                <svg className="animate-spin h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+              )}
+            </button>
+
+            {/* Option 2: Upgrade */}
+            <button
+              onClick={() => {
+                setFreeTierConflict(null);
+                navigate('/upgrade');
+              }}
+              className="w-full flex items-center gap-3 p-4 bg-lol-gold/10 hover:bg-lol-gold/20 rounded-lg border border-lol-gold/30 transition-colors text-left"
+            >
+              <div className="w-10 h-10 rounded-lg bg-lol-gold/20 flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-lol-gold" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <p className="text-lol-gold font-medium">Upgrade to Supporter</p>
+                <p className="text-sm text-gray-500">Join unlimited teams and unlock all features</p>
+              </div>
+            </button>
+          </div>
+
+          {/* Error in modal */}
+          {error && (
+            <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+              {error}
+            </div>
+          )}
+
+          {/* Cancel */}
+          <button
+            onClick={() => setFreeTierConflict(null)}
+            className="w-full py-2 text-gray-500 hover:text-gray-400 text-sm transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

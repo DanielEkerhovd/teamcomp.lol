@@ -639,9 +639,6 @@ export const useDraftStore = create<DraftState>()(
             // Store groups as JSON
             ban_groups: migrated.banGroups,
             priority_groups: migrated.priorityGroups,
-            // Keep legacy fields for backwards compatibility
-            priority_picks: getAllChampionIds(migrated.priorityGroups),
-            potential_bans: getAllChampionIds(migrated.banGroups),
             notes: session.notes,
             notepad: session.notepad || [],
             sort_order: index,

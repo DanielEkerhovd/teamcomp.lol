@@ -61,11 +61,17 @@ function PlayerGroupsCard({
   onChampionClick: (championId: string) => void;
   side: 'my' | 'enemy';
 }) {
-  const { findPool } = usePlayerPoolStore();
+  // Get pools directly to ensure reactivity
+  const pools = usePlayerPoolStore((state) => state.pools);
   const roleInfo = ROLES.find((r) => r.value === player.role);
 
   // Get champion groups from player pool store or player data
-  const pool = player.summonerName ? findPool(player.summonerName, player.role) : null;
+  const normalizedName = player.summonerName?.toLowerCase().trim() || '';
+  const pool = normalizedName
+    ? pools.find(
+        (p) => (p.summonerName?.toLowerCase().trim() || '') === normalizedName && p.role === player.role
+      )
+    : undefined;
   const groups = pool?.championGroups || player.championGroups || [];
 
   const totalChampions = groups.reduce((sum, g) => sum + g.championIds.length, 0);

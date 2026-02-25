@@ -74,13 +74,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (cachedSession) {
       console.log('Restoring session from localStorage cache');
       hasHandledSignIn = true;
-      setSession(cachedSession);
-      useAuthStore.setState({ isInitialized: true, isLoading: false });
-      // Load cloud data in background
-      isLoadingCloudData = true;
-      syncManager.loadAllFromCloud()
-        .catch(err => console.warn('Background cloud sync failed:', err))
-        .finally(() => { isLoadingCloudData = false; });
+      // Restore session and wait for profile to load before marking initialized
+      setSession(cachedSession).then(() => {
+        useAuthStore.setState({ isInitialized: true, isLoading: false });
+        // Load cloud data in background
+        isLoadingCloudData = true;
+        syncManager.loadAllFromCloud()
+          .catch(err => console.warn('Background cloud sync failed:', err))
+          .finally(() => { isLoadingCloudData = false; });
+      });
     }
 
     // Fallback timeout in case INITIAL_SESSION never fires and no cached session
@@ -101,8 +103,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (event === 'INITIAL_SESSION') {
             if (session && !hasHandledSignIn) {
               hasHandledSignIn = true;
-              // Restore session from cache
-              setSession(session);
+              // Restore session from cache and wait for profile to load
+              await setSession(session);
               // Load cloud data and WAIT for it to complete
               isLoadingCloudData = true;
               try {
@@ -115,6 +117,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               } finally {
                 isLoadingCloudData = false;
               }
+            } else if (session && hasHandledSignIn) {
+              // Cached session path is already handling this - wait for profile to be loaded
+              // before marking as initialized to avoid showing stale email-based display name
+              const maxWait = 5000;
+              const startTime = Date.now();
+              while (!useAuthStore.getState().profile && (Date.now() - startTime) < maxWait) {
+                await new Promise(resolve => setTimeout(resolve, 50));
+              }
             }
             // Mark as initialized regardless of session state
             useAuthStore.setState({ isInitialized: true, isLoading: false });
@@ -126,9 +136,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               // Skip if we've already handled this sign-in (prevents race condition)
               if (hasHandledSignIn) {
                 console.log('Sign-in already handled, skipping duplicate processing');
-                // But still wait for any ongoing cloud load to finish
-                while (isLoadingCloudData) {
+                // Wait for any ongoing cloud load to finish, with timeout to prevent infinite hang
+                const maxWait = 15000; // 15 seconds max
+                const startTime = Date.now();
+                while (isLoadingCloudData && (Date.now() - startTime) < maxWait) {
                   await new Promise(resolve => setTimeout(resolve, 100));
+                }
+                if (isLoadingCloudData) {
+                  console.warn('Cloud load still in progress after timeout, continuing anyway');
                 }
                 return;
               }
@@ -156,7 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               }
 
               // No local data - just load from cloud
-              setSession(session);
+              await setSession(session);
               // Load from cloud with timeout to prevent hanging
               isLoadingCloudData = true;
               try {
@@ -170,7 +185,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 isLoadingCloudData = false;
               }
             } else if (event === 'TOKEN_REFRESHED') {
-              setSession(session);
+              await setSession(session);
             }
           } else if (event === 'SIGNED_OUT') {
             hasHandledSignIn = false;
@@ -261,8 +276,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       useCustomTemplatesStore.setState({ templates: filteredTemplates });
     }
 
-    // Complete the sign in
-    setSession(pendingMerge.session);
+    // Complete the sign in and wait for profile to load
+    await setSession(pendingMerge.session);
 
     // Sync local data to cloud with timeout
     try {
@@ -282,8 +297,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const handleDiscardLocalData = async () => {
     if (!pendingMerge) return;
 
-    // Complete the sign in
-    setSession(pendingMerge.session);
+    // Complete the sign in and wait for profile to load
+    await setSession(pendingMerge.session);
 
     // Clear local stores and load from cloud
     // We need to clear localStorage first, then load cloud data

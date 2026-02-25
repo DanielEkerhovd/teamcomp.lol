@@ -10,10 +10,14 @@ import ToolsPage from './pages/ToolsPage';
 import SharedDraftPage from './pages/SharedDraftPage';
 import AcceptInvitePage from './pages/AcceptInvitePage';
 import ProfilePage from './pages/ProfilePage';
+import FriendsPage from './pages/FriendsPage';
 import FirstTimeSetupModal from './components/onboarding/FirstTimeSetupModal';
 import UsernameSetupModal from './components/onboarding/UsernameSetupModal';
 import { AuthProvider } from './contexts/AuthContext';
 import UserMenu from './components/auth/UserMenu';
+import { FriendsNavItem } from './components/notifications';
+import { NotificationBell } from './components/notifications';
+import { useTierLimits } from './stores/useAuthStore';
 
 // Icons as components
 const HomeIcon = () => (
@@ -68,21 +72,78 @@ const CollapseIcon = ({ collapsed }: { collapsed: boolean }) => (
   </svg>
 );
 
+function NavDivider({ label, collapsed }: { label?: string; collapsed: boolean }) {
+  return (
+    <div className="py-2">
+      <div className="flex items-center gap-2">
+        <div className="flex-1 h-px bg-lol-border" />
+        {label && !collapsed && (
+          <>
+            <span className="text-[10px] uppercase tracking-wider text-gray-500 font-medium">{label}</span>
+            <div className="flex-1 h-px bg-lol-border" />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed: (v: boolean) => void }) {
-  const navItems = [
+  const { maxTeams } = useTierLimits();
+  const myTeamLabel = maxTeams <= 1 ? 'My Team' : 'My Teams';
+
+  const mainNavItems = [
     { to: '/', label: 'Home', icon: HomeIcon },
+  ];
+
+  const draftNavItems = [
     { to: '/draft', label: 'Draft', icon: DraftIcon },
     { to: '/enemy-teams', label: 'Enemy Teams', icon: EnemyIcon },
-    { to: '/my-teams', label: 'My Teams', icon: TeamIcon },
+    { to: '/my-teams', label: myTeamLabel, icon: TeamIcon },
     { to: '/champion-pool', label: 'Pools', icon: ChampionIcon },
+  ];
+
+  const utilNavItems = [
     { to: '/tools', label: 'Tools', icon: ToolsIcon },
   ];
+
+  const renderNavItem = (item: { to: string; label: string; icon: React.ComponentType }) => (
+    <NavLink
+      key={item.to}
+      to={item.to}
+      end={item.to === '/'}
+      className={({ isActive }) =>
+        `flex items-center gap-3 px-3 py-3 rounded-xl font-medium transition-all duration-200 group relative
+        ${isActive
+          ? 'bg-gradient-to-r from-lol-gold/20 to-transparent text-lol-gold'
+          : 'text-gray-400 hover:text-white hover:bg-lol-surface'
+        }`
+      }
+    >
+      {({ isActive }) => (
+        <>
+          {/* Active indicator */}
+          {isActive && (
+            <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-lol-gold rounded-r-full" />
+          )}
+          <span className="shrink-0"><item.icon /></span>
+          <span className={`whitespace-nowrap transition-all duration-300 ${collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100'}`}>{item.label}</span>
+          {/* Tooltip when collapsed */}
+          {collapsed && (
+            <div className="absolute left-full ml-3 px-3 py-2 bg-lol-card border border-lol-border rounded-lg text-sm text-white whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 shadow-xl z-50">
+              {item.label}
+            </div>
+          )}
+        </>
+      )}
+    </NavLink>
+  );
 
   return (
     <aside
       className={`
         fixed left-0 top-0 h-screen bg-lol-dark border-r border-lol-border
-        flex flex-col z-50 transition-all duration-300 ease-in-out overflow-hidden
+        flex flex-col z-50 transition-all duration-300 ease-in-out
         ${collapsed ? 'w-[72px]' : 'w-[240px]'}
       `}
     >
@@ -99,42 +160,32 @@ function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 py-4 px-3 space-y-1 overflow-hidden">
-        {navItems.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.to === '/'}
-            className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-3 rounded-xl font-medium transition-all duration-200 group relative
-              ${isActive
-                ? 'bg-gradient-to-r from-lol-gold/20 to-transparent text-lol-gold'
-                : 'text-gray-400 hover:text-white hover:bg-lol-surface'
-              }`
-            }
-          >
-            {({ isActive }) => (
-              <>
-                {/* Active indicator */}
-                {isActive && (
-                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-lol-gold rounded-r-full" />
-                )}
-                <span className="shrink-0"><item.icon /></span>
-                <span className={`whitespace-nowrap transition-all duration-300 ${collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100'}`}>{item.label}</span>
-                {/* Tooltip when collapsed */}
-                {collapsed && (
-                  <div className="absolute left-full ml-3 px-3 py-2 bg-lol-card border border-lol-border rounded-lg text-sm text-white whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 shadow-xl z-50">
-                    {item.label}
-                  </div>
-                )}
-              </>
-            )}
-          </NavLink>
-        ))}
+      <nav className="flex-1 py-4 px-3 overflow-hidden">
+        {/* Main section */}
+        <div className="space-y-1">
+          {mainNavItems.map(renderNavItem)}
+        </div>
+
+        <NavDivider label="Planning" collapsed={collapsed} />
+
+        {/* Draft section */}
+        <div className="space-y-1">
+          {draftNavItems.map(renderNavItem)}
+        </div>
+
+        <NavDivider label="Utilities" collapsed={collapsed} />
+
+        {/* Utilities section */}
+        <div className="space-y-1">
+          {utilNavItems.map(renderNavItem)}
+          {/* Friends nav item (only for authenticated users) */}
+          <FriendsNavItem collapsed={collapsed} />
+        </div>
       </nav>
 
-      {/* User section */}
-      <div className="px-3 pb-3">
+      {/* Notification bell + User section */}
+      <div className="px-3 pb-3 space-y-2">
+        <NotificationBell collapsed={collapsed} />
         <UserMenu collapsed={collapsed} />
       </div>
 
@@ -200,6 +251,7 @@ export default function App() {
                   <Route path="/champion-pool" element={<ChampionPoolPage />} />
                   <Route path="/tools" element={<ToolsPage />} />
                   <Route path="/profile" element={<ProfilePage />} />
+                  <Route path="/friends" element={<FriendsPage />} />
                 </Routes>
               </Layout>
             }

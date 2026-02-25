@@ -150,10 +150,12 @@ export default function DraftChampionPool({ usedChampionIds }: DraftChampionPool
     return { inPoolChampions: sorted, notInPoolChampions: [] };
   }, [champions, search, searchChampions, selectedRoles, usedChampionIds, hasPoolFilter, poolFilterChampionIds]);
 
-  const toggleRole = (role: Role) => {
-    setSelectedRoles((prev) =>
-      prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]
-    );
+  const selectRole = (role: Role | null) => {
+    if (role === null) {
+      setSelectedRoles([]);
+    } else {
+      setSelectedRoles([role]);
+    }
   };
 
   if (loading) {
@@ -187,14 +189,28 @@ export default function DraftChampionPool({ usedChampionIds }: DraftChampionPool
       <div className="flex items-center gap-2 mb-3 shrink-0">
         {/* Role filters */}
         <div className="flex gap-1 flex-wrap">
+          <button
+            onClick={() => selectRole(null)}
+            className={`
+              px-2 py-1.5 rounded-md transition-colors text-xs font-medium
+              ${
+                selectedRoles.length === 0
+                  ? 'bg-lol-gold/20 ring-1 ring-lol-gold text-lol-gold'
+                  : 'bg-lol-dark hover:bg-lol-surface text-gray-400'
+              }
+            `}
+            title="All Champions"
+          >
+            All
+          </button>
           {ROLES.map((role) => (
             <button
               key={role}
-              onClick={() => toggleRole(role)}
+              onClick={() => selectRole(role)}
               className={`
                 p-1.5 rounded-md transition-colors
                 ${
-                  selectedRoles.includes(role)
+                  selectedRoles.length === 1 && selectedRoles[0] === role
                     ? 'bg-lol-gold/20 ring-1 ring-lol-gold'
                     : 'bg-lol-dark hover:bg-lol-surface'
                 }
@@ -208,14 +224,6 @@ export default function DraftChampionPool({ usedChampionIds }: DraftChampionPool
               />
             </button>
           ))}
-          {selectedRoles.length > 0 && (
-            <button
-              onClick={() => setSelectedRoles([])}
-              className="px-2 py-1 text-xs rounded-md bg-gray-700 text-gray-300 hover:bg-gray-600"
-            >
-              Clear
-            </button>
-          )}
         </div>
 
         {/* Spacer */}

@@ -17,13 +17,23 @@ export default function ShareModal({ isOpen, onClose, draftSessionId, draftName 
   const [creating, setCreating] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
+  // Start with syncing=true when modal opens to prevent premature loading
+  const [syncing, setSyncing] = useState(true);
 
   // Get store functions to trigger sync
   const { teams: myTeams, selectedTeamId, updateTeam } = useMyTeamStore();
   const { sessions, updateSession } = useDraftStore();
   const myTeam = myTeams.find((t) => t.id === selectedTeamId) || myTeams[0];
   const currentSession = sessions.find((s) => s.id === draftSessionId);
+
+  // Reset state when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setSyncing(true);
+      setError(null);
+      setShares([]);
+    }
+  }, [isOpen]);
 
   // Force sync team data when modal opens
   useEffect(() => {
@@ -38,27 +48,39 @@ export default function ShareModal({ isOpen, onClose, draftSessionId, draftName 
         // Force sync by updating with same notes
         updateSession(draftSessionId, { notes: currentSession.notes ?? '' });
       }
-      // Wait for debounced sync to complete
-      setTimeout(() => setSyncing(false), 1500);
+      // Wait for debounced sync to complete (cloudSync uses 3s debounce + network time)
+      setTimeout(() => setSyncing(false), 3500);
     }
   }, [isOpen]);
 
-  // Load existing shares when modal opens
+  // Load existing shares after sync completes
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !syncing) {
       loadShares();
     }
-  }, [isOpen, draftSessionId]);
+  }, [isOpen, syncing, draftSessionId]);
 
   const loadShares = async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await shareService.getSharesForDraft(draftSessionId);
+      // Add timeout to prevent hanging
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Request timed out')), 10000)
+      );
+      const result = await Promise.race([
+        shareService.getSharesForDraft(draftSessionId),
+        timeoutPromise
+      ]);
       setShares(result);
     } catch (err) {
-      setError('Failed to load share links');
-      console.error(err);
+      console.error('Load shares error:', err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      if (errorMessage.includes('timed out')) {
+        setError('Request timed out. Please check your connection.');
+      } else {
+        setError('Failed to load share links');
+      }
     } finally {
       setLoading(false);
     }
@@ -68,15 +90,32 @@ export default function ShareModal({ isOpen, onClose, draftSessionId, draftName 
     setCreating(true);
     setError(null);
     try {
-      const newShare = await shareService.createShare(draftSessionId);
+      // Add timeout to prevent hanging
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Request timed out')), 15000)
+      );
+      const newShare = await Promise.race([
+        shareService.createShare(draftSessionId),
+        timeoutPromise
+      ]);
       if (newShare) {
         setShares([newShare, ...shares]);
         // Auto-copy the new share link
         handleCopy(newShare.token);
       }
     } catch (err) {
-      setError('Failed to create share link');
-      console.error(err);
+      console.error('Share creation error:', err);
+      // Provide more specific error messages
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      if (errorMessage.includes('timed out')) {
+        setError('Request timed out. Please check your connection.');
+      } else if (errorMessage.includes('row-level security') || errorMessage.includes('violates foreign key')) {
+        setError('Draft not synced yet. Please wait a moment and try again.');
+      } else if (errorMessage.includes('authenticated')) {
+        setError('Please sign in to create share links.');
+      } else {
+        setError('Failed to create share link. Please try again.');
+      }
     } finally {
       setCreating(false);
     }

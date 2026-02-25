@@ -19,8 +19,9 @@ export default function InviteModal({ isOpen, onClose, teamId, teamName, players
   const [error, setError] = useState<string | null>(null);
 
   // New invite form state
-  const [newRole, setNewRole] = useState<'player' | 'viewer'>('player');
+  const [newRole, setNewRole] = useState<'admin' | 'player' | 'viewer'>('player');
   const [newPlayerSlotId, setNewPlayerSlotId] = useState<string>('');
+  const [newCanEditGroups, setNewCanEditGroups] = useState(false);
   const [newEmail, setNewEmail] = useState('');
 
   // Load existing invites when modal opens
@@ -51,8 +52,11 @@ export default function InviteModal({ isOpen, onClose, teamId, teamName, players
       const newInvite = await teamMembershipService.createInvite(
         teamId,
         newRole,
-        newPlayerSlotId || undefined,
-        newEmail || undefined
+        {
+          playerSlotId: newPlayerSlotId || undefined,
+          canEditGroups: newCanEditGroups,
+          email: newEmail || undefined,
+        }
       );
       setInvites([newInvite, ...invites]);
       // Auto-copy the new invite link
@@ -60,6 +64,7 @@ export default function InviteModal({ isOpen, onClose, teamId, teamName, players
       // Reset form
       setNewEmail('');
       setNewPlayerSlotId('');
+      setNewCanEditGroups(false);
     } catch (err) {
       setError('Failed to create invite');
       console.error(err);
@@ -110,30 +115,53 @@ export default function InviteModal({ isOpen, onClose, teamId, teamName, players
           <h3 className="text-sm font-medium text-gray-300">Create New Invite</h3>
 
           {/* Role selection */}
-          <div className="flex gap-2">
-            <button
-              onClick={() => setNewRole('player')}
-              className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                newRole === 'player'
-                  ? 'bg-lol-gold/20 text-lol-gold border border-lol-gold/30'
-                  : 'bg-lol-card hover:bg-lol-border text-gray-400 border border-lol-border'
-              }`}
-            >
-              Player
-            </button>
-            <button
-              onClick={() => {
-                setNewRole('viewer');
-                setNewPlayerSlotId('');
-              }}
-              className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                newRole === 'viewer'
-                  ? 'bg-lol-gold/20 text-lol-gold border border-lol-gold/30'
-                  : 'bg-lol-card hover:bg-lol-border text-gray-400 border border-lol-border'
-              }`}
-            >
-              Viewer
-            </button>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Role</label>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setNewRole('admin');
+                  setNewPlayerSlotId('');
+                  setNewCanEditGroups(true);
+                }}
+                className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  newRole === 'admin'
+                    ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                    : 'bg-lol-card hover:bg-lol-border text-gray-400 border border-lol-border'
+                }`}
+              >
+                Admin
+              </button>
+              <button
+                onClick={() => setNewRole('player')}
+                className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  newRole === 'player'
+                    ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                    : 'bg-lol-card hover:bg-lol-border text-gray-400 border border-lol-border'
+                }`}
+              >
+                Player
+              </button>
+              <button
+                onClick={() => {
+                  setNewRole('viewer');
+                  setNewPlayerSlotId('');
+                  setNewCanEditGroups(false);
+                }}
+                className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  newRole === 'viewer'
+                    ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                    : 'bg-lol-card hover:bg-lol-border text-gray-400 border border-lol-border'
+                }`}
+              >
+                Viewer
+              </button>
+            </div>
+            <p className="text-xs text-gray-600 mt-1">
+              {newRole === 'admin' && 'Can manage team members and edit all players'}
+              {newRole === 'player' && 'Can view team and edit assigned player slot'}
+              {newRole === 'viewer' && 'Can only view team data'}
+            </p>
           </div>
 
           {/* Player slot assignment (only for players) */}
@@ -153,6 +181,24 @@ export default function InviteModal({ isOpen, onClose, teamId, teamName, players
                 ))}
               </select>
             </div>
+          )}
+
+          {/* Can edit groups toggle (only for players) */}
+          {newRole === 'player' && (
+            <label className="flex items-center gap-3 p-3 bg-lol-card rounded-lg border border-lol-border cursor-pointer hover:border-lol-gold/30 transition-colors">
+              <input
+                type="checkbox"
+                checked={newCanEditGroups}
+                onChange={(e) => setNewCanEditGroups(e.target.checked)}
+                className="w-4 h-4 rounded border-gray-500 text-lol-gold focus:ring-lol-gold/50 bg-lol-surface"
+              />
+              <div>
+                <span className="text-sm text-gray-300">Can edit groups</span>
+                <p className="text-xs text-gray-500">
+                  Allow creating, renaming, and deleting champion groups
+                </p>
+              </div>
+            </label>
           )}
 
           {/* Optional email */}
@@ -249,10 +295,19 @@ function InviteLinkItem({ invite, players, copiedId, onCopy, onRevoke }: InviteL
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-            invite.role === 'player' ? 'bg-green-500/20 text-green-400' : 'bg-blue-500/20 text-blue-400'
+            invite.role === 'admin'
+              ? 'bg-purple-500/20 text-purple-400'
+              : invite.role === 'player'
+              ? 'bg-green-500/20 text-green-400'
+              : 'bg-blue-500/20 text-blue-400'
           }`}>
             {invite.role}
           </span>
+          {invite.canEditGroups && invite.role === 'player' && (
+            <span className="text-xs text-gray-500">
+              + groups
+            </span>
+          )}
           {assignedPlayer && (
             <span className="text-xs text-gray-500">
               {assignedPlayer.summonerName}

@@ -35,7 +35,6 @@ export const shareService = {
     const { data: user } = await supabase.auth.getUser();
     if (!user.user) throw new Error('Must be authenticated to create share');
 
-    // Use type assertion since draft_shares is a new table
     // Only include expires_at if explicitly provided, otherwise use DB default (30 days)
     const insertData: Record<string, unknown> = {
       draft_session_id: draftSessionId,
@@ -45,14 +44,15 @@ export const shareService = {
       insertData.expires_at = expiresAt.toISOString();
     }
 
-    const { data, error } = await (supabase
-      .from('draft_shares' as 'profiles') // Type hack for new table
-      .insert(insertData as never)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any)
+      .from('draft_shares')
+      .insert(insertData)
       .select()
-      .single() as unknown as Promise<{ data: DbDraftShare | null; error: Error | null }>);
+      .single();
 
     if (error) throw error;
-    return data ? mapDraftShare(data) : null;
+    return data ? mapDraftShare(data as DbDraftShare) : null;
   },
 
   /**
@@ -61,14 +61,15 @@ export const shareService = {
   async getSharesForDraft(draftSessionId: string): Promise<DraftShare[]> {
     if (!supabase) return [];
 
-    const { data, error } = await (supabase
-      .from('draft_shares' as 'profiles')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any)
+      .from('draft_shares')
       .select('*')
-      .eq('draft_session_id' as 'id', draftSessionId)
-      .order('created_at', { ascending: false }) as unknown as Promise<{ data: DbDraftShare[] | null; error: Error | null }>);
+      .eq('draft_session_id', draftSessionId)
+      .order('created_at', { ascending: false });
 
     if (error) throw error;
-    return (data || []).map(mapDraftShare);
+    return (data || []).map((row: DbDraftShare) => mapDraftShare(row));
   },
 
   /**
@@ -77,10 +78,11 @@ export const shareService = {
   async revokeShare(shareId: string): Promise<void> {
     if (!supabase) return;
 
-    const { error } = await (supabase
-      .from('draft_shares' as 'profiles')
-      .update({ is_active: false } as never)
-      .eq('id', shareId) as unknown as Promise<{ data: unknown; error: Error | null }>);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any)
+      .from('draft_shares')
+      .update({ is_active: false })
+      .eq('id', shareId);
 
     if (error) throw error;
   },
@@ -91,10 +93,11 @@ export const shareService = {
   async reactivateShare(shareId: string): Promise<void> {
     if (!supabase) return;
 
-    const { error } = await (supabase
-      .from('draft_shares' as 'profiles')
-      .update({ is_active: true } as never)
-      .eq('id', shareId) as unknown as Promise<{ data: unknown; error: Error | null }>);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any)
+      .from('draft_shares')
+      .update({ is_active: true })
+      .eq('id', shareId);
 
     if (error) throw error;
   },
@@ -105,10 +108,11 @@ export const shareService = {
   async deleteShare(shareId: string): Promise<void> {
     if (!supabase) return;
 
-    const { error } = await (supabase
-      .from('draft_shares' as 'profiles')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any)
+      .from('draft_shares')
       .delete()
-      .eq('id', shareId) as unknown as Promise<{ data: unknown; error: Error | null }>);
+      .eq('id', shareId);
 
     if (error) throw error;
   },

@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
-import { useMyTeamStore, MAX_TEAMS } from '../stores/useMyTeamStore';
+import { useMyTeamStore } from '../stores/useMyTeamStore';
 import { useDraftStore } from '../stores/useDraftStore';
+import { useAuthStore, useTierLimits } from '../stores/useAuthStore';
 import { Card, Button } from '../components/ui';
 import { ROLES, Team } from '../types';
 
@@ -52,14 +53,26 @@ function TeamCard({ team, isSelected, onSelect }: { team: Team; isSelected: bool
 export default function HomePage() {
   const { teams, selectedTeamId, selectTeam, addTeam } = useMyTeamStore();
   const { sessions } = useDraftStore();
+  const { user } = useAuthStore();
+  const { isFreeTier, maxTeams } = useTierLimits();
+
   const recentSessions = sessions
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, 3);
 
   const handleAddTeam = () => {
-    const teamNumber = teams.length + 1;
-    addTeam(`Team ${teamNumber}`);
+    if (teams.length >= maxTeams) return;
+    // Try adding with incrementing number until we find an available name
+    let teamNumber = teams.length + 1;
+    let result = addTeam(`Team ${teamNumber}`);
+    while (!result.success && result.error === 'duplicate_name' && teamNumber < 100) {
+      teamNumber++;
+      result = addTeam(`Team ${teamNumber}`);
+    }
   };
+
+  const myTeamLabel = maxTeams <= 1 ? 'My Team' : 'My Teams';
+  const manageTeamLabel = maxTeams <= 1 ? 'Manage Team' : 'Manage Teams';
 
   return (
     <div className="space-y-10 py-4">
@@ -137,12 +150,12 @@ export default function HomePage() {
       <div>
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="text-xl font-semibold text-white">My Teams</h2>
+            <h2 className="text-xl font-semibold text-white">{myTeamLabel}</h2>
             <p className="text-sm text-gray-400 mt-1">Click a team to set it as active</p>
           </div>
-          <Link to="/my-team">
+          <Link to="/my-teams">
             <Button variant="outline" size="sm">
-              Manage Teams
+              {manageTeamLabel}
             </Button>
           </Link>
         </div>
@@ -155,7 +168,18 @@ export default function HomePage() {
               onSelect={() => selectTeam(team.id)}
             />
           ))}
-          {teams.length < MAX_TEAMS && (
+          {/* For free tier users with max 1 team, show upgrade prompt */}
+          {isFreeTier && user && maxTeams <= 1 ? (
+            <Link
+              to="/profile"
+              className="flex flex-col items-center justify-center gap-2 p-8 rounded-xl border-2 border-dashed border-lol-gold/50 text-lol-gold/80 hover:border-lol-gold hover:text-lol-gold transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+              </svg>
+              <span className="font-medium">Need more teams? Upgrade to Pro</span>
+            </Link>
+          ) : teams.length < maxTeams ? (
             <button
               onClick={handleAddTeam}
               className="flex items-center justify-center gap-2 p-8 rounded-xl border-2 border-dashed border-lol-border text-gray-500 hover:border-lol-gold hover:text-lol-gold transition-colors"
@@ -165,7 +189,7 @@ export default function HomePage() {
               </svg>
               <span className="font-medium">Add Team</span>
             </button>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

@@ -38,7 +38,8 @@ function formatRank(tier: string, division: string, lp?: number): string {
 function PlayerCard({ player, side, showOpggLink }: { player: Player | undefined; side: 'my' | 'enemy'; showOpggLink?: boolean }) {
   const roleInfo = ROLES.find((r) => r.value === player?.role);
   const { getRank } = useRankStore();
-  const { findPool } = usePlayerPoolStore();
+  // Get pools directly to ensure reactivity when pools change
+  const pools = usePlayerPoolStore((state) => state.pools);
   const { openPlayerProfile } = useOpgg();
 
   // Get rank from store
@@ -55,16 +56,22 @@ function PlayerCard({ player, side, showOpggLink }: { player: Player | undefined
     };
   }, [cachedRank]);
 
-  // Get champion IDs from player pool
+  // Get champion IDs from player pool - use pools directly for reactivity
   const championIds = useMemo(() => {
     if (!player) return [];
-    const pool = player.summonerName ? findPool(player.summonerName, player.role) : null;
+    // Find pool by normalized name and role
+    const normalizedName = player.summonerName?.toLowerCase().trim() || '';
+    const pool = normalizedName
+      ? pools.find(
+          (p) => (p.summonerName?.toLowerCase().trim() || '') === normalizedName && p.role === player.role
+        )
+      : undefined;
     const groups = pool?.championGroups || player.championGroups || [];
     const fromGroups = groups.flatMap((g) => g.championIds);
     const fromPool = player.championPool?.map((c) => c.championId) || [];
     // Combine and dedupe
     return [...new Set([...fromGroups, ...fromPool])];
-  }, [player, findPool]);
+  }, [player, pools]);
 
   if (!player) {
     return (

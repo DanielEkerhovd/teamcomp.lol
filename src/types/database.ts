@@ -3,6 +3,20 @@
 
 export type UserTier = 'free' | 'paid' | 'supporter' | 'admin';
 
+export type ProfileRole = 'team_owner' | 'head_coach' | 'coach' | 'analyst' | 'player' | 'groupie' | 'custom';
+
+export type TeamMemberRole = 'owner' | 'admin' | 'player' | 'viewer';
+export type FriendshipStatus = 'pending' | 'accepted' | 'blocked';
+export type NotificationType =
+  | 'team_invite'
+  | 'team_member_joined'
+  | 'team_member_left'
+  | 'team_role_changed'
+  | 'player_assignment'
+  | 'friend_request'
+  | 'friend_accepted'
+  | 'message';
+
 export interface Database {
   public: {
     Tables: {
@@ -14,6 +28,10 @@ export interface Database {
           avatar_url: string | null;
           tier: UserTier;
           max_teams: number;
+          role: ProfileRole | null;
+          role_team_id: string | null;
+          role_custom: string | null;
+          is_private: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -24,6 +42,10 @@ export interface Database {
           avatar_url?: string | null;
           tier?: UserTier;
           max_teams?: number;
+          role?: ProfileRole | null;
+          role_team_id?: string | null;
+          role_custom?: string | null;
+          is_private?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -34,6 +56,10 @@ export interface Database {
           avatar_url?: string | null;
           tier?: UserTier;
           max_teams?: number;
+          role?: ProfileRole | null;
+          role_team_id?: string | null;
+          role_custom?: string | null;
+          is_private?: boolean;
           updated_at?: string;
         };
       };
@@ -95,7 +121,6 @@ export interface Database {
           notes: string;
           region: string;
           is_sub: boolean;
-          champion_pool: unknown;
           champion_groups: unknown;
           sort_order: number;
           created_at: string;
@@ -110,7 +135,6 @@ export interface Database {
           notes?: string;
           region?: string;
           is_sub?: boolean;
-          champion_pool?: unknown;
           champion_groups?: unknown;
           sort_order?: number;
           created_at?: string;
@@ -123,7 +147,6 @@ export interface Database {
           notes?: string;
           region?: string;
           is_sub?: boolean;
-          champion_pool?: unknown;
           champion_groups?: unknown;
           sort_order?: number;
           updated_at?: string;
@@ -162,7 +185,6 @@ export interface Database {
           notes: string;
           region: string;
           is_sub: boolean;
-          champion_pool: unknown;
           champion_groups: unknown;
           sort_order: number;
           created_at: string;
@@ -177,7 +199,6 @@ export interface Database {
           notes?: string;
           region?: string;
           is_sub?: boolean;
-          champion_pool?: unknown;
           champion_groups?: unknown;
           sort_order?: number;
           created_at?: string;
@@ -190,7 +211,6 @@ export interface Database {
           notes?: string;
           region?: string;
           is_sub?: boolean;
-          champion_pool?: unknown;
           champion_groups?: unknown;
           sort_order?: number;
           updated_at?: string;
@@ -203,8 +223,6 @@ export interface Database {
           name: string;
           enemy_team_id: string | null;
           my_team_id: string | null;
-          priority_picks: string[];
-          potential_bans: string[];
           ban_groups: unknown;
           priority_groups: unknown;
           notes: string;
@@ -219,8 +237,6 @@ export interface Database {
           name: string;
           enemy_team_id?: string | null;
           my_team_id?: string | null;
-          priority_picks?: string[];
-          potential_bans?: string[];
           ban_groups?: unknown;
           priority_groups?: unknown;
           notes?: string;
@@ -233,8 +249,6 @@ export interface Database {
           name?: string;
           enemy_team_id?: string | null;
           my_team_id?: string | null;
-          priority_picks?: string[];
-          potential_bans?: string[];
           ban_groups?: unknown;
           priority_groups?: unknown;
           notes?: string;
@@ -359,50 +373,31 @@ export interface Database {
           updated_at?: string;
         };
       };
-      champion_pool_state: {
-        Row: {
-          user_id: string;
-          contested_picks: string[];
-          potential_bans: string[];
-          priorities: unknown;
-          updated_at: string;
-        };
-        Insert: {
-          user_id: string;
-          contested_picks?: string[];
-          potential_bans?: string[];
-          priorities?: unknown;
-          updated_at?: string;
-        };
-        Update: {
-          contested_picks?: string[];
-          potential_bans?: string[];
-          priorities?: unknown;
-          updated_at?: string;
-        };
-      };
       team_members: {
         Row: {
           id: string;
           team_id: string;
           user_id: string;
-          role: 'owner' | 'player' | 'viewer';
+          role: TeamMemberRole;
           player_slot_id: string | null;
           invited_by: string | null;
           joined_at: string;
+          can_edit_groups: boolean;
         };
         Insert: {
           id?: string;
           team_id: string;
           user_id: string;
-          role?: 'owner' | 'player' | 'viewer';
+          role?: TeamMemberRole;
           player_slot_id?: string | null;
           invited_by?: string | null;
           joined_at?: string;
+          can_edit_groups?: boolean;
         };
         Update: {
-          role?: 'owner' | 'player' | 'viewer';
+          role?: TeamMemberRole;
           player_slot_id?: string | null;
+          can_edit_groups?: boolean;
         };
       };
       team_invites: {
@@ -411,34 +406,37 @@ export interface Database {
           team_id: string;
           token: string;
           invited_email: string | null;
-          role: 'player' | 'viewer';
+          role: 'admin' | 'player' | 'viewer';
           player_slot_id: string | null;
           created_by: string;
           expires_at: string;
           accepted_at: string | null;
           accepted_by: string | null;
           created_at: string;
+          can_edit_groups: boolean;
         };
         Insert: {
           id?: string;
           team_id: string;
           token?: string;
           invited_email?: string | null;
-          role?: 'player' | 'viewer';
+          role?: 'admin' | 'player' | 'viewer';
           player_slot_id?: string | null;
           created_by: string;
           expires_at?: string;
           accepted_at?: string | null;
           accepted_by?: string | null;
           created_at?: string;
+          can_edit_groups?: boolean;
         };
         Update: {
           invited_email?: string | null;
-          role?: 'player' | 'viewer';
+          role?: 'admin' | 'player' | 'viewer';
           player_slot_id?: string | null;
           expires_at?: string;
           accepted_at?: string | null;
           accepted_by?: string | null;
+          can_edit_groups?: boolean;
         };
       };
       draft_shares: {
@@ -471,6 +469,74 @@ export interface Database {
           expires_at?: string | null;
         };
       };
+      friendships: {
+        Row: {
+          id: string;
+          user_id: string;
+          friend_id: string;
+          status: FriendshipStatus;
+          created_at: string;
+          accepted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          friend_id: string;
+          status?: FriendshipStatus;
+          created_at?: string;
+          accepted_at?: string | null;
+        };
+        Update: {
+          status?: FriendshipStatus;
+          accepted_at?: string | null;
+        };
+      };
+      messages: {
+        Row: {
+          id: string;
+          sender_id: string;
+          recipient_id: string;
+          content: string;
+          read_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          sender_id: string;
+          recipient_id: string;
+          content: string;
+          read_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          read_at?: string | null;
+        };
+      };
+      notifications: {
+        Row: {
+          id: string;
+          user_id: string;
+          type: NotificationType;
+          title: string;
+          body: string | null;
+          data: Record<string, unknown>;
+          read_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          type: NotificationType;
+          title: string;
+          body?: string | null;
+          data?: Record<string, unknown>;
+          read_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          read_at?: string | null;
+        };
+      };
     };
   };
 }
@@ -487,10 +553,12 @@ export type DbPlayerPool = Database['public']['Tables']['player_pools']['Row'];
 export type DbCustomPool = Database['public']['Tables']['custom_pools']['Row'];
 export type DbCustomTemplate = Database['public']['Tables']['custom_templates']['Row'];
 export type DbDraftTheory = Database['public']['Tables']['draft_theory']['Row'];
-export type DbChampionPoolState = Database['public']['Tables']['champion_pool_state']['Row'];
 export type DbTeamMember = Database['public']['Tables']['team_members']['Row'];
 export type DbTeamInvite = Database['public']['Tables']['team_invites']['Row'];
 export type DbDraftShare = Database['public']['Tables']['draft_shares']['Row'];
+export type DbFriendship = Database['public']['Tables']['friendships']['Row'];
+export type DbMessage = Database['public']['Tables']['messages']['Row'];
+export type DbNotification = Database['public']['Tables']['notifications']['Row'];
 
 // Types for RPC responses
 export interface SharedDraftData {
@@ -512,7 +580,8 @@ export interface SharedDraftData {
 export interface InviteDetails {
   id: string;
   teamName: string;
-  role: 'player' | 'viewer';
+  role: 'admin' | 'player' | 'viewer';
+  canEditGroups: boolean;
   playerSlot: {
     id: string;
     summonerName: string;
@@ -521,4 +590,115 @@ export interface InviteDetails {
   expiresAt: string;
   isExpired: boolean;
   isAccepted: boolean;
+}
+
+// Friend types
+export interface Friend {
+  friendshipId: string;
+  friendId: string;
+  displayName: string;
+  avatarUrl: string | null;
+  acceptedAt: string;
+  role?: ProfileRole | null;
+  roleCustom?: string | null;
+  roleTeamName?: string | null;
+}
+
+export interface PendingFriendRequest {
+  friendshipId: string;
+  fromUserId?: string;
+  toUserId?: string;
+  displayName: string;
+  avatarUrl: string | null;
+  createdAt: string;
+  role?: ProfileRole | null;
+  roleCustom?: string | null;
+  roleTeamName?: string | null;
+}
+
+export interface BlockedUser {
+  friendshipId: string;
+  blockedUserId: string;
+  displayName: string;
+  avatarUrl: string | null;
+  blockedAt: string;
+}
+
+export interface FriendsData {
+  accepted: Friend[];
+  pendingReceived: PendingFriendRequest[];
+  pendingSent: PendingFriendRequest[];
+  blocked: BlockedUser[];
+}
+
+// Message types
+export interface ConversationPreview {
+  friendId: string;
+  friendName: string;
+  friendAvatar: string | null;
+  lastMessage: string;
+  lastMessageAt: string;
+  lastMessageBy: string;
+  unreadCount: number;
+}
+
+export interface Message {
+  id: string;
+  senderId: string;
+  recipientId: string;
+  content: string;
+  readAt: string | null;
+  createdAt: string;
+  senderName: string;
+  senderAvatar: string | null;
+}
+
+// Team membership types
+export interface TeamMembership {
+  membershipId: string;
+  teamId: string;
+  teamName: string;
+  role: TeamMemberRole;
+  canEditGroups: boolean;
+  playerSlotId: string | null;
+  joinedAt: string;
+  ownerName: string;
+  ownerAvatar: string | null;
+}
+
+// Accept invite response
+export interface AcceptInviteResponse {
+  success: boolean;
+  error?: string;
+  conflict?: 'free_tier_team_limit';
+  existingTeamId?: string;
+  existingTeamName?: string;
+  inviteTeamId?: string;
+  inviteTeamName?: string;
+  inviteRole?: string;
+  membershipId?: string;
+  teamId?: string;
+  teamName?: string;
+  role?: string;
+}
+
+// Friend request response
+export interface FriendRequestResponse {
+  success: boolean;
+  error?: string;
+  friendshipId?: string;
+  message?: string;
+  targetUser?: {
+    id: string;
+    displayName: string;
+    avatarUrl: string | null;
+  };
+}
+
+// Send message response
+export interface SendMessageResponse {
+  success: boolean;
+  error?: string;
+  messageId?: string;
+  createdAt?: string;
 }

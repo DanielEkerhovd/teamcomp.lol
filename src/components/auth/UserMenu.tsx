@@ -107,10 +107,10 @@ export default function UserMenu({ collapsed }: UserMenuProps) {
           <img
             src={profile.avatarUrl}
             alt={displayName}
-            className="w-9 h-9 shrink-0 rounded-lg object-cover"
+            className="size-9 shrink-0 rounded-lg object-cover"
           />
         ) : (
-          <div className="w-9 h-9 shrink-0 rounded-lg bg-gradient-to-br from-lol-gold to-lol-gold-light flex items-center justify-center text-lol-dark font-semibold text-sm">
+          <div className="size-9 shrink-0 rounded-lg bg-gradient-to-br from-lol-gold to-lol-gold-light flex items-center justify-center text-lol-dark font-semibold text-sm">
             {initials}
           </div>
         )}

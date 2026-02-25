@@ -99,13 +99,9 @@ export default function SharedDraftPage() {
   const banGroups = (draft.ban_groups || []) as { id: string; name: string; championIds: string[] }[];
   const priorityGroups = (draft.priority_groups || []) as { id: string; name: string; championIds: string[] }[];
 
-  // Flatten groups to get all champion IDs (for backwards compatibility display)
-  const potentialBans = banGroups.length > 0
-    ? banGroups.flatMap(g => g.championIds)
-    : (draft.potential_bans || []) as string[];
-  const priorities = priorityGroups.length > 0
-    ? priorityGroups.flatMap(g => g.championIds)
-    : (draft.priority_picks || []) as string[];
+  // Flatten groups to get all champion IDs
+  const potentialBans = banGroups.flatMap(g => g.championIds);
+  const priorities = priorityGroups.flatMap(g => g.championIds);
   const notepad = (draft.notepad || []) as Note[];
 
   return (
@@ -421,11 +417,12 @@ interface SharedPlayerCardProps {
 }
 
 function SharedPlayerCard({ player, side, roleLabel, hasTeam, showOpggLink }: SharedPlayerCardProps) {
-  // Get champion IDs from player's champion groups
+  // Get champion IDs from player's champion groups (deduplicated)
   const championIds = useMemo(() => {
     if (!player) return [];
     const groups = (player.champion_groups || []) as { id: string; name: string; championIds: string[] }[];
-    return groups.flatMap(g => g.championIds);
+    // Deduplicate champion IDs across all groups
+    return [...new Set(groups.flatMap(g => g.championIds))];
   }, [player]);
 
   if (!player) {

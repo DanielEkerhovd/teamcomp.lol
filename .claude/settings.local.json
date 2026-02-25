@@ -36,7 +36,12 @@
       "Bash(npm ls:*)",
       "Bash(npx tsx:*)",
       "Bash(grep:*)",
-      "Bash(supabase functions deploy:*)"
+      "Bash(supabase functions deploy:*)",
+      "Bash(node scripts/check-cloud-data.mjs:*)",
+      "Bash(xargs ls:*)",
+      "Bash(node scripts/test-social-backend.mjs:*)",
+      "Bash(node scripts/update-champion-roles.mjs:*)",
+      "Bash(curl:*)"
     ],
     "defaultMode": "acceptEdits"
   }

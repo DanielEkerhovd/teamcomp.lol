@@ -250,19 +250,36 @@ export const migrationService = {
 
       // Insert players
       if (team.players && team.players.length > 0) {
-        const players = team.players.map((player, index) => ({
-          id: player.id,
-          team_id: team.id,
-          summoner_name: player.summonerName,
-          tag_line: player.tagLine || '',
-          role: player.role,
-          notes: player.notes || '',
-          region: player.region || 'euw',
-          is_sub: player.isSub || false,
-          champion_pool: player.championPool || [],
-          champion_groups: player.championGroups || [],
-          sort_order: index,
-        }));
+        const players = team.players.map((player, index) => {
+          // Convert legacy championPool to championGroups if needed
+          let championGroups = player.championGroups || [];
+          const championPool = player.championPool || [];
+          if ((!championGroups || !Array.isArray(championGroups) || championGroups.length === 0) && Array.isArray(championPool) && championPool.length > 0) {
+            const championIds = championPool.map((item: unknown) => {
+              if (typeof item === 'string') return item;
+              if (item && typeof item === 'object' && 'championId' in item) {
+                return (item as { championId: string }).championId;
+              }
+              return null;
+            }).filter((id: unknown): id is string => id !== null);
+            if (championIds.length > 0) {
+              championGroups = [{ id: `pool-${player.id}`, name: 'Pool', championIds }];
+            }
+          }
+
+          return {
+            id: player.id,
+            team_id: team.id,
+            summoner_name: player.summonerName,
+            tag_line: player.tagLine || '',
+            role: player.role,
+            notes: player.notes || '',
+            region: player.region || 'euw',
+            is_sub: player.isSub || false,
+            champion_groups: championGroups,
+            sort_order: index,
+          };
+        });
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { error: playersError } = await (supabase.from('players') as any).upsert(players);
@@ -309,19 +326,36 @@ export const migrationService = {
 
       // Insert enemy players
       if (team.players && team.players.length > 0) {
-        const players = team.players.map((player, index) => ({
-          id: player.id,
-          team_id: team.id,
-          summoner_name: player.summonerName,
-          tag_line: player.tagLine || '',
-          role: player.role,
-          notes: player.notes || '',
-          region: player.region || 'euw',
-          is_sub: player.isSub || false,
-          champion_pool: player.championPool || [],
-          champion_groups: player.championGroups || [],
-          sort_order: index,
-        }));
+        const players = team.players.map((player, index) => {
+          // Convert legacy championPool to championGroups if needed
+          let championGroups = player.championGroups as { id: string; name: string; championIds: string[] }[] || [];
+          const championPool = player.championPool as unknown[] || [];
+          if ((!championGroups || championGroups.length === 0) && Array.isArray(championPool) && championPool.length > 0) {
+            const championIds = championPool.map((item: unknown) => {
+              if (typeof item === 'string') return item;
+              if (item && typeof item === 'object' && 'championId' in item) {
+                return (item as { championId: string }).championId;
+              }
+              return null;
+            }).filter((id: unknown): id is string => id !== null);
+            if (championIds.length > 0) {
+              championGroups = [{ id: `pool-${player.id}`, name: 'Pool', championIds }];
+            }
+          }
+
+          return {
+            id: player.id,
+            team_id: team.id,
+            summoner_name: player.summonerName,
+            tag_line: player.tagLine || '',
+            role: player.role,
+            notes: player.notes || '',
+            region: player.region || 'euw',
+            is_sub: player.isSub || false,
+            champion_groups: championGroups,
+            sort_order: index,
+          };
+        });
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { error: playersError } = await (supabase.from('enemy_players') as any).upsert(players);
@@ -355,26 +389,39 @@ export const migrationService = {
       id: string;
       name: string;
       enemyTeamId?: string | null;
+      myTeamId?: string | null;
       contestedPicks?: string[];
       potentialBans?: string[];
-      ourPriorities?: unknown;
+      banGroups?: { id: string; name: string; championIds: string[] }[];
+      priorityGroups?: { id: string; name: string; championIds: string[] }[];
       notes?: string;
+      notepad?: unknown;
       createdAt: number;
       updatedAt: number;
     }> };
 
-    const sessionsToInsert = sessions.map((session) => ({
-      id: session.id,
-      user_id: userId,
-      name: session.name,
-      enemy_team_id: session.enemyTeamId || null,
-      contested_picks: session.contestedPicks || [],
-      potential_bans: session.potentialBans || [],
-      our_priorities: session.ourPriorities || [],
-      notes: session.notes || '',
-      created_at: new Date(session.createdAt).toISOString(),
-      updated_at: new Date(session.updatedAt).toISOString(),
-    }));
+    const sessionsToInsert = sessions.map((session, index) => {
+      // Convert legacy flat arrays to groups if groups don't exist
+      const banGroups = session.banGroups?.length ? session.banGroups :
+        (session.potentialBans?.length ? [{ id: `ban-${session.id}`, name: 'Bans', championIds: session.potentialBans }] : []);
+      const priorityGroups = session.priorityGroups?.length ? session.priorityGroups :
+        (session.contestedPicks?.length ? [{ id: `priority-${session.id}`, name: 'Priorities', championIds: session.contestedPicks }] : []);
+
+      return {
+        id: session.id,
+        user_id: userId,
+        name: session.name,
+        enemy_team_id: session.enemyTeamId || null,
+        my_team_id: session.myTeamId || null,
+        ban_groups: banGroups,
+        priority_groups: priorityGroups,
+        notes: session.notes || '',
+        notepad: session.notepad || [],
+        sort_order: index,
+        created_at: new Date(session.createdAt).toISOString(),
+        updated_at: new Date(session.updatedAt).toISOString(),
+      };
+    });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await (supabase.from('draft_sessions') as any).upsert(sessionsToInsert);

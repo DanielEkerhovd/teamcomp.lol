@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { User, Session, AuthError } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import type { Profile, UserTier } from '../types/database';
+import type { Profile, UserTier, ProfileRole } from '../types/database';
 
 // Guard against multiple initialization calls (React Strict Mode)
 let isInitializing = false;
@@ -13,6 +13,10 @@ export interface UserProfile {
   avatarUrl: string | null;
   tier: UserTier;
   maxTeams: number;
+  role: ProfileRole | null;
+  roleTeamId: string | null;
+  roleCustom: string | null;
+  isPrivate: boolean;
 }
 
 interface AuthState {
@@ -35,11 +39,13 @@ interface AuthState {
   signInWithDiscord: () => Promise<{ error: AuthError | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
-  setSession: (session: Session | null) => void;
+  setSession: (session: Session | null) => Promise<void>;
   clearError: () => void;
   updateDisplayName: (displayName: string) => Promise<{ error: string | null }>;
   updateAvatar: (file: File) => Promise<{ error: string | null }>;
   removeAvatar: () => Promise<{ error: string | null }>;
+  updateRole: (role: ProfileRole | null, teamId: string | null, customRole: string | null) => Promise<{ error: string | null }>;
+  updatePrivacy: (isPrivate: boolean) => Promise<{ error: string | null }>;
   deleteAccount: () => Promise<{ error: string | null }>;
 }
 
@@ -50,6 +56,10 @@ const transformProfile = (dbProfile: Profile): UserProfile => ({
   avatarUrl: dbProfile.avatar_url,
   tier: dbProfile.tier,
   maxTeams: dbProfile.max_teams,
+  role: dbProfile.role,
+  roleTeamId: dbProfile.role_team_id,
+  roleCustom: dbProfile.role_custom,
+  isPrivate: dbProfile.is_private,
 });
 
 export const useAuthStore = create<AuthState>()((set, get) => ({
@@ -217,7 +227,12 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
         set({ isLoading: true });
 
-        await supabase.auth.signOut();
+        try {
+          await supabase.auth.signOut();
+        } catch (error) {
+          // Continue with sign out even if the API call fails
+          console.error('Sign out error:', error);
+        }
 
         // Clear all local data stores
         const storeKeys = [
@@ -258,14 +273,14 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         }
       },
 
-      setSession: (session: Session | null) => {
+      setSession: async (session: Session | null) => {
         if (session) {
           set({
             user: session.user,
             session,
           });
-          // Fetch profile after setting session
-          get().refreshProfile();
+          // Fetch profile after setting session and wait for it
+          await get().refreshProfile();
         } else {
           set({
             user: null,
@@ -292,11 +307,11 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
         const client = supabase;
 
-        // Check if display name is taken by another user
+        // Check if display name is taken by another user (case-insensitive)
         const { data: existing } = await client
           .from('profiles')
           .select('id')
-          .eq('display_name', trimmedName)
+          .ilike('display_name', trimmedName)
           .neq('id', user.id)
           .single();
 
@@ -408,6 +423,58 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         return { error: null };
       },
 
+      updateRole: async (role: ProfileRole | null, teamId: string | null, customRole: string | null) => {
+        const { user } = get();
+        if (!user || !supabase) {
+          return { error: 'Not authenticated' };
+        }
+
+        const client = supabase;
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error } = await (client as any)
+          .from('profiles')
+          .update({
+            role: role,
+            role_team_id: teamId,
+            role_custom: role === 'custom' ? customRole : null,
+          })
+          .eq('id', user.id);
+
+        if (error) {
+          return { error: error.message };
+        }
+
+        // Refresh the profile to get updated data
+        await get().refreshProfile();
+
+        return { error: null };
+      },
+
+      updatePrivacy: async (isPrivate: boolean) => {
+        const { user } = get();
+        if (!user || !supabase) {
+          return { error: 'Not authenticated' };
+        }
+
+        const client = supabase;
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error } = await (client as any)
+          .from('profiles')
+          .update({ is_private: isPrivate })
+          .eq('id', user.id);
+
+        if (error) {
+          return { error: error.message };
+        }
+
+        // Refresh the profile to get updated data
+        await get().refreshProfile();
+
+        return { error: null };
+      },
+
       deleteAccount: async () => {
         const { user } = get();
         if (!user || !supabase) {
@@ -446,9 +513,10 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
 // Helper hook for checking team limits
 export const useTeamLimit = () => {
-  const { profile, isAuthenticated } = useAuthStore();
+  const { user, profile } = useAuthStore();
 
-  if (!isAuthenticated) {
+  // Compute isAuthenticated directly from user (getter doesn't work with destructuring)
+  if (!user) {
     // Guest mode - use localStorage limit
     return { maxTeams: 3, tier: 'guest' as const };
   }
@@ -456,5 +524,28 @@ export const useTeamLimit = () => {
   return {
     maxTeams: profile?.maxTeams ?? 1,
     tier: profile?.tier ?? 'free',
+  };
+};
+
+// Constants for tier limits
+export const FREE_TIER_MAX_DRAFTS = 20;
+
+// Helper hook for checking tier limits (drafts, teams, etc.)
+export const useTierLimits = () => {
+  const { user, profile } = useAuthStore();
+
+  // Compute isAuthenticated directly from user (getter doesn't work with destructuring)
+  const isAuthenticated = !!user;
+  const tier = !isAuthenticated ? 'guest' : (profile?.tier ?? 'free');
+  const isFreeTier = tier === 'free' || tier === 'guest';
+  const isPaidTier = tier === 'paid' || tier === 'supporter' || tier === 'admin';
+
+  return {
+    tier,
+    isFreeTier,
+    isPaidTier,
+    isAuthenticated,
+    maxTeams: !isAuthenticated ? 3 : (profile?.maxTeams ?? 1),
+    maxDrafts: isPaidTier ? Infinity : FREE_TIER_MAX_DRAFTS,
   };
 };

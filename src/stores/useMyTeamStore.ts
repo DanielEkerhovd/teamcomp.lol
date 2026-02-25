@@ -6,6 +6,8 @@ import { useAuthStore } from './useAuthStore';
 import { cloudSync } from './middleware/cloudSync';
 import { syncManager } from '../lib/syncManager';
 import { usePlayerPoolStore } from './usePlayerPoolStore';
+import { teamMembershipService } from '../lib/teamMembershipService';
+import type { TeamMembership, TeamMemberRole } from '../types/database';
 
 // Guest mode limit (MAX_TEAMS exported for backward compatibility)
 export const MAX_TEAMS_GUEST = 3;
@@ -21,15 +23,52 @@ export const getMaxTeams = (): number => {
   return profile?.maxTeams ?? 1; // Authenticated: use tier limit
 };
 
+// Permissions for a specific team
+export interface TeamPermissions {
+  canView: boolean;
+  canEditTeamInfo: boolean;
+  canManageMembers: boolean;
+  canEditAllPlayers: boolean;
+  canEditOwnPlayer: boolean;
+  canEditGroups: boolean;
+  canLeave: boolean;
+  role: TeamMemberRole;
+  playerSlotId: string | null;
+}
+
+// Result type for team operations that can fail
+export interface TeamOperationResult {
+  success: boolean;
+  team?: Team;
+  error?: 'duplicate_name' | 'max_teams_reached';
+}
+
+// Helper to check if a team name is taken (case-insensitive)
+const isTeamNameTaken = (teams: Team[], name: string, excludeTeamId?: string): boolean => {
+  const normalizedName = name.trim().toLowerCase();
+  return teams.some(
+    (t) => t.id !== excludeTeamId && t.name.trim().toLowerCase() === normalizedName
+  );
+};
+
 interface MyTeamState {
   teams: Team[];
   selectedTeamId: string;
+  // Memberships - teams user is a member of (not owner)
+  memberships: TeamMembership[];
+  membershipsLoading: boolean;
+  membershipsError: string | null;
   // Team management
-  addTeam: (name: string) => Team | null;
+  addTeam: (name: string) => TeamOperationResult;
   deleteTeam: (id: string) => void;
   selectTeam: (id: string) => void;
+  isTeamNameAvailable: (name: string, excludeTeamId?: string) => boolean;
+  // Membership management
+  loadMemberships: () => Promise<void>;
+  leaveTeam: (teamId: string) => Promise<{ success: boolean; error?: string }>;
+  getMyPermissions: (teamId: string) => TeamPermissions;
   // Existing actions (operate on selected team)
-  updateTeam: (updates: Partial<Omit<Team, 'id' | 'createdAt'>>) => void;
+  updateTeam: (updates: Partial<Omit<Team, 'id' | 'createdAt'>>) => { success: boolean; error?: 'duplicate_name' };
   updatePlayer: (playerId: string, updates: Partial<Omit<Player, 'id'>>) => void;
   importFromOpgg: (region: Region, players: { summonerName: string; tagLine: string }[]) => void;
   addSub: () => void;
@@ -73,14 +112,104 @@ export const useMyTeamStore = create<MyTeamState>()(
       (set, get) => ({
         teams: [initialTeam],
         selectedTeamId: initialTeam.id,
+        memberships: [],
+        membershipsLoading: false,
+        membershipsError: null,
 
-      addTeam: (name: string) => {
+      loadMemberships: async () => {
+        set({ membershipsLoading: true, membershipsError: null });
+        try {
+          const memberships = await teamMembershipService.getTeamMemberships();
+          set({ memberships, membershipsLoading: false });
+        } catch (error) {
+          set({
+            membershipsError: error instanceof Error ? error.message : 'Failed to load memberships',
+            membershipsLoading: false,
+          });
+        }
+      },
+
+      leaveTeam: async (teamId: string) => {
+        const result = await teamMembershipService.leaveTeam(teamId);
+        if (result.success) {
+          // Remove from local memberships
+          set((state) => ({
+            memberships: state.memberships.filter((m) => m.teamId !== teamId),
+          }));
+        }
+        return result;
+      },
+
+      getMyPermissions: (teamId: string): TeamPermissions => {
+        const state = get();
+        const { user } = useAuthStore.getState();
+
+        // Check if user owns this team
+        const ownedTeam = state.teams.find((t) => t.id === teamId);
+        if (ownedTeam) {
+          return {
+            canView: true,
+            canEditTeamInfo: true,
+            canManageMembers: true,
+            canEditAllPlayers: true,
+            canEditOwnPlayer: true,
+            canEditGroups: true,
+            canLeave: false, // Owner cannot leave, must transfer
+            role: 'owner',
+            playerSlotId: null,
+          };
+        }
+
+        // Check if user is a member of this team
+        const membership = state.memberships.find((m) => m.teamId === teamId);
+        if (membership) {
+          const isAdmin = membership.role === 'admin';
+          const isPlayer = membership.role === 'player';
+
+          return {
+            canView: true,
+            canEditTeamInfo: isAdmin,
+            canManageMembers: isAdmin,
+            canEditAllPlayers: isAdmin,
+            canEditOwnPlayer: isPlayer && !!membership.playerSlotId,
+            canEditGroups: membership.canEditGroups,
+            canLeave: true,
+            role: membership.role,
+            playerSlotId: membership.playerSlotId,
+          };
+        }
+
+        // No access
+        return {
+          canView: false,
+          canEditTeamInfo: false,
+          canManageMembers: false,
+          canEditAllPlayers: false,
+          canEditOwnPlayer: false,
+          canEditGroups: false,
+          canLeave: false,
+          role: 'viewer',
+          playerSlotId: null,
+        };
+      },
+
+      addTeam: (name: string): TeamOperationResult => {
         const state = get();
         const maxTeams = getMaxTeams();
-        if (state.teams.length >= maxTeams) return null;
+        if (state.teams.length >= maxTeams) {
+          return { success: false, error: 'max_teams_reached' };
+        }
+        if (isTeamNameTaken(state.teams, name)) {
+          return { success: false, error: 'duplicate_name' };
+        }
         const newTeam = createEmptyTeam(name);
         set({ teams: [...state.teams, newTeam], selectedTeamId: newTeam.id });
-        return newTeam;
+        return { success: true, team: newTeam };
+      },
+
+      isTeamNameAvailable: (name: string, excludeTeamId?: string): boolean => {
+        const state = get();
+        return !isTeamNameTaken(state.teams, name, excludeTeamId);
       },
 
       deleteTeam: (id: string) => {
@@ -99,7 +228,14 @@ export const useMyTeamStore = create<MyTeamState>()(
         }
       },
 
-      updateTeam: (updates: Partial<Omit<Team, 'id' | 'createdAt'>>) => {
+      updateTeam: (updates: Partial<Omit<Team, 'id' | 'createdAt'>>): { success: boolean; error?: 'duplicate_name' } => {
+        const state = get();
+        // Check for duplicate name if name is being updated
+        if (updates.name !== undefined) {
+          if (isTeamNameTaken(state.teams, updates.name, state.selectedTeamId)) {
+            return { success: false, error: 'duplicate_name' };
+          }
+        }
         set((state) =>
           updateSelectedTeam(state, (team) => ({
             ...team,
@@ -107,6 +243,7 @@ export const useMyTeamStore = create<MyTeamState>()(
             updatedAt: Date.now(),
           }))
         );
+        return { success: true };
       },
 
       updatePlayer: (playerId: string, updates: Partial<Omit<Player, 'id'>>) => {
@@ -487,18 +624,28 @@ export const useMyTeamStore = create<MyTeamState>()(
         }),
         // Sync players to the players table after team sync
         onAfterSync: (teams: Team[], storeKey: string, debounceMs: number) => {
-          // Get champion pools from the separate store
-          const { findPool } = usePlayerPoolStore.getState();
+          // Get champion pools from the separate store - use pools directly for more control
+          const { pools } = usePlayerPoolStore.getState();
 
           teams.forEach((team) => {
             // Enrich players with their champion pools from usePlayerPoolStore
             const enrichedPlayers = team.players.map((player) => {
-              // Look up pool by summoner name and role
-              const pool = player.summonerName ? findPool(player.summonerName, player.role) : null;
+              // Look up pool by summoner name (case-insensitive) and role
+              const normalizedName = player.summonerName?.toLowerCase().trim() || '';
+              const pool = normalizedName
+                ? pools.find(
+                    (p) => (p.summonerName?.toLowerCase().trim() || '') === normalizedName && p.role === player.role
+                  )
+                : undefined;
+
+              // Merge champion groups: prefer pool groups if they have content
+              const poolGroups = pool?.championGroups || [];
+              const playerGroups = player.championGroups || [];
+              const championGroups = poolGroups.length > 0 ? poolGroups : playerGroups;
+
               return {
                 ...player,
-                // Use pool's championGroups if available, otherwise keep player's (which may be empty)
-                championGroups: pool?.championGroups || player.championGroups || [],
+                championGroups,
               };
             });
 

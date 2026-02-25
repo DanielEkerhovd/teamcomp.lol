@@ -8,12 +8,31 @@ import { syncManager } from '../lib/syncManager';
 // Maximum number of subs per team
 export const MAX_SUBS = 5;
 
+// Maximum number of enemy teams a user can create
+export const MAX_TEAMS = 100;
+
+// Result type for team operations that can fail
+export interface EnemyTeamOperationResult {
+  success: boolean;
+  team?: Team;
+  error?: 'duplicate_name' | 'max_teams_reached';
+}
+
+// Helper to check if a team name is taken (case-insensitive)
+const isTeamNameTaken = (teams: Team[], name: string, excludeTeamId?: string): boolean => {
+  const normalizedName = name.trim().toLowerCase();
+  return teams.some(
+    (t) => t.id !== excludeTeamId && t.name.trim().toLowerCase() === normalizedName
+  );
+};
+
 interface EnemyTeamState {
   teams: Team[];
-  addTeam: (name: string) => Team;
-  importTeamFromOpgg: (name: string, region: Region, players: { summonerName: string; tagLine: string }[]) => Team;
+  addTeam: (name: string) => EnemyTeamOperationResult;
+  isTeamNameAvailable: (name: string, excludeTeamId?: string) => boolean;
+  importTeamFromOpgg: (name: string, region: Region, players: { summonerName: string; tagLine: string }[]) => EnemyTeamOperationResult;
   importPlayersToTeam: (teamId: string, region: Region, players: { summonerName: string; tagLine: string }[]) => void;
-  updateTeam: (id: string, updates: Partial<Omit<Team, 'id' | 'createdAt'>>) => void;
+  updateTeam: (id: string, updates: Partial<Omit<Team, 'id' | 'createdAt'>>) => { success: boolean; error?: 'duplicate_name' };
   deleteTeam: (id: string) => void;
   toggleFavorite: (id: string) => void;
   updatePlayer: (teamId: string, playerId: string, updates: Partial<Omit<Player, 'id'>>) => void;
@@ -52,13 +71,32 @@ export const useEnemyTeamStore = create<EnemyTeamState>()(
       (set, get) => ({
         teams: [],
 
-      addTeam: (name: string) => {
+      addTeam: (name: string): EnemyTeamOperationResult => {
+        const currentTeams = get().teams;
+        if (currentTeams.length >= MAX_TEAMS) {
+          return { success: false, error: 'max_teams_reached' };
+        }
+        if (isTeamNameTaken(currentTeams, name)) {
+          return { success: false, error: 'duplicate_name' };
+        }
         const newTeam = createEmptyTeam(name);
         set((state) => ({ teams: [...state.teams, newTeam] }));
-        return newTeam;
+        return { success: true, team: newTeam };
       },
 
-      importTeamFromOpgg: (name: string, region: Region, players: { summonerName: string; tagLine: string }[]) => {
+      isTeamNameAvailable: (name: string, excludeTeamId?: string): boolean => {
+        const state = get();
+        return !isTeamNameTaken(state.teams, name, excludeTeamId);
+      },
+
+      importTeamFromOpgg: (name: string, region: Region, players: { summonerName: string; tagLine: string }[]): EnemyTeamOperationResult => {
+        const currentTeams = get().teams;
+        if (currentTeams.length >= MAX_TEAMS) {
+          return { success: false, error: 'max_teams_reached' };
+        }
+        if (isTeamNameTaken(currentTeams, name)) {
+          return { success: false, error: 'duplicate_name' };
+        }
         const newTeam = createEmptyTeam(name);
 
         // Assign first 5 players to main roster roles
@@ -94,7 +132,7 @@ export const useEnemyTeamStore = create<EnemyTeamState>()(
         });
 
         set((state) => ({ teams: [...state.teams, newTeam] }));
-        return newTeam;
+        return { success: true, team: newTeam };
       },
 
       importPlayersToTeam: (teamId: string, region: Region, players: { summonerName: string; tagLine: string }[]) => {
@@ -146,7 +184,14 @@ export const useEnemyTeamStore = create<EnemyTeamState>()(
         }));
       },
 
-      updateTeam: (id: string, updates: Partial<Omit<Team, 'id' | 'createdAt'>>) => {
+      updateTeam: (id: string, updates: Partial<Omit<Team, 'id' | 'createdAt'>>): { success: boolean; error?: 'duplicate_name' } => {
+        const state = get();
+        // Check for duplicate name if name is being updated
+        if (updates.name !== undefined) {
+          if (isTeamNameTaken(state.teams, updates.name, id)) {
+            return { success: false, error: 'duplicate_name' };
+          }
+        }
         set((state) => ({
           teams: state.teams.map((team) =>
             team.id === id
@@ -154,6 +199,7 @@ export const useEnemyTeamStore = create<EnemyTeamState>()(
               : team
           ),
         }));
+        return { success: true };
       },
 
       deleteTeam: (id: string) => {

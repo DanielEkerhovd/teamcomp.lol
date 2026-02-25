@@ -15,12 +15,19 @@ interface RoleComparisonProps {
 }
 
 function usePlayerChampions(player: Player | undefined, tierFilter: ChampionTier[]) {
-  const { findPool } = usePlayerPoolStore();
+  // Get pools directly to ensure reactivity
+  const pools = usePlayerPoolStore((state) => state.pools);
 
   return useMemo(() => {
     if (!player) return [];
 
-    const pool = player.summonerName ? findPool(player.summonerName, player.role) : null;
+    // Find pool by normalized name and role
+    const normalizedName = player.summonerName?.toLowerCase().trim() || '';
+    const pool = normalizedName
+      ? pools.find(
+          (p) => (p.summonerName?.toLowerCase().trim() || '') === normalizedName && p.role === player.role
+        )
+      : undefined;
     const groups = pool?.championGroups || player.championGroups || [];
 
     // Build tier lookup
@@ -44,7 +51,7 @@ function usePlayerChampions(player: Player | undefined, tierFilter: ChampionTier
     }
 
     return Array.from(allChampionIds);
-  }, [player, tierFilter, findPool]);
+  }, [player, tierFilter, pools]);
 }
 
 function ChampionRow({

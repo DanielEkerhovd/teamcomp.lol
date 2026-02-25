@@ -14,7 +14,7 @@ import {
   horizontalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { useDroppable } from "@dnd-kit/core";
-import { useEnemyTeamStore, MAX_SUBS } from "../stores/useEnemyTeamStore";
+import { useEnemyTeamStore, MAX_SUBS, MAX_TEAMS } from "../stores/useEnemyTeamStore";
 import { useRankStore } from "../stores/useRankStore";
 import { useMasteryStore } from "../stores/useMasteryStore";
 import { parseOpggMultiSearchUrl, ROLES, Role, Player } from "../types";
@@ -98,8 +98,13 @@ export default function EnemyTeamPage() {
   const [activeDragTeamId, setActiveDragTeamId] = useState<string | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [addTeamError, setAddTeamError] = useState("");
+  const [teamNameErrors, setTeamNameErrors] = useState<Record<string, string>>({});
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [teamToDelete, setTeamToDelete] = useState<string | null>(null);
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
+
+  const isAtLimit = teams.length >= MAX_TEAMS;
 
   const {
     fetchRanksForContext,
@@ -207,10 +212,19 @@ export default function EnemyTeamPage() {
 
   const handleAddTeam = () => {
     if (newTeamName.trim()) {
-      const team = addTeam(newTeamName.trim());
+      const result = addTeam(newTeamName.trim());
+      if (!result.success) {
+        if (result.error === 'duplicate_name') {
+          setAddTeamError('A team with this name already exists');
+        } else if (result.error === 'max_teams_reached') {
+          setAddTeamError(`You've reached the maximum limit of ${MAX_TEAMS} teams`);
+        }
+        return;
+      }
       setNewTeamName("");
+      setAddTeamError("");
       setIsAddModalOpen(false);
-      setExpandedTeamId(team.id);
+      setExpandedTeamId(result.team!.id);
     }
   };
 
@@ -233,6 +247,11 @@ export default function EnemyTeamPage() {
     const teamName =
       importTeamName.trim() || `Imported Team ${teams.length + 1}`;
     const team = importTeamFromOpgg(teamName, parsed.region, parsed.players);
+
+    if (!team) {
+      setImportError(`You've reached the maximum limit of ${MAX_TEAMS} teams. Please delete some teams to add new ones.`);
+      return;
+    }
 
     setImportUrl("");
     setImportTeamName("");
@@ -291,41 +310,76 @@ export default function EnemyTeamPage() {
   const getSubs = (players: (typeof teams)[0]["players"]) =>
     players.filter((p) => p.isSub);
 
-  const filteredTeams = teams.filter((team) => {
-    // Search filter - match team name or player names
-    const searchLower = searchQuery.toLowerCase();
-    const matchesSearch =
-      !searchQuery ||
-      team.name.toLowerCase().includes(searchLower) ||
-      team.players.some((p) =>
-        p.summonerName?.toLowerCase().includes(searchLower),
-      );
+  const filteredTeams = teams
+    .filter((team) => {
+      // Search filter - match team name or player names
+      const searchLower = searchQuery.toLowerCase();
+      const matchesSearch =
+        !searchQuery ||
+        team.name.toLowerCase().includes(searchLower) ||
+        team.players.some((p) =>
+          p.summonerName?.toLowerCase().includes(searchLower),
+        );
 
-    if (!matchesSearch) return false;
+      if (!matchesSearch) return false;
 
-    // Favorites filter
-    if (showFavoritesOnly && !team.isFavorite) return false;
+      // Favorites filter
+      if (showFavoritesOnly && !team.isFavorite) return false;
 
-    return true;
-  });
+      return true;
+    })
+    .sort((a, b) => {
+      // Sort by createdAt timestamp
+      const aTime = a.createdAt || 0;
+      const bTime = b.createdAt || 0;
+      return sortOrder === "newest" ? bTime - aTime : aTime - bTime;
+    });
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-white">Enemy Teams</h1>
-          <p className="text-gray-400 mt-1">Scout and track your opponents</p>
-        </div>
+      <div className="flex items-center gap-4">
         <div className="flex gap-3">
           <Button
             variant="secondary"
             onClick={() => setIsImportModalOpen(true)}
+            disabled={isAtLimit}
+            title={isAtLimit ? `Maximum of ${MAX_TEAMS} teams reached` : undefined}
           >
             Import from OP.GG
           </Button>
-          <Button onClick={() => setIsAddModalOpen(true)}>+ Add Team</Button>
+          <Button
+            onClick={() => setIsAddModalOpen(true)}
+            disabled={isAtLimit}
+            title={isAtLimit ? `Maximum of ${MAX_TEAMS} teams reached` : undefined}
+          >
+            + Add Team
+          </Button>
+        </div>
+        <div>
+          <h1 className="text-3xl font-bold text-white">Enemy Teams</h1>
+          <p className="text-gray-400 mt-1">
+            Scout and track your opponents
+            <span className="ml-2 text-gray-500">
+              ({teams.length}/{MAX_TEAMS})
+            </span>
+          </p>
         </div>
       </div>
+
+      {/* Limit Warning Banner */}
+      {isAtLimit && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 flex items-center gap-3">
+          <svg className="w-5 h-5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <div>
+            <p className="text-red-400 font-medium">Team limit reached</p>
+            <p className="text-red-400/70 text-sm">
+              You've reached the maximum of {MAX_TEAMS} enemy teams. Delete some teams to add new ones.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Search and Filter Bar */}
       {teams.length > 0 && (
@@ -375,17 +429,35 @@ export default function EnemyTeamPage() {
             </svg>
             Favorites
           </button>
-          {(searchQuery || showFavoritesOnly) && (
+          {/* Sort Order Filter */}
+          <div className="flex items-center gap-1 bg-lol-dark border border-lol-border rounded-xl p-1">
             <button
-              onClick={() => {
-                setSearchQuery("");
-                setShowFavoritesOnly(false);
-              }}
-              className="px-3 py-2.5 text-gray-400 hover:text-white transition-colors"
+              onClick={() => setSortOrder("newest")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-all duration-200 ${
+                sortOrder === "newest"
+                  ? "bg-lol-surface text-white"
+                  : "text-gray-400 hover:text-white"
+              }`}
             >
-              Clear
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
+              </svg>
+              Newest
             </button>
-          )}
+            <button
+              onClick={() => setSortOrder("oldest")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-all duration-200 ${
+                sortOrder === "oldest"
+                  ? "bg-lol-surface text-white"
+                  : "text-gray-400 hover:text-white"
+              }`}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4" />
+              </svg>
+              Oldest
+            </button>
+          </div>
         </div>
       )}
 
@@ -429,6 +501,7 @@ export default function EnemyTeamPage() {
             onClick={() => {
               setSearchQuery("");
               setShowFavoritesOnly(false);
+              setSortOrder("newest");
             }}
             className="mt-3 text-lol-gold hover:text-lol-gold-light transition-colors"
           >

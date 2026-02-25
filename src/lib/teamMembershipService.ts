@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 import type { DbTeamMember, DbTeamInvite, InviteDetails } from '../types/database';
 
-export type MemberRole = 'owner' | 'player' | 'viewer';
+export type MemberRole = 'owner' | 'admin' | 'player' | 'viewer';
 
 export interface TeamMember {
   id: string;
@@ -9,6 +9,7 @@ export interface TeamMember {
   userId: string;
   role: MemberRole;
   playerSlotId: string | null;
+  canEditGroups: boolean;
   joinedAt: string;
   invitedBy: string | null;
   user?: {
@@ -23,8 +24,9 @@ export interface TeamInvite {
   teamId: string;
   token: string;
   invitedEmail: string | null;
-  role: 'player' | 'viewer';
+  role: 'admin' | 'player' | 'viewer';
   playerSlotId: string | null;
+  canEditGroups: boolean;
   expiresAt: string;
   createdAt: string;
   acceptedAt: string | null;
@@ -35,8 +37,9 @@ function mapTeamMember(row: DbTeamMember & { profiles?: { display_name: string |
     id: row.id,
     teamId: row.team_id,
     userId: row.user_id,
-    role: row.role,
+    role: row.role as MemberRole,
     playerSlotId: row.player_slot_id,
+    canEditGroups: row.can_edit_groups,
     joinedAt: row.joined_at,
     invitedBy: row.invited_by,
     user: row.profiles ? {
@@ -55,6 +58,7 @@ function mapTeamInvite(row: DbTeamInvite): TeamInvite {
     invitedEmail: row.invited_email,
     role: row.role,
     playerSlotId: row.player_slot_id,
+    canEditGroups: row.can_edit_groups,
     expiresAt: row.expires_at,
     createdAt: row.created_at,
     acceptedAt: row.accepted_at,
@@ -85,9 +89,12 @@ export const teamMembershipService = {
    */
   async createInvite(
     teamId: string,
-    role: 'player' | 'viewer',
-    playerSlotId?: string,
-    email?: string
+    role: 'admin' | 'player' | 'viewer',
+    options: {
+      playerSlotId?: string;
+      canEditGroups?: boolean;
+      email?: string;
+    } = {}
   ): Promise<TeamInvite> {
     if (!supabase) throw new Error('Supabase not configured');
 
@@ -99,8 +106,9 @@ export const teamMembershipService = {
       .insert({
         team_id: teamId,
         role,
-        player_slot_id: playerSlotId || null,
-        invited_email: email || null,
+        player_slot_id: options.playerSlotId || null,
+        can_edit_groups: options.canEditGroups || false,
+        invited_email: options.email || null,
         created_by: user.user.id,
       } as never)
       .select()
@@ -146,20 +154,123 @@ export const teamMembershipService = {
 
   /**
    * Accept an invite using the token
+   * Returns full response including any free tier conflicts
    */
-  async acceptInvite(token: string): Promise<{ teamId: string; membershipId: string }> {
-    if (!supabase) throw new Error('Supabase not configured');
+  async acceptInvite(token: string): Promise<{
+    success: boolean;
+    teamId?: string;
+    membershipId?: string;
+    teamName?: string;
+    role?: string;
+    error?: string;
+    conflict?: 'free_tier_team_limit';
+    existingTeamId?: string;
+    existingTeamName?: string;
+    inviteTeamId?: string;
+    inviteTeamName?: string;
+    inviteRole?: string;
+  }> {
+    if (!supabase) return { success: false, error: 'Supabase not configured' };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase.rpc as any)('accept_team_invite', {
       invite_token: token,
     });
 
-    if (error) throw error;
-    return {
-      teamId: data.teamId,
-      membershipId: data.membershipId,
-    };
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return data;
+  },
+
+  /**
+   * Leave a team (for non-owners)
+   */
+  async leaveTeam(teamId: string): Promise<{ success: boolean; error?: string }> {
+    if (!supabase) return { success: false, error: 'Supabase not configured' };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.rpc as any)('leave_team', {
+      p_team_id: teamId,
+    });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return data;
+  },
+
+  /**
+   * Assign a player slot to a team member
+   */
+  async assignPlayerSlot(
+    membershipId: string,
+    playerSlotId: string | null
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!supabase) return { success: false, error: 'Supabase not configured' };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.rpc as any)('assign_player_slot', {
+      p_membership_id: membershipId,
+      p_player_slot_id: playerSlotId,
+    });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return data;
+  },
+
+  /**
+   * Update member permissions (can_edit_groups)
+   */
+  async updateMemberPermissions(
+    membershipId: string,
+    canEditGroups: boolean
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!supabase) return { success: false, error: 'Supabase not configured' };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.rpc as any)('update_member_permissions', {
+      p_membership_id: membershipId,
+      p_can_edit_groups: canEditGroups,
+    });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return data;
+  },
+
+  /**
+   * Get teams where the user is a member (not owner) with full details
+   */
+  async getTeamMemberships(): Promise<Array<{
+    membershipId: string;
+    teamId: string;
+    teamName: string;
+    role: MemberRole;
+    canEditGroups: boolean;
+    playerSlotId: string | null;
+    joinedAt: string;
+    ownerName: string;
+    ownerAvatar: string | null;
+  }>> {
+    if (!supabase) return [];
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.rpc as any)('get_team_memberships');
+
+    if (error) {
+      console.error('Error fetching team memberships:', error);
+      return [];
+    }
+
+    return data || [];
   },
 
   /**

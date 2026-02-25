@@ -10,10 +10,11 @@ import {
   DragEndEvent,
 } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
-import { useMyTeamStore, MAX_TEAMS, MAX_SUBS } from '../stores/useMyTeamStore';
+import { useMyTeamStore, MAX_SUBS, getMaxTeams, TeamPermissions } from '../stores/useMyTeamStore';
+import { Link } from 'react-router-dom';
 import { useRankStore } from '../stores/useRankStore';
 import { useMasteryStore } from '../stores/useMasteryStore';
-import { useAuthStore } from '../stores/useAuthStore';
+import { useAuthStore, useTierLimits } from '../stores/useAuthStore';
 import { parseOpggMultiSearchUrl, Player, Role, ROLES } from '../types';
 import { Card, ConfirmationModal, Input, Button, Modal } from '../components/ui';
 import { RoleSlot, SubSlot, TeamMembersPanel } from '../components/team';
@@ -43,6 +44,8 @@ export default function MyTeamPage() {
   const {
     teams,
     selectedTeamId,
+    memberships,
+    membershipsLoading,
     addTeam,
     deleteTeam,
     selectTeam,
@@ -58,6 +61,8 @@ export default function MyTeamPage() {
     addNote,
     updateNote,
     deleteNote,
+    loadMemberships,
+    getMyPermissions,
   } = useMyTeamStore();
 
   const team = teams.find((t) => t.id === selectedTeamId) || teams[0];
@@ -105,8 +110,30 @@ export default function MyTeamPage() {
   const [isOwner, setIsOwner] = useState(false);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [teamToDelete, setTeamToDelete] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
 
   const { user } = useAuthStore();
+  const { isFreeTier, maxTeams } = useTierLimits();
+
+  // Load memberships when authenticated
+  useEffect(() => {
+    if (user) {
+      loadMemberships();
+    }
+  }, [user, loadMemberships]);
+
+  // Get permissions for current team
+  const permissions: TeamPermissions = team ? getMyPermissions(team.id) : {
+    canView: false,
+    canEditTeamInfo: false,
+    canManageMembers: false,
+    canEditAllPlayers: false,
+    canEditOwnPlayer: false,
+    canEditGroups: false,
+    canLeave: false,
+    role: 'viewer',
+    playerSlotId: null,
+  };
 
   // Check if user is the team owner
   useEffect(() => {
@@ -114,8 +141,8 @@ export default function MyTeamPage() {
       setIsOwner(false);
       return;
     }
-    teamMembershipService.isTeamOwner(team.id).then(setIsOwner);
-  }, [user, team?.id]);
+    setIsOwner(permissions.role === 'owner');
+  }, [user, team?.id, permissions.role]);
 
   // Sync editingName when team changes
   useEffect(() => {
@@ -132,7 +159,12 @@ export default function MyTeamPage() {
   const handleNameSave = () => {
     const trimmedName = editingName.trim();
     if (trimmedName) {
-      updateTeam({ name: trimmedName });
+      const result = updateTeam({ name: trimmedName });
+      if (!result.success && result.error === 'duplicate_name') {
+        setNameError('A team with this name already exists');
+        return;
+      }
+      setNameError(null);
     } else {
       setEditingName(team?.name || '');
     }
@@ -184,8 +216,15 @@ export default function MyTeamPage() {
   };
 
   const handleAddTeam = () => {
-    if (teams.length >= MAX_TEAMS) return;
-    addTeam(`Team ${teams.length + 1}`);
+    const currentMaxTeams = getMaxTeams();
+    if (teams.length >= currentMaxTeams) return;
+    // Try adding with incrementing number until we find an available name
+    let teamNumber = teams.length + 1;
+    let result = addTeam(`Team ${teamNumber}`);
+    while (!result.success && result.error === 'duplicate_name' && teamNumber < 100) {
+      teamNumber++;
+      result = addTeam(`Team ${teamNumber}`);
+    }
   };
 
   const handleImport = () => {
@@ -261,7 +300,8 @@ export default function MyTeamPage() {
     >
       <div className="space-y-6">
         {/* Team Tabs */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Owned Teams */}
           {teams.map((t) => (
             <div
               key={t.id}
@@ -273,6 +313,9 @@ export default function MyTeamPage() {
               onClick={() => selectTeam(t.id)}
             >
               <span className="font-medium truncate max-w-32">{t.name || 'Unnamed'}</span>
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-yellow-500/20 text-yellow-400">
+                Owner
+              </span>
               {teams.length > 1 && (
                 <button
                   onClick={(e) => {
@@ -293,7 +336,51 @@ export default function MyTeamPage() {
               )}
             </div>
           ))}
-          {teams.length < MAX_TEAMS && (
+
+          {/* Membership Teams (teams user is a member of) */}
+          {memberships.map((m) => (
+            <div
+              key={m.teamId}
+              className={`group flex items-center gap-2 px-4 py-2 rounded-lg cursor-pointer transition-all ${
+                m.teamId === selectedTeamId
+                  ? 'bg-lol-gold/20 border border-lol-gold text-lol-gold'
+                  : 'bg-lol-card border border-lol-border text-gray-400 hover:border-gray-500 hover:text-gray-300'
+              }`}
+              onClick={() => selectTeam(m.teamId)}
+            >
+              <span className="font-medium truncate max-w-32">{m.teamName}</span>
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                m.role === 'admin'
+                  ? 'bg-purple-500/20 text-purple-400'
+                  : m.role === 'player'
+                  ? 'bg-green-500/20 text-green-400'
+                  : 'bg-blue-500/20 text-blue-400'
+              }`}>
+                {m.role.charAt(0).toUpperCase() + m.role.slice(1)}
+              </span>
+            </div>
+          ))}
+
+          {/* Loading memberships indicator */}
+          {membershipsLoading && (
+            <div className="px-3 py-2 text-gray-500 text-sm">
+              Loading...
+            </div>
+          )}
+
+          {/* For free tier users with max 1 team, always show upgrade prompt */}
+          {isFreeTier && user && maxTeams <= 1 ? (
+            <Link
+              to="/profile"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-lol-gold/50 text-lol-gold/80 hover:border-lol-gold hover:text-lol-gold transition-all"
+              title="Upgrade to Pro for more teams"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+              </svg>
+              <span className="text-sm font-medium">Need more teams? Upgrade to Pro</span>
+            </Link>
+          ) : teams.length < maxTeams ? (
             <button
               onClick={handleAddTeam}
               className="flex items-center gap-1 px-3 py-2 rounded-lg border border-dashed border-gray-600 text-gray-500 hover:border-lol-gold hover:text-lol-gold transition-all"
@@ -304,21 +391,31 @@ export default function MyTeamPage() {
               </svg>
               <span className="text-sm font-medium">New</span>
             </button>
-          )}
+          ) : null}
         </div>
 
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             {isEditingName ? (
-              <input
-                ref={nameInputRef}
-                value={editingName}
-                onChange={(e) => setEditingName(e.target.value)}
-                onBlur={handleNameSave}
-                onKeyDown={handleNameKeyDown}
-                className="text-3xl font-bold text-white bg-transparent border-b-2 border-lol-gold focus:outline-none px-1"
-              />
+              <div>
+                <input
+                  ref={nameInputRef}
+                  value={editingName}
+                  onChange={(e) => {
+                    setEditingName(e.target.value);
+                    setNameError(null);
+                  }}
+                  onBlur={handleNameSave}
+                  onKeyDown={handleNameKeyDown}
+                  className={`text-3xl font-bold text-white bg-transparent border-b-2 focus:outline-none px-1 ${
+                    nameError ? 'border-red-500' : 'border-lol-gold'
+                  }`}
+                />
+                {nameError && (
+                  <p className="text-red-500 text-sm mt-1">{nameError}</p>
+                )}
+              </div>
             ) : (
               <div>
                 <h1
