@@ -28,6 +28,9 @@ const debounceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 // Pending syncs - keyed by storeKey, stores the data to sync
 const pendingSyncs: Map<string, PendingSync> = new Map();
 
+// Helper to add small delay between Supabase operations to prevent lock contention
+const throttleDelay = (ms: number = 100) => new Promise(resolve => setTimeout(resolve, ms));
+
 function notifyListeners(storeKey: string, state: SyncState) {
   const listeners = syncListeners.get(storeKey);
   if (listeners) {
@@ -241,6 +244,7 @@ export const syncManager = {
       if (deleteOrphans) {
         const localIds = items.map((item) => item.id);
         if (localIds.length > 0) {
+          // Delete items that exist in cloud but not locally
           const { error: deleteError } = await supabase
             .from(tableName)
             .delete()
@@ -249,6 +253,16 @@ export const syncManager = {
 
           if (deleteError && !deleteError.message.includes('no rows')) {
             console.warn(`Delete orphans warning for ${storeKey}:`, deleteError);
+          }
+        } else {
+          // All items deleted locally - delete all items in cloud for this user
+          const { error: deleteError } = await supabase
+            .from(tableName)
+            .delete()
+            .eq('user_id', user.id);
+
+          if (deleteError && !deleteError.message.includes('no rows')) {
+            console.warn(`Delete all warning for ${storeKey}:`, deleteError);
           }
         }
       }
@@ -371,6 +385,65 @@ export const syncManager = {
   },
 
   /**
+   * Resolve team name conflicts before syncing to cloud
+   * Returns the teams with any conflicting names renamed
+   */
+  async resolveTeamNameConflicts<T extends { id: string; name: string }>(
+    tableName: 'my_teams' | 'enemy_teams',
+    localTeams: T[],
+    userId: string
+  ): Promise<T[]> {
+    if (!supabase || localTeams.length === 0) return localTeams;
+
+    try {
+      // Fetch existing team names from cloud
+      const { data: cloudTeams } = await supabase
+        .from(tableName)
+        .select('id, name')
+        .eq('user_id', userId);
+
+      if (!cloudTeams || cloudTeams.length === 0) return localTeams;
+
+      // Build a set of existing names (lowercase for case-insensitive comparison)
+      // Exclude teams that have the same ID (they're being updated, not conflicting)
+      const localIds = new Set(localTeams.map(t => t.id));
+      const existingNames = new Set(
+        cloudTeams
+          .filter(t => !localIds.has(t.id))
+          .map(t => t.name.toLowerCase())
+      );
+
+      // Also track names we're about to use (to avoid local-to-local conflicts after renaming)
+      const usedNames = new Set(existingNames);
+
+      // Resolve conflicts
+      return localTeams.map(team => {
+        const normalizedName = team.name.toLowerCase();
+
+        if (!usedNames.has(normalizedName)) {
+          usedNames.add(normalizedName);
+          return team;
+        }
+
+        // Name conflicts - find a unique name
+        let counter = 2;
+        let newName = `${team.name} (${counter})`;
+        while (usedNames.has(newName.toLowerCase())) {
+          counter++;
+          newName = `${team.name} (${counter})`;
+        }
+
+        usedNames.add(newName.toLowerCase());
+        console.log(`Renamed team "${team.name}" to "${newName}" to avoid conflict`);
+        return { ...team, name: newName };
+      });
+    } catch (error) {
+      console.error('Error resolving team name conflicts:', error);
+      return localTeams;
+    }
+  },
+
+  /**
    * Sync all stores to cloud (called on login to upload guest data)
    */
   async syncAllStores(): Promise<void> {
@@ -385,8 +458,15 @@ export const syncManager = {
     const { useDraftStore } = await import('../stores/useDraftStore');
     const { usePlayerPoolStore } = await import('../stores/usePlayerPoolStore');
 
-    // Sync my teams
-    const myTeams = useMyTeamStore.getState().teams;
+    // Sync my teams (resolve name conflicts first)
+    let myTeams = useMyTeamStore.getState().teams;
+    myTeams = await this.resolveTeamNameConflicts('my_teams', myTeams, user.id);
+
+    // Update local store if any names were changed
+    const originalTeams = useMyTeamStore.getState().teams;
+    if (myTeams.some((t, i) => t.name !== originalTeams[i]?.name)) {
+      useMyTeamStore.setState({ teams: myTeams });
+    }
     if (myTeams.length > 0) {
       await this.syncArrayToCloudImmediate('my-teams', 'my_teams', myTeams, {
         transformItem: (team, userId, index) => ({
@@ -413,8 +493,16 @@ export const syncManager = {
       }
     }
 
-    // Sync enemy teams
-    const enemyTeams = useEnemyTeamStore.getState().teams;
+    // Sync enemy teams (resolve name conflicts first)
+    let enemyTeams = useEnemyTeamStore.getState().teams;
+    enemyTeams = await this.resolveTeamNameConflicts('enemy_teams', enemyTeams, user.id);
+
+    // Update local store if any names were changed
+    const originalEnemyTeams = useEnemyTeamStore.getState().teams;
+    if (enemyTeams.some((t, i) => t.name !== originalEnemyTeams[i]?.name)) {
+      useEnemyTeamStore.setState({ teams: enemyTeams });
+    }
+
     if (enemyTeams.length > 0) {
       await this.syncArrayToCloudImmediate('enemy-teams', 'enemy_teams', enemyTeams, {
         transformItem: (team, userId, index) => ({
@@ -571,6 +659,9 @@ export const syncManager = {
       );
 
       if (cloudItems.length > 0) {
+        // Add throttle delay to prevent Navigator LockManager contention
+        await throttleDelay(150);
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { error: upsertError } = await (supabase.from(tableName) as any)
           .upsert(cloudItems as Record<string, unknown>[]);
@@ -578,7 +669,13 @@ export const syncManager = {
         if (upsertError) throw upsertError;
       }
     } catch (error) {
-      console.error(`Immediate sync error for ${storeKey}:`, error);
+      // Silently handle lock timeout errors during initial sync
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.includes('LockManager') || errorMessage.includes('timed out')) {
+        console.debug(`Sync deferred for ${storeKey} due to lock contention`);
+      } else {
+        console.error(`Immediate sync error for ${storeKey}:`, error);
+      }
     }
   },
 
@@ -639,6 +736,9 @@ export const syncManager = {
       });
 
       if (cloudPlayers.length > 0) {
+        // Add throttle delay to prevent Navigator LockManager contention
+        await throttleDelay(150);
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { error: upsertError } = await (supabase.from(tableName) as any)
           .upsert(cloudPlayers as Record<string, unknown>[]);
@@ -646,7 +746,13 @@ export const syncManager = {
         if (upsertError) throw upsertError;
       }
     } catch (error) {
-      console.error(`Immediate player sync error for ${tableName}:`, error);
+      // Silently handle lock timeout errors during initial sync
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.includes('LockManager') || errorMessage.includes('timed out')) {
+        console.debug(`Player sync deferred for ${tableName} due to lock contention`);
+      } else {
+        console.error(`Immediate player sync error for ${tableName}:`, error);
+      }
     }
   },
 
@@ -676,6 +782,9 @@ export const syncManager = {
         .order('sort_order');
 
       if (myTeams && myTeams.length > 0) {
+        // Preserve the current selectedTeamId if possible
+        const currentSelectedTeamId = useMyTeamStore.getState().selectedTeamId;
+
         const teamsWithPlayers = await Promise.all(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           myTeams.map(async (team: any) => {
@@ -709,21 +818,23 @@ export const syncManager = {
           })
         );
 
-        // Reset the store with cloud data
+        // Check if the previously selected team still exists in the loaded data
+        const selectedTeamExists = teamsWithPlayers.some(t => t.id === currentSelectedTeamId);
+        const newSelectedTeamId = selectedTeamExists ? currentSelectedTeamId : (teamsWithPlayers[0]?.id || '');
+
+        // Reset the store with cloud data, preserving selection if valid
         useMyTeamStore.setState({
           teams: teamsWithPlayers,
-          selectedTeamId: teamsWithPlayers[0]?.id || '',
+          selectedTeamId: newSelectedTeamId,
         });
       } else {
         // No cloud data - check if we have local data to preserve
         const localTeams = useMyTeamStore.getState().teams;
         if (localTeams.length === 0) {
-          // No local data either - create a fresh default team
-          const { createEmptyTeam } = await import('../types');
-          const defaultTeam = createEmptyTeam('My Team');
+          // No local data either - keep empty state (user can create teams manually)
           useMyTeamStore.setState({
-            teams: [defaultTeam],
-            selectedTeamId: defaultTeam.id,
+            teams: [],
+            selectedTeamId: '',
           });
         } else {
           // Preserve local data and immediately sync to cloud

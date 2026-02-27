@@ -19,9 +19,8 @@ import { useRankStore } from "../stores/useRankStore";
 import { useMasteryStore } from "../stores/useMasteryStore";
 import { parseOpggMultiSearchUrl, ROLES, Role, Player } from "../types";
 import { Button, Card, ConfirmationModal, Input, Modal } from "../components/ui";
-import { RoleSlot, SubSlot, RoleIcon } from "../components/team";
+import { RoleSlot, SubSlot } from "../components/team";
 import { useOpgg } from "../hooks/useOpgg";
-import { PlayerTierList } from "../components/champion";
 
 function SubsDropZone({
   children,
@@ -61,26 +60,11 @@ export default function EnemyTeamPage() {
     swapPlayerRoles,
     moveToRole,
     moveToSubs,
-    addChampionToGroup,
-    removeChampionFromGroup,
-    moveChampion,
-    reorderChampionInGroup,
-    addGroup,
-    removeGroup,
-    renameGroup,
-    reorderGroups,
-    setAllowDuplicateChampions,
     toggleFavorite,
     addNote,
     updateNote,
     deleteNote,
-    addPlayerNote,
-    updatePlayerNote,
-    deletePlayerNote,
   } = useEnemyTeamStore();
-  const [selectedPlayerIds, setSelectedPlayerIds] = useState<
-    Record<string, string>
-  >({});
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [newTeamName, setNewTeamName] = useState("");
@@ -246,17 +230,21 @@ export default function EnemyTeamPage() {
 
     const teamName =
       importTeamName.trim() || `Imported Team ${teams.length + 1}`;
-    const team = importTeamFromOpgg(teamName, parsed.region, parsed.players);
+    const result = importTeamFromOpgg(teamName, parsed.region, parsed.players);
 
-    if (!team) {
-      setImportError(`You've reached the maximum limit of ${MAX_TEAMS} teams. Please delete some teams to add new ones.`);
+    if (!result.success) {
+      if (result.error === 'duplicate_name') {
+        setImportError('A team with this name already exists. Please choose a different name.');
+      } else if (result.error === 'max_teams_reached') {
+        setImportError(`You've reached the maximum limit of ${MAX_TEAMS} teams. Please delete some teams to add new ones.`);
+      }
       return;
     }
 
     setImportUrl("");
     setImportTeamName("");
     setIsImportModalOpen(false);
-    setExpandedTeamId(team.id);
+    setExpandedTeamId(result.team!.id);
   };
 
   const handleInlineImport = (teamId: string) => {
@@ -655,10 +643,22 @@ export default function EnemyTeamPage() {
                         <Input
                           label="Team Name"
                           value={team.name}
-                          onChange={(e) =>
-                            updateTeam(team.id, { name: e.target.value })
-                          }
+                          onChange={(e) => {
+                            const result = updateTeam(team.id, { name: e.target.value });
+                            if (!result.success && result.error === 'duplicate_name') {
+                              setTeamNameErrors(prev => ({ ...prev, [team.id]: 'A team with this name already exists' }));
+                            } else {
+                              setTeamNameErrors(prev => {
+                                const newErrors = { ...prev };
+                                delete newErrors[team.id];
+                                return newErrors;
+                              });
+                            }
+                          }}
                         />
+                        {teamNameErrors[team.id] && (
+                          <p className="text-red-500 text-sm mt-1">{teamNameErrors[team.id]}</p>
+                        )}
                       </div>
                       {(() => {
                         const validPlayers = team.players.filter(
@@ -886,198 +886,6 @@ export default function EnemyTeamPage() {
                       </div>
                     </div>
 
-                    {/* Player Champion Pools */}
-                    <div>
-                      <div className="mb-4">
-                        <h3 className="text-sm font-medium text-gray-300">
-                          Player Champion Pools
-                        </h3>
-                        <p className="text-xs text-gray-400 font-light">
-                          Create custom champion pools for each player. Data is
-                          used in drafting.
-                        </p>
-                      </div>
-
-                      {/* Player Tabs - Main Roster */}
-                      <div className="flex flex-wrap gap-2 mb-4">
-                        <div className="flex gap-2 bg-lol-dark p-1.5 rounded-xl border border-lol-border">
-                          {ROLES.map((role) => {
-                            const player = mainRoster.find(
-                              (p) => p.role === role.value,
-                            );
-                            if (!player) return null;
-                            const roleLabel = role.label;
-                            const selectedId =
-                              selectedPlayerIds[team.id] ||
-                              mainRoster.find((p) => p.role === "top")?.id ||
-                              mainRoster[0]?.id;
-                            const isSelected = player.id === selectedId;
-                            return (
-                              <button
-                                key={player.id}
-                                onClick={() =>
-                                  setSelectedPlayerIds((prev) => ({
-                                    ...prev,
-                                    [team.id]: player.id,
-                                  }))
-                                }
-                                className={`px-4 py-2.5 rounded-lg font-medium transition-all duration-200 min-w-35 text-center ${
-                                  isSelected
-                                    ? "bg-gradient-to-b from-lol-gold-light to-lol-gold text-lol-dark shadow-md"
-                                    : "text-gray-400 hover:text-white hover:bg-lol-surface"
-                                }`}
-                              >
-                                <div className="text-sm flex items-center justify-center gap-1">
-                                  <RoleIcon role={role.value} size="xs" />
-                                  {roleLabel}
-                                </div>
-                                <div
-                                  className={`text-xs mt-0.5 truncate ${isSelected ? "text-lol-dark/70" : "text-gray-500"}`}
-                                >
-                                  {player.summonerName || "Empty"}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                        {/* Subs Tabs */}
-                        {subs.length > 0 && (
-                          <div className="flex gap-2 bg-lol-dark p-1.5 rounded-xl border border-lol-border/50">
-                            {subs.map((player) => {
-                              const selectedId =
-                                selectedPlayerIds[team.id] ||
-                                mainRoster.find((p) => p.role === "top")?.id ||
-                                mainRoster[0]?.id;
-                              const isSelected = player.id === selectedId;
-                              return (
-                                <button
-                                  key={player.id}
-                                  onClick={() =>
-                                    setSelectedPlayerIds((prev) => ({
-                                      ...prev,
-                                      [team.id]: player.id,
-                                    }))
-                                  }
-                                  className={`px-4 py-2.5 rounded-lg font-medium transition-all duration-200 min-w-35 text-center ${
-                                    isSelected
-                                      ? "bg-gradient-to-b from-lol-gold-light to-lol-gold text-lol-dark shadow-md"
-                                      : "text-gray-400 hover:text-white hover:bg-lol-surface"
-                                  }`}
-                                >
-                                  <div className="text-sm text-orange-400 flex items-center justify-center gap-1">
-                                    <RoleIcon role={player.role} size="xs" />
-                                    Sub
-                                  </div>
-                                  <div
-                                    className={`text-xs mt-0.5 truncate ${isSelected ? "text-lol-dark/70" : "text-gray-500"}`}
-                                  >
-                                    {player.summonerName || "Empty"}
-                                  </div>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Selected Player's Champion Groups */}
-                      {(() => {
-                        const selectedId =
-                          selectedPlayerIds[team.id] ||
-                          mainRoster.find((p) => p.role === "top")?.id ||
-                          mainRoster[0]?.id;
-                        const selectedPlayer = team.players.find(
-                          (p) => p.id === selectedId,
-                        );
-                        if (!selectedPlayer) return null;
-                        return (
-                          <PlayerTierList
-                            player={selectedPlayer}
-                            onAddChampion={(groupId, championId) =>
-                              addChampionToGroup(
-                                team.id,
-                                selectedPlayer.id,
-                                groupId,
-                                championId,
-                              )
-                            }
-                            onRemoveChampion={(groupId, championId) =>
-                              removeChampionFromGroup(
-                                team.id,
-                                selectedPlayer.id,
-                                groupId,
-                                championId,
-                              )
-                            }
-                            onMoveChampion={(
-                              fromGroupId,
-                              toGroupId,
-                              championId,
-                              newIndex,
-                            ) =>
-                              moveChampion(
-                                team.id,
-                                selectedPlayer.id,
-                                fromGroupId,
-                                toGroupId,
-                                championId,
-                                newIndex,
-                              )
-                            }
-                            onReorderChampion={(
-                              groupId,
-                              championId,
-                              newIndex,
-                            ) =>
-                              reorderChampionInGroup(
-                                team.id,
-                                selectedPlayer.id,
-                                groupId,
-                                championId,
-                                newIndex,
-                              )
-                            }
-                            onAddGroup={(groupName) =>
-                              addGroup(team.id, selectedPlayer.id, groupName)
-                            }
-                            onRemoveGroup={(groupId) =>
-                              removeGroup(team.id, selectedPlayer.id, groupId)
-                            }
-                            onRenameGroup={(groupId, newName) =>
-                              renameGroup(
-                                team.id,
-                                selectedPlayer.id,
-                                groupId,
-                                newName,
-                              )
-                            }
-                            onReorderGroups={(groupIds) =>
-                              reorderGroups(
-                                team.id,
-                                selectedPlayer.id,
-                                groupIds,
-                              )
-                            }
-                            onSetAllowDuplicates={(allowDuplicates) =>
-                              setAllowDuplicateChampions(
-                                team.id,
-                                selectedPlayer.id,
-                                allowDuplicates,
-                              )
-                            }
-                            onAddNote={() =>
-                              addPlayerNote(team.id, selectedPlayer.id)
-                            }
-                            onUpdateNote={(noteId, content) =>
-                              updatePlayerNote(team.id, selectedPlayer.id, noteId, content)
-                            }
-                            onDeleteNote={(noteId) =>
-                              deletePlayerNote(team.id, selectedPlayer.id, noteId)
-                            }
-                          />
-                        );
-                      })()}
-                    </div>
                   </div>
                 )}
               </Card>
@@ -1089,20 +897,34 @@ export default function EnemyTeamPage() {
       {/* Add Team Modal */}
       <Modal
         isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
+        onClose={() => {
+          setIsAddModalOpen(false);
+          setAddTeamError("");
+        }}
         title="Add Enemy Team"
       >
         <div className="space-y-6">
-          <Input
-            label="Team Name"
-            value={newTeamName}
-            onChange={(e) => setNewTeamName(e.target.value)}
-            placeholder="e.g., Team Liquid"
-            autoFocus
-            size="lg"
-          />
+          <div>
+            <Input
+              label="Team Name"
+              value={newTeamName}
+              onChange={(e) => {
+                setNewTeamName(e.target.value);
+                setAddTeamError("");
+              }}
+              placeholder="e.g., Team Liquid"
+              autoFocus
+              size="lg"
+            />
+            {addTeamError && (
+              <p className="text-red-500 text-sm mt-1">{addTeamError}</p>
+            )}
+          </div>
           <div className="flex gap-3 justify-end">
-            <Button variant="ghost" onClick={() => setIsAddModalOpen(false)}>
+            <Button variant="ghost" onClick={() => {
+              setIsAddModalOpen(false);
+              setAddTeamError("");
+            }}>
               Cancel
             </Button>
             <Button onClick={handleAddTeam} disabled={!newTeamName.trim()}>

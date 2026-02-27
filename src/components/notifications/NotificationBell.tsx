@@ -177,7 +177,7 @@ export default function NotificationBell({ collapsed }: NotificationBellProps) {
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setShowDropdown(!showDropdown)}
-        className={`relative w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg transition-all duration-200 group border ${
+        className={`relative w-full flex items-center justify-center py-2 px-3 rounded-lg transition-all duration-300 group border ${
           showDropdown
             ? 'bg-lol-gold/10 border-lol-gold/30 text-lol-gold'
             : 'bg-lol-surface/50 border-lol-border hover:border-lol-gold/30 text-gray-400 hover:text-white'
@@ -207,12 +207,10 @@ export default function NotificationBell({ collapsed }: NotificationBellProps) {
           )}
         </span>
 
-        {/* Label - only show when expanded */}
-        {!collapsed && (
-          <span className="text-sm font-medium whitespace-nowrap">
-            Updates
-          </span>
-        )}
+        {/* Label */}
+        <span className={`text-sm font-medium whitespace-nowrap transition-all duration-300 overflow-hidden ${collapsed ? 'max-w-0 opacity-0 ml-0' : 'max-w-[100px] opacity-100 ml-2'}`}>
+          Updates
+        </span>
       </button>
 
       {/* Dropdown */}

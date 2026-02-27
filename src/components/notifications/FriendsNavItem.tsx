@@ -39,11 +39,11 @@ export default function FriendsNavItem({ collapsed }: FriendsNavItemProps) {
     <NavLink
       to="/friends"
       className={({ isActive }) =>
-        `relative flex items-center gap-3 px-3 py-3 rounded-xl font-medium transition-all duration-200 group ${
+        `relative flex items-center py-3 px-3 rounded-xl font-medium transition-all duration-300 group ${
           isActive
             ? 'bg-gradient-to-r from-lol-gold/20 to-transparent text-lol-gold'
             : 'text-gray-400 hover:text-white hover:bg-lol-surface'
-        } ${collapsed ? 'justify-center' : ''}`
+        }`
       }
     >
       {({ isActive }) => (
@@ -77,11 +77,7 @@ export default function FriendsNavItem({ collapsed }: FriendsNavItemProps) {
             )}
           </span>
 
-          <span
-            className={`whitespace-nowrap transition-all duration-300 ${
-              collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100'
-            }`}
-          >
+          <span className={`whitespace-nowrap transition-all duration-300 overflow-hidden ${collapsed ? 'max-w-0 opacity-0 ml-0' : 'max-w-[200px] opacity-100 ml-3'}`}>
             Friends
           </span>
 

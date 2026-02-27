@@ -118,7 +118,7 @@ export const messageService = {
 
     if (error) {
       console.error('Error sending message:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: 'Could not send message. Please try again.' };
     }
 
     return data as SendMessageResponse;

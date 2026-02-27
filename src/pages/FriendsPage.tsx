@@ -6,21 +6,58 @@ import { useAuthStore } from '../stores/useAuthStore';
 import { FriendCard, PendingRequestCard, BlockedUserCard } from '../components/social/FriendCard';
 import AddFriendModal from '../components/social/AddFriendModal';
 import { formatDistanceToNowShort } from '../lib/dateUtils';
-import type { Message, ConversationPreview } from '../types/database';
+import { teamMembershipService, PendingTeamInvite } from '../lib/teamMembershipService';
+import type { Message, ConversationPreview, Friend, ProfileRole } from '../types/database';
 
-type Tab = 'friends' | 'pending' | 'sent' | 'messages' | 'blocked';
+// Role display labels
+const ROLE_LABELS: Record<ProfileRole, string> = {
+  team_owner: 'Team Owner',
+  head_coach: 'Head Coach',
+  coach: 'Coach',
+  analyst: 'Analyst',
+  player: 'Player',
+  manager: 'Manager',
+  scout: 'Scout',
+  content_creator: 'Content Creator',
+  caster: 'Caster',
+  journalist: 'Journalist',
+  streamer: 'Streamer',
+  groupie: 'Groupie',
+  developer: 'Developer',
+};
+
+function getRoleDisplay(
+  role?: ProfileRole | null,
+  roleTeamName?: string | null
+): string | null {
+  if (!role) return null;
+
+  const roleLabel = ROLE_LABELS[role] || null;
+  if (!roleLabel) return null;
+
+  if (roleTeamName) {
+    return `${roleLabel} for ${roleTeamName}`;
+  }
+
+  return roleLabel;
+}
+
+type Tab = 'friends' | 'pending' | 'sent' | 'messages' | 'blocked' | 'team_invites';
 
 // Conversation Item Component
 function ConversationItem({
   conversation,
+  friend,
   isActive,
   onClick,
 }: {
   conversation: ConversationPreview;
+  friend?: Friend;
   isActive: boolean;
   onClick: () => void;
 }) {
   const initials = conversation.friendName?.slice(0, 2).toUpperCase() || '??';
+  const roleDisplay = friend ? getRoleDisplay(friend.role, friend.roleTeamName) : null;
 
   return (
     <button
@@ -52,6 +89,11 @@ function ConversationItem({
             {formatDistanceToNowShort(conversation.lastMessageAt)}
           </span>
         </div>
+        {roleDisplay && (
+          <p className="text-[9px] font-medium text-lol-gold truncate">
+            {roleDisplay}
+          </p>
+        )}
         <p className="text-xs text-gray-500 truncate mt-0.5">
           {conversation.lastMessage}
         </p>
@@ -94,13 +136,18 @@ export default function FriendsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<Tab>(() => {
     const tab = searchParams.get('tab');
-    if (tab === 'messages' || tab === 'pending' || tab === 'sent' || tab === 'blocked') return tab;
+    if (tab === 'messages' || tab === 'pending' || tab === 'sent' || tab === 'blocked' || tab === 'team_invites') return tab;
     return 'friends';
   });
   const [showAddModal, setShowAddModal] = useState(false);
   const [newMessage, setNewMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Team invites state
+  const [teamInvites, setTeamInvites] = useState<PendingTeamInvite[]>([]);
+  const [teamInvitesLoading, setTeamInvitesLoading] = useState(false);
+  const [respondingInviteId, setRespondingInviteId] = useState<string | null>(null);
 
   const { user } = useAuthStore();
   const {
@@ -161,10 +208,43 @@ export default function FriendsPage() {
   // Handle tab from URL
   useEffect(() => {
     const tab = searchParams.get('tab');
-    if (tab === 'messages' || tab === 'pending' || tab === 'sent' || tab === 'blocked') {
+    if (tab === 'messages' || tab === 'pending' || tab === 'sent' || tab === 'blocked' || tab === 'team_invites') {
       setActiveTab(tab);
     }
   }, [searchParams]);
+
+  // Load team invites
+  const loadTeamInvites = async () => {
+    setTeamInvitesLoading(true);
+    try {
+      const invites = await teamMembershipService.getPendingTeamInvitesForUser();
+      setTeamInvites(invites);
+    } catch (err) {
+      console.error('Failed to load team invites:', err);
+    } finally {
+      setTeamInvitesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user) {
+      loadTeamInvites();
+    }
+  }, [user]);
+
+  const handleRespondToTeamInvite = async (inviteId: string, accept: boolean) => {
+    setRespondingInviteId(inviteId);
+    try {
+      const result = await teamMembershipService.respondToTeamInvite(inviteId, accept);
+      if (result.success) {
+        setTeamInvites(teamInvites.filter(i => i.inviteId !== inviteId));
+      }
+    } catch (err) {
+      console.error('Failed to respond to invite:', err);
+    } finally {
+      setRespondingInviteId(null);
+    }
+  };
 
   // Redirect guests to sign in
   if (!user) {
@@ -188,6 +268,7 @@ export default function FriendsPage() {
     { id: 'friends', label: 'Friends', count: friends.length },
     { id: 'messages', label: 'Messages', count: unreadMessagesCount },
     { id: 'pending', label: 'Requests', count: pendingReceived.length },
+    { id: 'team_invites', label: 'Team Invites', count: teamInvites.length },
     { id: 'sent', label: 'Sent', count: pendingSent.length },
     { id: 'blocked', label: 'Blocked', count: blocked.length },
   ];
@@ -345,6 +426,7 @@ export default function FriendsPage() {
                       <ConversationItem
                         key={convo.friendId}
                         conversation={convo}
+                        friend={friends.find((f) => f.friendId === convo.friendId)}
                         isActive={convo.friendId === activeConversation}
                         onClick={() => handleSelectConversation(convo.friendId)}
                       />
@@ -374,6 +456,11 @@ export default function FriendsPage() {
                         <h3 className="font-medium text-white">
                           {activeFriend?.displayName || activeConvo?.friendName || 'Unknown'}
                         </h3>
+                        {activeFriend && getRoleDisplay(activeFriend.role, activeFriend.roleTeamName) && (
+                          <p className="text-[10px] font-medium text-lol-gold">
+                            {getRoleDisplay(activeFriend.role, activeFriend.roleTeamName)}
+                          </p>
+                        )}
                       </div>
                     </div>
 
@@ -510,6 +597,35 @@ export default function FriendsPage() {
               )}
             </div>
           )}
+
+          {/* Team Invites Tab */}
+          {activeTab === 'team_invites' && (
+            <div className="space-y-3">
+              {teamInvitesLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-lol-gold" />
+                </div>
+              ) : teamInvites.length === 0 ? (
+                <div className="text-center py-12">
+                  <svg className="w-12 h-12 text-gray-600 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  <p className="text-gray-400">No team invites</p>
+                  <p className="text-gray-500 text-sm mt-1">Team invitations will appear here</p>
+                </div>
+              ) : (
+                teamInvites.map((invite) => (
+                  <TeamInviteCard
+                    key={invite.inviteId}
+                    invite={invite}
+                    onAccept={() => handleRespondToTeamInvite(invite.inviteId, true)}
+                    onDecline={() => handleRespondToTeamInvite(invite.inviteId, false)}
+                    isResponding={respondingInviteId === invite.inviteId}
+                  />
+                ))
+              )}
+            </div>
+          )}
         </>
       )}
 
@@ -518,6 +634,85 @@ export default function FriendsPage() {
         isOpen={showAddModal}
         onClose={() => setShowAddModal(false)}
       />
+    </div>
+  );
+}
+
+// Team Invite Card Component
+function TeamInviteCard({
+  invite,
+  onAccept,
+  onDecline,
+  isResponding,
+}: {
+  invite: PendingTeamInvite;
+  onAccept: () => void;
+  onDecline: () => void;
+  isResponding: boolean;
+}) {
+  const expiresIn = Math.ceil((new Date(invite.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+
+  return (
+    <div className="flex items-center gap-4 p-4 bg-lol-card rounded-xl border border-lol-border">
+      {/* Inviter Avatar */}
+      {invite.invitedBy.avatarUrl ? (
+        <img
+          src={invite.invitedBy.avatarUrl}
+          alt={invite.invitedBy.displayName}
+          className="w-12 h-12 rounded-lg object-cover"
+        />
+      ) : (
+        <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-lol-gold to-lol-gold-light flex items-center justify-center text-lol-dark font-semibold">
+          {invite.invitedBy.displayName.slice(0, 2).toUpperCase()}
+        </div>
+      )}
+
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-medium text-white">{invite.invitedBy.displayName}</span>
+          <span className="text-gray-400">invited you to join</span>
+          <span className="font-medium text-lol-gold">{invite.teamName}</span>
+        </div>
+        <div className="flex items-center gap-3 mt-1">
+          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+            invite.role === 'admin'
+              ? 'bg-purple-500/20 text-purple-400'
+              : invite.role === 'player'
+              ? 'bg-green-500/20 text-green-400'
+              : 'bg-blue-500/20 text-blue-400'
+          }`}>
+            {invite.role}
+          </span>
+          {invite.canEditGroups && invite.role === 'player' && (
+            <span className="text-xs text-gray-500">+ can edit groups</span>
+          )}
+          <span className="text-xs text-gray-500">
+            Expires in {expiresIn} day{expiresIn !== 1 ? 's' : ''}
+          </span>
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onDecline}
+          disabled={isResponding}
+          className="px-4 py-2 text-sm font-medium text-gray-400 hover:text-white hover:bg-lol-surface rounded-lg transition-colors disabled:opacity-50"
+        >
+          Decline
+        </button>
+        <button
+          onClick={onAccept}
+          disabled={isResponding}
+          className="px-4 py-2 text-sm font-medium bg-lol-gold hover:bg-lol-gold-light text-lol-dark rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+        >
+          {isResponding ? (
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-lol-dark" />
+          ) : (
+            'Accept'
+          )}
+        </button>
+      </div>
     </div>
   );
 }

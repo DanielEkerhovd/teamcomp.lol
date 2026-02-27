@@ -41,7 +41,14 @@
       "Bash(xargs ls:*)",
       "Bash(node scripts/test-social-backend.mjs:*)",
       "Bash(node scripts/update-champion-roles.mjs:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(ls:*)",
+      "Bash(10042 \")",
+      "Bash(supabase migration:*)",
+      "Bash(findstr:*)",
+      "Bash(Select-String -Pattern \"my_teams\")",
+      "Bash(npx vite build)",
+      "WebFetch(domain:raw.communitydragon.org)"
     ],
     "defaultMode": "acceptEdits"
   }

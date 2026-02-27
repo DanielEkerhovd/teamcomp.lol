@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Modal from '../ui/Modal';
-import { teamMembershipService, TeamInvite } from '../../lib/teamMembershipService';
+import { teamMembershipService, SentTeamInvite } from '../../lib/teamMembershipService';
 import type { Player } from '../../types';
 
 interface InviteModalProps {
@@ -12,17 +12,19 @@ interface InviteModalProps {
 }
 
 export default function InviteModal({ isOpen, onClose, teamId, teamName, players }: InviteModalProps) {
-  const [invites, setInvites] = useState<TeamInvite[]>([]);
+  const [invites, setInvites] = useState<SentTeamInvite[]>([]);
   const [loading, setLoading] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // New invite form state
+  // Invite form state
   const [newRole, setNewRole] = useState<'admin' | 'player' | 'viewer'>('player');
   const [newPlayerSlotId, setNewPlayerSlotId] = useState<string>('');
   const [newCanEditGroups, setNewCanEditGroups] = useState(false);
-  const [newEmail, setNewEmail] = useState('');
+
+  // Direct invite state
+  const [identifier, setIdentifier] = useState('');
+  const [sending, setSending] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
 
   // Load existing invites when modal opens
   useEffect(() => {
@@ -35,58 +37,56 @@ export default function InviteModal({ isOpen, onClose, teamId, teamName, players
     setLoading(true);
     setError(null);
     try {
-      const result = await teamMembershipService.getPendingInvites(teamId);
-      setInvites(result);
+      const result = await teamMembershipService.getSentTeamInvites(teamId);
+      // Only show direct invites (not link-based)
+      setInvites(result.filter(i => i.isDirectInvite));
     } catch (err) {
-      setError('Failed to load invites');
+      setError('Couldn\'t load invites. Please try again.');
       console.error(err);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCreateInvite = async () => {
-    setCreating(true);
-    setError(null);
-    try {
-      const newInvite = await teamMembershipService.createInvite(
-        teamId,
-        newRole,
-        {
-          playerSlotId: newPlayerSlotId || undefined,
-          canEditGroups: newCanEditGroups,
-          email: newEmail || undefined,
-        }
-      );
-      setInvites([newInvite, ...invites]);
-      // Auto-copy the new invite link
-      handleCopy(newInvite.token);
-      // Reset form
-      setNewEmail('');
-      setNewPlayerSlotId('');
-      setNewCanEditGroups(false);
-    } catch (err) {
-      setError('Failed to create invite');
-      console.error(err);
-    } finally {
-      setCreating(false);
-    }
-  };
+  const handleSendInvite = async () => {
+    if (!identifier.trim() || sending) return;
 
-  const handleCopy = async (token: string) => {
-    const success = await teamMembershipService.copyInviteUrl(token);
-    if (success) {
-      setCopiedId(token);
-      setTimeout(() => setCopiedId(null), 2000);
+    setSending(true);
+    setError(null);
+    setSuccess(null);
+
+    const result = await teamMembershipService.sendTeamInvite(
+      teamId,
+      identifier.trim(),
+      newRole,
+      {
+        playerSlotId: newPlayerSlotId || undefined,
+        canEditGroups: newCanEditGroups,
+      }
+    );
+
+    if (result.success) {
+      setSuccess(`Invite sent to ${result.targetUser?.displayName || identifier}`);
+      setIdentifier('');
+      loadInvites();
+      setTimeout(() => setSuccess(null), 3000);
+    } else {
+      setError(result.error || 'Couldn\'t send invite. Please try again.');
     }
+
+    setSending(false);
   };
 
   const handleRevoke = async (inviteId: string) => {
     try {
-      await teamMembershipService.revokeInvite(inviteId);
-      setInvites(invites.filter(i => i.id !== inviteId));
+      const result = await teamMembershipService.cancelTeamInvite(inviteId);
+      if (result.success) {
+        setInvites(invites.filter(i => i.inviteId !== inviteId));
+      } else {
+        setError(result.error || 'Couldn\'t cancel invite. Please try again.');
+      }
     } catch (err) {
-      setError('Failed to revoke invite');
+      setError('Couldn\'t cancel invite. Please try again.');
       console.error(err);
     }
   };
@@ -100,7 +100,7 @@ export default function InviteModal({ isOpen, onClose, teamId, teamName, players
         {/* Header info */}
         <p className="text-gray-400 text-sm">
           Invite people to join <span className="text-white font-medium">{teamName}</span>.
-          They can view all team data and edit their assigned champion pool.
+          They must have an account to receive the invitation.
         </p>
 
         {/* Error message */}
@@ -110,9 +110,29 @@ export default function InviteModal({ isOpen, onClose, teamId, teamName, players
           </div>
         )}
 
-        {/* Create new invite form */}
+        {/* Success message */}
+        {success && (
+          <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg text-green-400 text-sm">
+            {success}
+          </div>
+        )}
+
+        {/* Invite form */}
         <div className="space-y-3 p-4 bg-lol-surface rounded-xl border border-lol-border">
-          <h3 className="text-sm font-medium text-gray-300">Create New Invite</h3>
+          <h3 className="text-sm font-medium text-gray-300">Send Invite</h3>
+
+          {/* Username/Email input */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Username or Email</label>
+            <input
+              type="text"
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSendInvite()}
+              placeholder="Enter username or email"
+              className="w-full px-3 py-2 bg-lol-card border border-lol-border rounded-lg text-gray-300 text-sm placeholder:text-gray-600 focus:outline-none focus:border-lol-gold/50"
+            />
+          </div>
 
           {/* Role selection */}
           <div>
@@ -201,38 +221,26 @@ export default function InviteModal({ isOpen, onClose, teamId, teamName, players
             </label>
           )}
 
-          {/* Optional email */}
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Email (optional - for tracking)</label>
-            <input
-              type="email"
-              value={newEmail}
-              onChange={(e) => setNewEmail(e.target.value)}
-              placeholder="teammate@example.com"
-              className="w-full px-3 py-2 bg-lol-card border border-lol-border rounded-lg text-gray-300 text-sm placeholder:text-gray-600 focus:outline-none focus:border-lol-gold/50"
-            />
-          </div>
-
-          {/* Create button */}
+          {/* Send button */}
           <button
-            onClick={handleCreateInvite}
-            disabled={creating}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-lol-gold/10 hover:bg-lol-gold/20 border border-lol-gold/30 text-lol-gold rounded-lg font-medium transition-colors disabled:opacity-50"
+            onClick={handleSendInvite}
+            disabled={!identifier.trim() || sending}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-lol-gold/10 hover:bg-lol-gold/20 border border-lol-gold/30 text-lol-gold rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {creating ? (
+            {sending ? (
               <>
                 <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
-                Creating...
+                Sending...
               </>
             ) : (
               <>
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                 </svg>
-                Create Invite Link
+                Send Invite
               </>
             )}
           </button>
@@ -253,12 +261,10 @@ export default function InviteModal({ isOpen, onClose, teamId, teamName, players
           <div className="space-y-2">
             <h3 className="text-sm font-medium text-gray-400">Pending Invites</h3>
             {invites.map(invite => (
-              <InviteLinkItem
-                key={invite.id}
+              <PendingInviteItem
+                key={invite.inviteId}
                 invite={invite}
                 players={players}
-                copiedId={copiedId}
-                onCopy={handleCopy}
                 onRevoke={handleRevoke}
               />
             ))}
@@ -276,24 +282,38 @@ export default function InviteModal({ isOpen, onClose, teamId, teamName, players
   );
 }
 
-interface InviteLinkItemProps {
-  invite: TeamInvite;
+interface PendingInviteItemProps {
+  invite: SentTeamInvite;
   players: Player[];
-  copiedId: string | null;
-  onCopy: (token: string) => void;
   onRevoke: (id: string) => void;
 }
 
-function InviteLinkItem({ invite, players, copiedId, onCopy, onRevoke }: InviteLinkItemProps) {
-  const inviteUrl = teamMembershipService.getInviteUrl(invite.token);
-  const isCopied = copiedId === invite.token;
+function PendingInviteItem({ invite, players, onRevoke }: PendingInviteItemProps) {
   const assignedPlayer = invite.playerSlotId ? players.find(p => p.id === invite.playerSlotId) : null;
   const expiresIn = Math.ceil((new Date(invite.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
 
   return (
-    <div className="flex items-center gap-2 p-3 bg-lol-surface rounded-lg border border-lol-border">
+    <div className="flex items-center gap-3 p-3 bg-lol-surface rounded-lg border border-lol-border">
+      {/* Avatar */}
+      {invite.invitedUser?.avatarUrl ? (
+        <img
+          src={invite.invitedUser.avatarUrl}
+          alt={invite.invitedUser.displayName}
+          className="w-10 h-10 rounded-full"
+        />
+      ) : (
+        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-lol-gold/20 to-lol-gold/5 flex items-center justify-center">
+          <span className="text-lol-gold font-medium">
+            {invite.invitedUser?.displayName?.charAt(0).toUpperCase() || '?'}
+          </span>
+        </div>
+      )}
+
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
+          <span className="text-gray-200 font-medium truncate">
+            {invite.invitedUser?.displayName || 'Unknown'}
+          </span>
           <span className={`px-2 py-0.5 rounded text-xs font-medium ${
             invite.role === 'admin'
               ? 'bg-purple-500/20 text-purple-400'
@@ -304,47 +324,21 @@ function InviteLinkItem({ invite, players, copiedId, onCopy, onRevoke }: InviteL
             {invite.role}
           </span>
           {invite.canEditGroups && invite.role === 'player' && (
-            <span className="text-xs text-gray-500">
-              + groups
-            </span>
+            <span className="text-xs text-gray-500">+ groups</span>
           )}
+        </div>
+        <div className="flex items-center gap-2 text-xs text-gray-500">
           {assignedPlayer && (
-            <span className="text-xs text-gray-500">
-              {assignedPlayer.summonerName}
-            </span>
+            <span>Slot: {assignedPlayer.summonerName}</span>
           )}
-          {invite.invitedEmail && (
-            <span className="text-xs text-gray-500 truncate">
-              {invite.invitedEmail}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-3 mt-1">
-          <input
-            type="text"
-            readOnly
-            value={inviteUrl}
-            className="flex-1 bg-transparent text-xs text-gray-400 truncate focus:outline-none"
-          />
-        </div>
-        <div className="text-xs text-gray-600 mt-0.5">
-          Expires in {expiresIn} day{expiresIn !== 1 ? 's' : ''}
+          <span>Expires in {expiresIn} day{expiresIn !== 1 ? 's' : ''}</span>
         </div>
       </div>
+
       <button
-        onClick={() => onCopy(invite.token)}
-        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-          isCopied
-            ? 'bg-green-500/20 text-green-400'
-            : 'bg-lol-gold/10 hover:bg-lol-gold/20 text-lol-gold'
-        }`}
-      >
-        {isCopied ? 'Copied!' : 'Copy'}
-      </button>
-      <button
-        onClick={() => onRevoke(invite.id)}
+        onClick={() => onRevoke(invite.inviteId)}
         className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-        title="Revoke invite"
+        title="Cancel invite"
       >
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

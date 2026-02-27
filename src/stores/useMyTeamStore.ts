@@ -7,6 +7,7 @@ import { cloudSync } from './middleware/cloudSync';
 import { syncManager } from '../lib/syncManager';
 import { usePlayerPoolStore } from './usePlayerPoolStore';
 import { teamMembershipService } from '../lib/teamMembershipService';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import type { TeamMembership, TeamMemberRole } from '../types/database';
 
 // Guest mode limit (MAX_TEAMS exported for backward compatibility)
@@ -63,6 +64,7 @@ interface MyTeamState {
   deleteTeam: (id: string) => void;
   selectTeam: (id: string) => void;
   isTeamNameAvailable: (name: string, excludeTeamId?: string) => boolean;
+  checkTeamNameGloballyAvailable: (name: string, excludeTeamId?: string) => Promise<{ available: boolean; error?: string }>;
   // Membership management
   loadMemberships: () => Promise<void>;
   leaveTeam: (teamId: string) => Promise<{ success: boolean; error?: string }>;
@@ -104,14 +106,12 @@ const updateSelectedTeam = (
   ),
 });
 
-const initialTeam = createEmptyTeam('My Team');
-
 export const useMyTeamStore = create<MyTeamState>()(
   persist(
     cloudSync(
       (set, get) => ({
-        teams: [initialTeam],
-        selectedTeamId: initialTeam.id,
+        teams: [],
+        selectedTeamId: '',
         memberships: [],
         membershipsLoading: false,
         membershipsError: null,
@@ -212,18 +212,57 @@ export const useMyTeamStore = create<MyTeamState>()(
         return !isTeamNameTaken(state.teams, name, excludeTeamId);
       },
 
+      checkTeamNameGloballyAvailable: async (name: string, excludeTeamId?: string): Promise<{ available: boolean; error?: string }> => {
+        // First check locally
+        const state = get();
+        if (isTeamNameTaken(state.teams, name, excludeTeamId)) {
+          return { available: false };
+        }
+
+        // Then check database for global uniqueness
+        if (!isSupabaseConfigured() || !supabase) {
+          return { available: true }; // Can't check, assume available (local-only mode)
+        }
+
+        try {
+          const trimmedName = name.trim();
+
+          // Use the database function that bypasses RLS to check all teams
+          const { data, error } = await supabase.rpc('check_team_name_available', {
+            team_name: trimmedName,
+            exclude_team_id: excludeTeamId || null,
+          });
+
+          if (error) {
+            console.error('Error checking team name availability:', error);
+            // Return false with error message - don't silently fail
+            return { available: false, error: 'Could not verify team name availability. Please try again.' };
+          }
+
+          // The function returns true if available, false if taken
+          return { available: data === true };
+        } catch (error) {
+          console.error('Error checking team name availability:', error);
+          return { available: false, error: 'Could not verify team name availability. Please try again.' };
+        }
+      },
+
       deleteTeam: (id: string) => {
         const state = get();
-        if (state.teams.length <= 1) return; // Can't delete last team
         const newTeams = state.teams.filter((t) => t.id !== id);
         const newSelectedId =
-          state.selectedTeamId === id ? newTeams[0].id : state.selectedTeamId;
+          state.selectedTeamId === id
+            ? (newTeams[0]?.id || '')
+            : state.selectedTeamId;
         set({ teams: newTeams, selectedTeamId: newSelectedId });
       },
 
       selectTeam: (id: string) => {
         const state = get();
-        if (state.teams.some((t) => t.id === id)) {
+        // Allow selecting owned teams or membership teams
+        const isOwnedTeam = state.teams.some((t) => t.id === id);
+        const isMembershipTeam = state.memberships.some((m) => m.teamId === id);
+        if (isOwnedTeam || isMembershipTeam) {
           set({ selectedTeamId: id });
         }
       },

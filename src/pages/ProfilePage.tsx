@@ -9,14 +9,20 @@ import LoginModal from "../components/auth/LoginModal";
 import ConfirmationModal from "../components/ui/ConfirmationModal";
 
 // Role options for the role selector
-const ROLE_OPTIONS: { value: ProfileRole; label: string }[] = [
+const ROLE_OPTIONS: { value: ProfileRole; label: string; requiresTier?: string }[] = [
   { value: "team_owner", label: "Team Owner" },
   { value: "head_coach", label: "Head Coach" },
   { value: "coach", label: "Coach" },
   { value: "analyst", label: "Analyst" },
   { value: "player", label: "Player" },
+  { value: "manager", label: "Manager" },
+  { value: "scout", label: "Scout" },
+  { value: "content_creator", label: "Content Creator" },
+  { value: "caster", label: "Caster" },
+  { value: "journalist", label: "Journalist" },
+  { value: "streamer", label: "Streamer" },
   { value: "groupie", label: "Groupie" },
-  { value: "custom", label: "Custom Role" },
+  { value: "developer", label: "Developer", requiresTier: "developer" },
 ];
 
 // Combined avatar + username row component
@@ -588,20 +594,19 @@ function InfoRow({
 function RoleRow({
   currentRole,
   currentTeamId,
-  currentCustomRole,
   teams,
+  userTier,
   onSave,
 }: {
   currentRole: ProfileRole | null;
   currentTeamId: string | null;
-  currentCustomRole: string | null;
   teams: { id: string; name: string }[];
-  onSave: (role: ProfileRole | null, teamId: string | null, customRole: string | null) => Promise<{ error: string | null }>;
+  userTier: string;
+  onSave: (role: ProfileRole | null, teamId: string | null) => Promise<{ error: string | null }>;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [selectedRole, setSelectedRole] = useState<ProfileRole | null>(currentRole);
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(currentTeamId);
-  const [customRole, setCustomRole] = useState(currentCustomRole || "");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -609,6 +614,11 @@ function RoleRow({
   const [isTeamDropdownOpen, setIsTeamDropdownOpen] = useState(false);
   const roleDropdownRef = useRef<HTMLDivElement>(null);
   const teamDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Filter role options based on user tier
+  const availableRoles = ROLE_OPTIONS.filter(
+    (opt) => !opt.requiresTier || opt.requiresTier === userTier
+  );
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -631,7 +641,7 @@ function RoleRow({
     setError(null);
     setShowSuccess(false);
 
-    const result = await onSave(selectedRole, selectedTeamId, customRole);
+    const result = await onSave(selectedRole, selectedTeamId);
 
     if (result.error) {
       setError(result.error);
@@ -648,7 +658,6 @@ function RoleRow({
   const handleCancel = () => {
     setSelectedRole(currentRole);
     setSelectedTeamId(currentTeamId);
-    setCustomRole(currentCustomRole || "");
     setError(null);
     setShowSuccess(false);
     setIsEditing(false);
@@ -667,10 +676,7 @@ function RoleRow({
   const getDisplayValue = () => {
     if (!currentRole) return "Not set";
 
-    const roleLabel = currentRole === "custom" && currentCustomRole
-      ? currentCustomRole
-      : getRoleLabel(currentRole);
-
+    const roleLabel = getRoleLabel(currentRole);
     const teamName = getTeamName(currentTeamId);
 
     if (teamName) {
@@ -724,7 +730,7 @@ function RoleRow({
                 {isRoleDropdownOpen && (
                   <div className="absolute z-50 mt-2 w-full bg-lol-card border border-lol-border rounded-xl shadow-2xl shadow-black/50 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
                     <div className="max-h-64 overflow-y-auto py-1">
-                      {ROLE_OPTIONS.map((opt) => (
+                      {availableRoles.map((opt) => (
                         <button
                           key={opt.value}
                           type="button"
@@ -752,17 +758,6 @@ function RoleRow({
                   </div>
                 )}
               </div>
-
-              {/* Custom role input - only show when custom is selected */}
-              {selectedRole === "custom" && (
-                <input
-                  type="text"
-                  value={customRole}
-                  onChange={(e) => setCustomRole(e.target.value)}
-                  placeholder="Enter your custom role..."
-                  className="w-full pl-3 pr-3 py-2 bg-lol-dark border border-lol-border rounded-lg text-white focus:outline-none focus:border-lol-gold/50 focus:ring-2 focus:ring-lol-gold/20 transition-all"
-                />
-              )}
 
               {/* Team dropdown - show when role is selected */}
               {selectedRole && teams.length > 0 && (
@@ -1088,7 +1083,9 @@ export default function ProfilePage() {
         ? "Supporter"
         : profile?.tier === "admin"
           ? "Admin"
-          : "Free";
+          : profile?.tier === "developer"
+            ? "Developer"
+            : "Free";
   const tierBadgeColor =
     profile?.tier === "paid"
       ? "bg-lol-gold/20 text-lol-gold"
@@ -1096,7 +1093,9 @@ export default function ProfilePage() {
         ? "bg-purple-500/20 text-purple-400"
         : profile?.tier === "admin"
           ? "bg-red-500/20 text-red-400"
-          : "bg-gray-500/20 text-gray-400";
+          : profile?.tier === "developer"
+            ? "bg-emerald-500/20 text-emerald-400"
+            : "bg-gray-500/20 text-gray-400";
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -1140,8 +1139,8 @@ export default function ProfilePage() {
           <RoleRow
             currentRole={profile?.role || null}
             currentTeamId={profile?.roleTeamId || null}
-            currentCustomRole={profile?.roleCustom || null}
             teams={teams.map((t) => ({ id: t.id, name: t.name }))}
+            userTier={profile?.tier || 'free'}
             onSave={updateRole}
           />
 
@@ -1296,75 +1295,79 @@ export default function ProfilePage() {
             </span>
           </div>
           <ul className="space-y-2 text-sm text-gray-300">
-            <li className="flex items-center gap-2">
-              <svg
-                className="w-4 h-4 text-green-500 shrink-0"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M5 13l4 4L19 7"
-                />
-              </svg>
-              <span>
-                Manage {profile?.maxTeams ?? 1} team
-                {(profile?.maxTeams ?? 1) !== 1 ? "s" : ""}
-              </span>
-            </li>
-            <li className="flex items-center gap-2">
-              <svg
-                className="w-4 h-4 text-green-500 shrink-0"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M5 13l4 4L19 7"
-                />
-              </svg>
-              <span>
-                {profile?.tier === 'free' ? `${FREE_TIER_MAX_DRAFTS} drafts` : 'Unlimited drafts'}
-              </span>
-            </li>
-            <li className="flex items-center gap-2">
-              <svg
-                className="w-4 h-4 text-green-500 shrink-0"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M5 13l4 4L19 7"
-                />
-              </svg>
-              <span>Cloud sync</span>
-            </li>
-            <li className="flex items-center gap-2">
-              <svg
-                className="w-4 h-4 text-green-500 shrink-0"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M5 13l4 4L19 7"
-                />
-              </svg>
-              <span>Shareable draft links</span>
-            </li>
+            {profile?.tier !== "developer" && (
+              <>
+                <li className="flex items-center gap-2">
+                  <svg
+                    className="w-4 h-4 text-green-500 shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                  <span>
+                    Manage {profile?.maxTeams ?? 1} team
+                    {(profile?.maxTeams ?? 1) !== 1 ? "s" : ""}
+                  </span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <svg
+                    className="w-4 h-4 text-green-500 shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                  <span>
+                    {profile?.tier === 'free' ? `${FREE_TIER_MAX_DRAFTS} drafts` : 'Unlimited drafts'}
+                  </span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <svg
+                    className="w-4 h-4 text-green-500 shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                  <span>Cloud sync</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <svg
+                    className="w-4 h-4 text-green-500 shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                  <span>Shareable draft links</span>
+                </li>
+              </>
+            )}
             {(profile?.tier === "paid" ||
               profile?.tier === "supporter" ||
               profile?.tier === "admin") && (
@@ -1434,6 +1437,74 @@ export default function ProfilePage() {
                     />
                   </svg>
                   <span>Supporter badge</span>
+                </li>
+              </>
+            )}
+            {profile?.tier === "developer" && (
+              <>
+                <li className="flex items-center gap-2">
+                  <svg
+                    className="w-4 h-4 text-emerald-400 shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
+                    />
+                  </svg>
+                  <span>You built this thing</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <svg
+                    className="w-4 h-4 text-emerald-400 shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M13 10V3L4 14h7v7l9-11h-7z"
+                    />
+                  </svg>
+                  <span>Unlimited everything (obviously)</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <svg
+                    className="w-4 h-4 text-emerald-400 shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                  <span>Access to features before they exist</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <svg
+                    className="w-4 h-4 text-emerald-400 shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                  <span>Free tier (you're paying in tears)</span>
                 </li>
               </>
             )}
@@ -1588,17 +1659,19 @@ export default function ProfilePage() {
         )}
 
         {/* Enterprise Contact */}
-        <div className="mt-6 pt-6 border-t border-lol-border/50">
-          <p className="text-gray-400 text-sm text-center">
-            Need a bigger plan for your team or organisation? Talk to us at{" "}
-            <a
-              href="mailto:contact@teamcomp.lol"
-              className="text-lol-gold hover:text-lol-gold-light transition-colors"
-            >
-              contact@teamcomp.lol
-            </a>
-          </p>
-        </div>
+        {profile?.tier !== "developer" && (
+          <div className="mt-6 pt-6 border-t border-lol-border/50">
+            <p className="text-gray-400 text-sm text-center">
+              Need a bigger plan for your team or organisation? Talk to us at{" "}
+              <a
+                href="mailto:contact@teamcomp.lol"
+                className="text-lol-gold hover:text-lol-gold-light transition-colors"
+              >
+                contact@teamcomp.lol
+              </a>
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Account Actions */}

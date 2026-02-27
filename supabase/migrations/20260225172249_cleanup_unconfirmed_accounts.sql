@@ -1,0 +1,10 @@
+-- This migration is intentionally empty.
+-- Cleanup of unconfirmed accounts is handled by the cleanup-unconfirmed-accounts Edge Function
+-- which runs on a schedule and uses the Supabase Admin API.
+--
+-- The Edge Function approach is required because:
+-- 1. We cannot create functions in the auth schema via migrations
+-- 2. The admin API is needed to properly delete auth users
+-- 3. Edge Functions can be scheduled via Supabase dashboard or external cron
+--
+-- See: supabase/functions/cleanup-unconfirmed-accounts/index.ts

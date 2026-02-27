@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { Session } from '@supabase/supabase-js';
 import { useAuthStore } from '../stores/useAuthStore';
-import { supabase, isSupabaseConfigured, getCachedSession } from '../lib/supabase';
+import { supabase, isSupabaseConfigured, getCachedSession, clearCachedSession } from '../lib/supabase';
 import { syncManager } from '../lib/syncManager';
 import LocalDataMergeModal, { getLocalDataSummary, clearAllLocalStores, ExcludedItems, AlreadyInCloud, getLocalDataWithIds, compareLocalWithCloud } from '../components/onboarding/LocalDataMergeModal';
 import { useMyTeamStore } from '../stores/useMyTeamStore';
@@ -71,25 +71,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Try to restore session from localStorage cache immediately
     // This bypasses Supabase's auth methods which can hang on token refresh
     const cachedSession = getCachedSession();
-    if (cachedSession) {
-      console.log('Restoring session from localStorage cache');
+    if (cachedSession && supabase) {
+      console.log('Restoring session from localStorage cache, validating...');
       hasHandledSignIn = true;
-      // Restore session and wait for profile to load before marking initialized
-      setSession(cachedSession).then(() => {
-        useAuthStore.setState({ isInitialized: true, isLoading: false });
-        // Load cloud data in background
-        isLoadingCloudData = true;
-        syncManager.loadAllFromCloud()
-          .catch(err => console.warn('Background cloud sync failed:', err))
-          .finally(() => { isLoadingCloudData = false; });
-      });
+
+      // Validate the cached session with Supabase
+      const validateAndRestore = async () => {
+        try {
+          // Quick validation - try to get current user with a timeout
+          const { data, error } = await Promise.race([
+            supabase.auth.getUser(),
+            new Promise<{ data: null; error: Error }>((resolve) =>
+              setTimeout(() => resolve({ data: null, error: new Error('Validation timeout') }), 5000)
+            ),
+          ]);
+
+          if (error || !data?.user) {
+            // Session is invalid or validation failed - clear cache and stay logged out
+            console.warn('Cached session validation failed, clearing cache:', error?.message || 'No user');
+            clearCachedSession();
+            hasHandledSignIn = false;
+            useAuthStore.setState({ user: null, profile: null, isInitialized: true, isLoading: false });
+            return;
+          }
+
+          // Session is valid - restore it
+          await setSession(cachedSession);
+          useAuthStore.setState({ isInitialized: true, isLoading: false });
+
+          // Load cloud data in background
+          isLoadingCloudData = true;
+          syncManager.loadAllFromCloud()
+            .catch(err => console.warn('Background cloud sync failed:', err))
+            .finally(() => { isLoadingCloudData = false; });
+        } catch (err) {
+          // Any error during validation - clear cache and stay logged out
+          console.warn('Session validation error, clearing cache:', err);
+          clearCachedSession();
+          hasHandledSignIn = false;
+          useAuthStore.setState({ user: null, profile: null, isInitialized: true, isLoading: false });
+        }
+      };
+
+      validateAndRestore();
     }
 
     // Fallback timeout in case INITIAL_SESSION never fires and no cached session
     const fallbackTimeout = setTimeout(() => {
       if (!useAuthStore.getState().isInitialized) {
         console.warn('Auth initialization fallback - no session found');
-        useAuthStore.setState({ isInitialized: true, isLoading: false });
+        // Clear any stale cache on fallback
+        clearCachedSession();
+        useAuthStore.setState({ user: null, profile: null, isInitialized: true, isLoading: false });
       }
     }, 3000);
 
@@ -333,9 +366,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return (
       <div className="min-h-screen bg-lol-gray flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-lol-gold-light to-lol-gold flex items-center justify-center text-lol-dark font-bold text-xl animate-pulse">
-            TC
-          </div>
+          <img
+            src="/images/logo.png"
+            alt="teamcomp.lol logo"
+            className="size-16"
+          />
           <div className="text-gray-400 text-sm">Loading...</div>
         </div>
       </div>

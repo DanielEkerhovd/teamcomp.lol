@@ -27,12 +27,14 @@ export default function UserMenu({ collapsed }: UserMenuProps) {
       <div className="relative">
         <button
           onClick={() => setShowDropdown(!showDropdown)}
-          className="flex items-center gap-3 w-full px-3 py-3 rounded-xl bg-lol-surface/50 border border-lol-border hover:border-lol-gold/50 transition-all duration-200 group relative"
+          className={`flex items-center w-full py-3 rounded-xl bg-lol-surface/50 border border-lol-border hover:border-lol-gold/50 transition-all duration-300 group relative ${
+            collapsed ? 'justify-center px-2' : 'px-3'
+          }`}
         >
           <div className="w-9 h-9 shrink-0 rounded-lg bg-gradient-to-br from-gray-600 to-gray-700 flex items-center justify-center text-white font-semibold text-sm">
             ?
           </div>
-          <div className={`flex-1 min-w-0 text-left transition-all duration-300 ${collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100'}`}>
+          <div className={`min-w-0 text-left transition-all duration-300 overflow-hidden ${collapsed ? 'max-w-0 opacity-0 ml-0' : 'max-w-[200px] opacity-100 ml-3'}`}>
             <div className="text-sm font-medium text-white truncate">Guest User</div>
             <div className="text-xs text-gray-400">Click for options</div>
           </div>
@@ -44,7 +46,7 @@ export default function UserMenu({ collapsed }: UserMenuProps) {
         </button>
 
         {/* Guest Dropdown Menu */}
-        {showDropdown && !collapsed && (
+        {showDropdown && (
           <>
             {/* Backdrop */}
             <div
@@ -53,7 +55,9 @@ export default function UserMenu({ collapsed }: UserMenuProps) {
             />
 
             {/* Menu */}
-            <div className="absolute bottom-full left-0 right-0 mb-2 bg-lol-card border border-lol-border rounded-xl shadow-xl z-50 overflow-hidden">
+            <div className={`absolute bg-lol-card border border-lol-border rounded-xl shadow-xl z-50 overflow-hidden ${
+              collapsed ? 'left-full bottom-0 ml-2 w-48' : 'bottom-full left-0 right-0 mb-2'
+            }`}>
               <div className="p-1">
                 <button
                   onClick={() => {
@@ -94,14 +98,28 @@ export default function UserMenu({ collapsed }: UserMenuProps) {
   // Authenticated user display
   const displayName = profile?.displayName || user.email?.split('@')[0] || 'User';
   const initials = displayName.slice(0, 2).toUpperCase();
-  const tierBadge = profile?.tier === 'paid' ? 'Pro' : profile?.tier === 'admin' ? 'Admin' : 'Free';
-  const tierColor = profile?.tier === 'paid' ? 'text-lol-gold' : profile?.tier === 'admin' ? 'text-purple-400' : 'text-gray-400';
+
+  // Show custom role if set, otherwise fall back to tier badge
+  const formatRole = (role: string) =>
+    role.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+  const roleLabel = profile?.role
+    ? formatRole(profile.role) + (profile.roleTeamName ? ` of ${profile.roleTeamName}` : '')
+    : null;
+  const subtitleText = roleLabel ?? (
+    profile?.tier === 'developer' ? 'Developer' : profile?.tier === 'paid' ? 'Pro' : profile?.tier === 'admin' ? 'Admin' : 'Free'
+  );
+  const subtitleColor = profile?.role
+    ? 'text-lol-gold'
+    : profile?.tier === 'developer' ? 'text-emerald-400' : profile?.tier === 'paid' ? 'text-lol-gold' : profile?.tier === 'admin' ? 'text-purple-400' : 'text-gray-400';
 
   return (
     <div className="relative">
       <button
         onClick={() => setShowDropdown(!showDropdown)}
-        className="flex items-center gap-3 w-full px-3 py-3 rounded-xl bg-lol-surface/50 border border-lol-border hover:border-lol-gold/50 transition-all duration-200 group"
+        className={`flex items-center w-full py-3 rounded-xl bg-lol-surface/50 border border-lol-border hover:border-lol-gold/50 transition-all duration-300 group ${
+          collapsed ? 'justify-center px-2' : 'px-3'
+        }`}
       >
         {profile?.avatarUrl ? (
           <img
@@ -114,9 +132,9 @@ export default function UserMenu({ collapsed }: UserMenuProps) {
             {initials}
           </div>
         )}
-        <div className={`flex-1 min-w-0 text-left transition-all duration-300 ${collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100'}`}>
+        <div className={`min-w-0 text-left transition-all duration-300 overflow-hidden ${collapsed ? 'max-w-0 opacity-0 ml-0' : 'max-w-[200px] opacity-100 ml-3'}`}>
           <div className="text-sm font-medium text-white truncate">{displayName}</div>
-          <div className={`text-xs ${tierColor}`}>{tierBadge}</div>
+          <div className={`text-xs truncate ${subtitleColor}`}>{subtitleText}</div>
         </div>
         {collapsed && (
           <div className="absolute left-full ml-3 px-3 py-2 bg-lol-card border border-lol-border rounded-lg text-sm text-white whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 shadow-xl z-50">
@@ -126,7 +144,7 @@ export default function UserMenu({ collapsed }: UserMenuProps) {
       </button>
 
       {/* Dropdown Menu */}
-      {showDropdown && !collapsed && (
+      {showDropdown && (
         <>
           {/* Backdrop */}
           <div
@@ -135,7 +153,9 @@ export default function UserMenu({ collapsed }: UserMenuProps) {
           />
 
           {/* Menu */}
-          <div className="absolute bottom-full left-0 right-0 mb-2 bg-lol-card border border-lol-border rounded-xl shadow-xl z-50 overflow-hidden">
+          <div className={`absolute bg-lol-card border border-lol-border rounded-xl shadow-xl z-50 overflow-hidden ${
+            collapsed ? 'left-full bottom-0 ml-2 w-48' : 'bottom-full left-0 right-0 mb-2'
+          }`}>
             <div className="p-1">
               <button
                 onClick={() => {

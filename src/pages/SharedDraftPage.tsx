@@ -1,17 +1,17 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { shareService } from '../lib/shareService';
-import { SharedDraftData, DbPlayer, DbEnemyPlayer } from '../types/database';
-import { Card } from '../components/ui';
-import { ChampionIcon } from '../components/champion';
-import { useChampionData } from '../hooks/useChampionData';
-import { ROLES, Role, Note, DEFAULT_REGION } from '../types';
+import { useState, useEffect, useMemo } from "react";
+import { useParams, Link } from "react-router-dom";
+import { shareService } from "../lib/shareService";
+import { SharedDraftData, DbPlayer, DbEnemyPlayer } from "../types/database";
+import { Card } from "../components/ui";
+import { ChampionIcon } from "../components/champion";
+import { useChampionData } from "../hooks/useChampionData";
+import { ROLES, Role, Note, DEFAULT_REGION } from "../types";
 
 // Helper to generate op.gg URLs for DB player types
 function getPlayerOpggUrl(player: DbPlayer | DbEnemyPlayer): string {
-  if (!player.summoner_name) return '';
+  if (!player.summoner_name) return "";
   const name = encodeURIComponent(player.summoner_name);
-  const tag = player.tag_line ? encodeURIComponent(player.tag_line) : '';
+  const tag = player.tag_line ? encodeURIComponent(player.tag_line) : "";
   const region = player.region || DEFAULT_REGION;
   if (tag) {
     return `https://www.op.gg/summoners/${region}/${name}-${tag}`;
@@ -21,11 +21,13 @@ function getPlayerOpggUrl(player: DbPlayer | DbEnemyPlayer): string {
 
 function getMultiSearchUrl(players: (DbPlayer | DbEnemyPlayer)[]): string {
   const validPlayers = players.filter((p) => p.summoner_name);
-  if (validPlayers.length === 0) return '';
+  if (validPlayers.length === 0) return "";
   const region = validPlayers[0]?.region || DEFAULT_REGION;
   const names = validPlayers
-    .map((p) => p.tag_line ? `${p.summoner_name}#${p.tag_line}` : p.summoner_name)
-    .join(',');
+    .map((p) =>
+      p.tag_line ? `${p.summoner_name}#${p.tag_line}` : p.summoner_name,
+    )
+    .join(",");
   return `https://www.op.gg/multisearch/${region}?summoners=${encodeURIComponent(names)}`;
 }
 
@@ -47,12 +49,12 @@ export default function SharedDraftPage() {
     try {
       const result = await shareService.getSharedDraft(shareToken);
       if (!result) {
-        setError('This share link is invalid or has expired.');
+        setError("This share link is invalid or has expired.");
       } else {
         setData(result);
       }
     } catch (err) {
-      setError('Failed to load shared draft. Please try again later.');
+      setError("Failed to load shared draft. Please try again later.");
       console.error(err);
     } finally {
       setLoading(false);
@@ -63,9 +65,24 @@ export default function SharedDraftPage() {
     return (
       <div className="min-h-screen bg-lol-gray flex items-center justify-center">
         <div className="text-center">
-          <svg className="animate-spin h-10 w-10 text-lol-gold mx-auto mb-4" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+          <svg
+            className="animate-spin h-10 w-10 text-lol-gold mx-auto mb-4"
+            fill="none"
+            viewBox="0 0 24 24"
+          >
+            <circle
+              className="opacity-25"
+              cx="12"
+              cy="12"
+              r="10"
+              stroke="currentColor"
+              strokeWidth="4"
+            />
+            <path
+              className="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+            />
           </svg>
           <p className="text-gray-400">Loading draft...</p>
         </div>
@@ -76,9 +93,23 @@ export default function SharedDraftPage() {
   if (error || !data) {
     return (
       <div className="min-h-screen bg-lol-gray flex items-center justify-center p-4">
-        <Card variant="bordered" padding="lg" className="max-w-md w-full text-center">
-          <svg className="w-16 h-16 text-red-500 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        <Card
+          variant="bordered"
+          padding="lg"
+          className="max-w-md w-full text-center"
+        >
+          <svg
+            className="w-16 h-16 text-red-500 mx-auto mb-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1.5}
+              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+            />
           </svg>
           <h1 className="text-xl font-bold text-white mb-2">Link Not Found</h1>
           <p className="text-gray-400 mb-6">{error}</p>
@@ -86,7 +117,7 @@ export default function SharedDraftPage() {
             to="/"
             className="inline-flex items-center gap-2 px-4 py-2 bg-lol-gold/10 hover:bg-lol-gold/20 text-lol-gold rounded-lg transition-colors"
           >
-            Go to Teamcomp.lol
+            Go to teamcomp.lol
           </Link>
         </Card>
       </div>
@@ -96,12 +127,20 @@ export default function SharedDraftPage() {
   const { draft, enemyTeam, myTeam } = data;
 
   // Read from groups (source of truth) with fallback to legacy flat arrays
-  const banGroups = (draft.ban_groups || []) as { id: string; name: string; championIds: string[] }[];
-  const priorityGroups = (draft.priority_groups || []) as { id: string; name: string; championIds: string[] }[];
+  const banGroups = (draft.ban_groups || []) as {
+    id: string;
+    name: string;
+    championIds: string[];
+  }[];
+  const priorityGroups = (draft.priority_groups || []) as {
+    id: string;
+    name: string;
+    championIds: string[];
+  }[];
 
   // Flatten groups to get all champion IDs
-  const potentialBans = banGroups.flatMap(g => g.championIds);
-  const priorities = priorityGroups.flatMap(g => g.championIds);
+  const potentialBans = banGroups.flatMap((g) => g.championIds);
+  const priorities = priorityGroups.flatMap((g) => g.championIds);
   const notepad = (draft.notepad || []) as Note[];
 
   return (
@@ -109,11 +148,18 @@ export default function SharedDraftPage() {
       {/* Header */}
       <header className="bg-lol-dark border-b border-lol-border">
         <div className="max-w-6xl mx-auto px-4 py-4">
-          <Link to="/" className="flex items-center gap-2 text-lol-gold font-bold">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-lol-gold-light to-lol-gold flex items-center justify-center text-lol-dark font-bold text-sm">
-              TC
-            </div>
-            <span>Teamcomp.lol</span>
+          <Link
+            to="/"
+            className="flex items-center gap-2 text-lol-gold font-bold"
+          >
+            <img
+              src="/images/logo.png"
+              alt="Teamcomp logo"
+              className="size-6"
+            />
+            <p>
+              teamcomp.<span className="text-lol-gold">lol</span>
+            </p>
           </Link>
         </div>
       </header>
@@ -160,19 +206,36 @@ export default function SharedDraftPage() {
           {myTeam && (
             <Card variant="bordered" padding="md">
               <h2 className="text-lg font-semibold text-blue-400 mb-3 flex items-center gap-2">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"
+                  />
                 </svg>
                 {myTeam.team.name}
               </h2>
               <div className="space-y-2">
-                {myTeam.players.filter(p => !p.is_sub).map((player) => (
-                  <div key={player.id} className="flex items-center gap-3 text-sm">
-                    <span className="w-16 text-gray-500 uppercase text-xs">{player.role}</span>
-                    <span className="text-white">{player.summoner_name}</span>
-                    <span className="text-gray-600">#{player.tag_line}</span>
-                  </div>
-                ))}
+                {myTeam.players
+                  .filter((p) => !p.is_sub)
+                  .map((player) => (
+                    <div
+                      key={player.id}
+                      className="flex items-center gap-3 text-sm"
+                    >
+                      <span className="w-16 text-gray-500 uppercase text-xs">
+                        {player.role}
+                      </span>
+                      <span className="text-white">{player.summoner_name}</span>
+                      <span className="text-gray-600">#{player.tag_line}</span>
+                    </div>
+                  ))}
               </div>
             </Card>
           )}
@@ -181,23 +244,42 @@ export default function SharedDraftPage() {
           {enemyTeam && (
             <Card variant="bordered" padding="md">
               <h2 className="text-lg font-semibold text-red-400 mb-3 flex items-center gap-2">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"
+                  />
                 </svg>
                 {enemyTeam.team.name}
               </h2>
               <div className="space-y-2">
-                {enemyTeam.players.filter(p => !p.is_sub).map((player) => (
-                  <div key={player.id} className="flex items-center gap-3 text-sm">
-                    <span className="w-16 text-gray-500 uppercase text-xs">{player.role}</span>
-                    <span className="text-white">{player.summoner_name}</span>
-                    <span className="text-gray-600">#{player.tag_line}</span>
-                  </div>
-                ))}
+                {enemyTeam.players
+                  .filter((p) => !p.is_sub)
+                  .map((player) => (
+                    <div
+                      key={player.id}
+                      className="flex items-center gap-3 text-sm"
+                    >
+                      <span className="w-16 text-gray-500 uppercase text-xs">
+                        {player.role}
+                      </span>
+                      <span className="text-white">{player.summoner_name}</span>
+                      <span className="text-gray-600">#{player.tag_line}</span>
+                    </div>
+                  ))}
               </div>
               {enemyTeam.team.notes && (
                 <div className="mt-3 pt-3 border-t border-lol-border">
-                  <p className="text-sm text-gray-400">{enemyTeam.team.notes}</p>
+                  <p className="text-sm text-gray-400">
+                    {enemyTeam.team.notes}
+                  </p>
                 </div>
               )}
             </Card>
@@ -207,7 +289,9 @@ export default function SharedDraftPage() {
         {/* Draft Notes (single text) */}
         {draft.notes && (
           <Card variant="bordered" padding="md">
-            <h2 className="text-lg font-semibold text-white mb-3">Draft Notes</h2>
+            <h2 className="text-lg font-semibold text-white mb-3">
+              Draft Notes
+            </h2>
             <p className="text-gray-300 whitespace-pre-wrap">{draft.notes}</p>
           </Card>
         )}
@@ -216,8 +300,18 @@ export default function SharedDraftPage() {
         {notepad.length > 0 && (
           <Card variant="bordered" padding="md">
             <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-              <svg className="w-5 h-5 text-lol-gold" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              <svg
+                className="w-5 h-5 text-lol-gold"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
               </svg>
               Notepad ({notepad.length})
             </h2>
@@ -227,7 +321,11 @@ export default function SharedDraftPage() {
                   key={note.id}
                   className="w-[calc((100%-1.5rem)/3)] min-w-48 bg-lol-dark rounded-xl border border-lol-border/50 p-3"
                 >
-                  <p className="text-sm text-gray-300 whitespace-pre-wrap">{note.content || <span className="text-gray-600 italic">Empty note</span>}</p>
+                  <p className="text-sm text-gray-300 whitespace-pre-wrap">
+                    {note.content || (
+                      <span className="text-gray-600 italic">Empty note</span>
+                    )}
+                  </p>
                 </div>
               ))}
             </div>
@@ -237,38 +335,65 @@ export default function SharedDraftPage() {
         {/* Enemy Champion Pools */}
         {enemyTeam && (
           <Card variant="bordered" padding="md">
-            <h2 className="text-lg font-semibold text-white mb-4">Enemy Champion Pools</h2>
+            <h2 className="text-lg font-semibold text-white mb-4">
+              Enemy Champion Pools
+            </h2>
             <div className="space-y-4">
-              {(['top', 'jungle', 'mid', 'adc', 'support'] as Role[]).map((role) => {
-                const player = enemyTeam.players.find(p => p.role === role && !p.is_sub);
-                if (!player) return null;
+              {(["top", "jungle", "mid", "adc", "support"] as Role[]).map(
+                (role) => {
+                  const player = enemyTeam.players.find(
+                    (p) => p.role === role && !p.is_sub,
+                  );
+                  if (!player) return null;
 
-                const groups = (player.champion_groups || []) as { id: string; name: string; championIds: string[] }[];
-                const hasChampions = groups.some(g => g.championIds.length > 0);
+                  const groups = (player.champion_groups || []) as {
+                    id: string;
+                    name: string;
+                    championIds: string[];
+                  }[];
+                  const hasChampions = groups.some(
+                    (g) => g.championIds.length > 0,
+                  );
 
-                if (!hasChampions) return null;
+                  if (!hasChampions) return null;
 
-                return (
-                  <div key={player.id} className="p-3 bg-lol-surface rounded-lg">
-                    <div className="flex items-center gap-2 mb-3">
-                      <span className="text-xs font-medium text-gray-500 uppercase w-14">{player.role}</span>
-                      <span className="text-white font-medium">{player.summoner_name}</span>
+                  return (
+                    <div
+                      key={player.id}
+                      className="p-3 bg-lol-surface rounded-lg"
+                    >
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="text-xs font-medium text-gray-500 uppercase w-14">
+                          {player.role}
+                        </span>
+                        <span className="text-white font-medium">
+                          {player.summoner_name}
+                        </span>
+                      </div>
+                      <div className="space-y-2">
+                        {groups
+                          .filter((g) => g.championIds.length > 0)
+                          .map((group) => (
+                            <div key={group.id}>
+                              <div className="text-xs text-gray-500 mb-1">
+                                {group.name}
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                {group.championIds.map((champId, idx) => (
+                                  <ChampionIcon
+                                    key={`${champId}-${idx}`}
+                                    championId={champId}
+                                    size="sm"
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      {groups.filter(g => g.championIds.length > 0).map((group) => (
-                        <div key={group.id}>
-                          <div className="text-xs text-gray-500 mb-1">{group.name}</div>
-                          <div className="flex flex-wrap gap-1">
-                            {group.championIds.map((champId, idx) => (
-                              <ChampionIcon key={`${champId}-${idx}`} championId={champId} size="sm" />
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                },
+              )}
             </div>
           </Card>
         )}
@@ -276,7 +401,7 @@ export default function SharedDraftPage() {
         {/* Footer */}
         <div className="text-center pt-4 pb-8 text-gray-500 text-sm">
           <p>
-            Create your own draft sheets at{' '}
+            Create your own draft sheets at{" "}
             <Link to="/" className="text-lol-gold hover:underline">
               Teamcomp.lol
             </Link>
@@ -289,18 +414,22 @@ export default function SharedDraftPage() {
 
 interface ChampionBadgeProps {
   championId: string;
-  variant?: 'default' | 'ban' | 'priority';
-  size?: 'sm' | 'md';
+  variant?: "default" | "ban" | "priority";
+  size?: "sm" | "md";
 }
 
-function ChampionBadge({ championId, variant = 'default', size = 'md' }: ChampionBadgeProps) {
+function ChampionBadge({
+  championId,
+  variant = "default",
+  size = "md",
+}: ChampionBadgeProps) {
   const { getChampionById } = useChampionData();
   const champion = getChampionById(championId);
 
   const borderClasses = {
-    default: 'border-lol-border',
-    ban: 'border-red-500/50',
-    priority: 'border-lol-gold/50',
+    default: "border-lol-border",
+    ban: "border-red-500/50",
+    priority: "border-lol-gold/50",
   }[variant];
 
   return (
@@ -309,7 +438,9 @@ function ChampionBadge({ championId, variant = 'default', size = 'md' }: Champio
       title={champion?.name || championId}
     >
       <ChampionIcon championId={championId} size={size} />
-      <span className="text-sm text-gray-300">{champion?.name || championId}</span>
+      <span className="text-sm text-gray-300">
+        {champion?.name || championId}
+      </span>
     </div>
   );
 }
@@ -318,34 +449,74 @@ function ChampionBadge({ championId, variant = 'default', size = 'md' }: Champio
 interface GroupedChampionDisplayProps {
   title: string;
   groups: { id: string; name: string; championIds: string[] }[];
-  variant: 'ban' | 'priority';
+  variant: "ban" | "priority";
   fallbackChampions: string[];
 }
 
-function GroupedChampionDisplay({ title, groups, variant, fallbackChampions }: GroupedChampionDisplayProps) {
-  const colors = variant === 'ban'
-    ? { text: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', headerBg: 'bg-red-500/5' }
-    : { text: 'text-lol-gold', bg: 'bg-lol-gold/10', border: 'border-lol-gold/30', headerBg: 'bg-lol-gold/5' };
+function GroupedChampionDisplay({
+  title,
+  groups,
+  variant,
+  fallbackChampions,
+}: GroupedChampionDisplayProps) {
+  const colors =
+    variant === "ban"
+      ? {
+          text: "text-red-400",
+          bg: "bg-red-500/10",
+          border: "border-red-500/30",
+          headerBg: "bg-red-500/5",
+        }
+      : {
+          text: "text-lol-gold",
+          bg: "bg-lol-gold/10",
+          border: "border-lol-gold/30",
+          headerBg: "bg-lol-gold/5",
+        };
 
-  const totalCount = groups.length > 0
-    ? groups.reduce((acc, g) => acc + g.championIds.length, 0)
-    : fallbackChampions.length;
+  const totalCount =
+    groups.length > 0
+      ? groups.reduce((acc, g) => acc + g.championIds.length, 0)
+      : fallbackChampions.length;
 
-  const icon = variant === 'ban' ? (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-    </svg>
-  ) : (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-    </svg>
-  );
+  const icon =
+    variant === "ban" ? (
+      <svg
+        className="w-5 h-5"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
+        />
+      </svg>
+    ) : (
+      <svg
+        className="w-5 h-5"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"
+        />
+      </svg>
+    );
 
   // If we have groups, show grouped display
   if (groups.length > 0) {
     return (
       <Card variant="bordered" padding="md" className="h-full">
-        <h3 className={`text-lg font-semibold ${colors.text} mb-3 flex items-center gap-2`}>
+        <h3
+          className={`text-lg font-semibold ${colors.text} mb-3 flex items-center gap-2`}
+        >
           {icon}
           {title} ({totalCount})
         </h3>
@@ -360,7 +531,9 @@ function GroupedChampionDisplay({ title, groups, variant, fallbackChampions }: G
               <div className="flex items-center justify-between px-3 py-2 border-b border-lol-border/30">
                 <span className={`text-sm font-medium ${colors.text}`}>
                   {group.name}
-                  <span className="text-gray-500 ml-2">({group.championIds.length})</span>
+                  <span className="text-gray-500 ml-2">
+                    ({group.championIds.length})
+                  </span>
                 </span>
               </div>
 
@@ -377,7 +550,9 @@ function GroupedChampionDisplay({ title, groups, variant, fallbackChampions }: G
                     ))}
                   </div>
                 ) : (
-                  <p className="text-gray-500 text-sm py-2 text-center">Empty group</p>
+                  <p className="text-gray-500 text-sm py-2 text-center">
+                    Empty group
+                  </p>
                 )}
               </div>
             </div>
@@ -390,18 +565,26 @@ function GroupedChampionDisplay({ title, groups, variant, fallbackChampions }: G
   // Fallback: show flat list (for legacy data)
   return (
     <Card variant="bordered" padding="md" className="h-full">
-      <h3 className={`text-lg font-semibold ${colors.text} mb-3 flex items-center gap-2`}>
+      <h3
+        className={`text-lg font-semibold ${colors.text} mb-3 flex items-center gap-2`}
+      >
         {icon}
         {title} ({totalCount})
       </h3>
       {fallbackChampions.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           {fallbackChampions.map((championId, idx) => (
-            <ChampionBadge key={`${championId}-${idx}`} championId={championId} variant={variant} />
+            <ChampionBadge
+              key={`${championId}-${idx}`}
+              championId={championId}
+              variant={variant}
+            />
           ))}
         </div>
       ) : (
-        <p className="text-gray-500 text-sm">No {variant === 'ban' ? 'ban targets' : 'priorities'} set</p>
+        <p className="text-gray-500 text-sm">
+          No {variant === "ban" ? "ban targets" : "priorities"} set
+        </p>
       )}
     </Card>
   );
@@ -410,51 +593,73 @@ function GroupedChampionDisplay({ title, groups, variant, fallbackChampions }: G
 // Shared Player Card with champion pool display
 interface SharedPlayerCardProps {
   player: DbPlayer | DbEnemyPlayer | undefined;
-  side: 'my' | 'enemy';
+  side: "my" | "enemy";
   roleLabel: string;
   hasTeam: boolean;
   showOpggLink?: boolean;
 }
 
-function SharedPlayerCard({ player, side, roleLabel, hasTeam, showOpggLink }: SharedPlayerCardProps) {
+function SharedPlayerCard({
+  player,
+  side,
+  roleLabel,
+  hasTeam,
+  showOpggLink,
+}: SharedPlayerCardProps) {
   // Get champion IDs from player's champion groups (deduplicated)
   const championIds = useMemo(() => {
     if (!player) return [];
-    const groups = (player.champion_groups || []) as { id: string; name: string; championIds: string[] }[];
+    const groups = (player.champion_groups || []) as {
+      id: string;
+      name: string;
+      championIds: string[];
+    }[];
     // Deduplicate champion IDs across all groups
-    return [...new Set(groups.flatMap(g => g.championIds))];
+    return [...new Set(groups.flatMap((g) => g.championIds))];
   }, [player]);
 
   if (!player) {
     return (
-      <div className={`flex items-center gap-3 p-2 rounded-lg bg-lol-dark/50 ${
-        side === 'enemy' ? 'flex-row-reverse text-right' : ''
-      }`}>
+      <div
+        className={`flex items-center gap-3 p-2 rounded-lg bg-lol-dark/50 ${
+          side === "enemy" ? "flex-row-reverse text-right" : ""
+        }`}
+      >
         <div className="w-8 h-8 rounded-full bg-lol-surface flex items-center justify-center text-gray-600">
           ?
         </div>
         <div className="flex-1">
-          <div className="text-gray-600 text-sm">{hasTeam ? 'Unknown' : '-'}</div>
+          <div className="text-gray-600 text-sm">
+            {hasTeam ? "Unknown" : "-"}
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className={`flex items-center gap-3 p-2 rounded-lg bg-lol-dark ${
-      side === 'enemy' ? 'flex-row-reverse text-right' : ''
-    }`}>
+    <div
+      className={`flex items-center gap-3 p-2 rounded-lg bg-lol-dark ${
+        side === "enemy" ? "flex-row-reverse text-right" : ""
+      }`}
+    >
       {/* Role Icon */}
-      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-        side === 'my' ? 'bg-blue-500/20 text-blue-400' : 'bg-red-500/20 text-red-400'
-      }`}>
+      <div
+        className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+          side === "my"
+            ? "bg-blue-500/20 text-blue-400"
+            : "bg-red-500/20 text-red-400"
+        }`}
+      >
         {roleLabel.slice(0, 3)}
       </div>
 
       {/* Player Info */}
       <div className="flex-1 min-w-0">
-        <div className={`flex items-center gap-2 ${side === 'enemy' ? 'justify-end' : ''}`}>
-          {showOpggLink && side === 'enemy' && player.summoner_name && (
+        <div
+          className={`flex items-center gap-2 ${side === "enemy" ? "justify-end" : ""}`}
+        >
+          {showOpggLink && side === "enemy" && player.summoner_name && (
             <a
               href={getPlayerOpggUrl(player)}
               target="_blank"
@@ -462,23 +667,41 @@ function SharedPlayerCard({ player, side, roleLabel, hasTeam, showOpggLink }: Sh
               className="p-1 rounded hover:bg-lol-surface text-gray-500 hover:text-lol-gold transition-colors shrink-0"
               title="Open OP.GG profile"
             >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              <svg
+                className="w-3.5 h-3.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                />
               </svg>
             </a>
           )}
           <span className="text-white text-sm font-medium truncate">
-            {player.summoner_name || 'Unknown'}
+            {player.summoner_name || "Unknown"}
           </span>
           {player.tag_line && (
-            <span className="text-gray-500 text-xs shrink-0">#{player.tag_line}</span>
+            <span className="text-gray-500 text-xs shrink-0">
+              #{player.tag_line}
+            </span>
           )}
         </div>
         {/* Champion Pool */}
         {championIds.length > 0 && (
-          <div className={`flex gap-0.5 mt-1 ${side === 'enemy' ? 'justify-end' : ''}`}>
+          <div
+            className={`flex gap-0.5 mt-1 ${side === "enemy" ? "justify-end" : ""}`}
+          >
             {championIds.slice(0, 6).map((champId, idx) => (
-              <ChampionIcon key={`${champId}-${idx}`} championId={champId} size="xs" />
+              <ChampionIcon
+                key={`${champId}-${idx}`}
+                championId={champId}
+                size="xs"
+              />
             ))}
             {championIds.length > 6 && (
               <span className="text-[10px] text-gray-500 self-center ml-1">
@@ -494,14 +717,17 @@ function SharedPlayerCard({ player, side, roleLabel, hasTeam, showOpggLink }: Sh
 
 // Read-only Team VS Display for shared drafts
 interface SharedTeamVsDisplayProps {
-  myTeam: SharedDraftData['myTeam'];
-  enemyTeam: SharedDraftData['enemyTeam'];
+  myTeam: SharedDraftData["myTeam"];
+  enemyTeam: SharedDraftData["enemyTeam"];
 }
 
 function SharedTeamVsDisplay({ myTeam, enemyTeam }: SharedTeamVsDisplayProps) {
-  const mainRoles: Role[] = ['top', 'jungle', 'mid', 'adc', 'support'];
+  const mainRoles: Role[] = ["top", "jungle", "mid", "adc", "support"];
 
-  const getPlayerByRole = (players: (DbPlayer | DbEnemyPlayer)[] | undefined, role: Role) => {
+  const getPlayerByRole = (
+    players: (DbPlayer | DbEnemyPlayer)[] | undefined,
+    role: Role,
+  ) => {
     return players?.find((p) => p.role === role && !p.is_sub);
   };
 
@@ -519,7 +745,7 @@ function SharedTeamVsDisplay({ myTeam, enemyTeam }: SharedTeamVsDisplayProps) {
             My Team
           </div>
           <div className="px-4 py-2 rounded-lg border bg-blue-500/10 border-blue-500/50 text-blue-400 font-medium">
-            {myTeam?.team.name || 'My Team'}
+            {myTeam?.team.name || "My Team"}
           </div>
         </div>
 
@@ -534,7 +760,7 @@ function SharedTeamVsDisplay({ myTeam, enemyTeam }: SharedTeamVsDisplayProps) {
             Enemy Team
           </div>
           <div className="px-4 py-2 rounded-lg border bg-red-500/10 border-red-500/50 text-red-400 font-medium">
-            {enemyTeam?.team.name || 'Enemy Team'}
+            {enemyTeam?.team.name || "Enemy Team"}
           </div>
         </div>
       </div>
@@ -548,7 +774,10 @@ function SharedTeamVsDisplay({ myTeam, enemyTeam }: SharedTeamVsDisplayProps) {
             const roleLabel = getRoleLabel(role);
 
             return (
-              <div key={role} className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+              <div
+                key={role}
+                className="grid grid-cols-[1fr_auto_1fr] items-center gap-3"
+              >
                 {/* My Player */}
                 <SharedPlayerCard
                   player={myPlayer}
@@ -578,7 +807,7 @@ function SharedTeamVsDisplay({ myTeam, enemyTeam }: SharedTeamVsDisplayProps) {
         </div>
 
         {/* Enemy Team OP.GG Link */}
-        {enemyTeam?.players.some(p => p.summoner_name) && (
+        {enemyTeam?.players.some((p) => p.summoner_name) && (
           <div className="mt-4 pt-4 border-t border-lol-border flex justify-end">
             <a
               href={getMultiSearchUrl(enemyTeam.players)}
@@ -586,8 +815,18 @@ function SharedTeamVsDisplay({ myTeam, enemyTeam }: SharedTeamVsDisplayProps) {
               rel="noopener noreferrer"
               className="text-lol-gold hover:text-lol-gold-light transition-colors text-sm font-medium flex items-center gap-1.5"
             >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                />
               </svg>
               Open enemy team in OP.GG
             </a>
@@ -600,11 +839,14 @@ function SharedTeamVsDisplay({ myTeam, enemyTeam }: SharedTeamVsDisplayProps) {
 
 // Contested Picks Section for shared drafts
 interface ContestedPicksSectionProps {
-  myTeam: NonNullable<SharedDraftData['myTeam']>;
-  enemyTeam: NonNullable<SharedDraftData['enemyTeam']>;
+  myTeam: NonNullable<SharedDraftData["myTeam"]>;
+  enemyTeam: NonNullable<SharedDraftData["enemyTeam"]>;
 }
 
-function ContestedPicksSection({ myTeam, enemyTeam }: ContestedPicksSectionProps) {
+function ContestedPicksSection({
+  myTeam,
+  enemyTeam,
+}: ContestedPicksSectionProps) {
   const { getChampionById } = useChampionData();
 
   // Calculate contested picks from both teams' champion pools
@@ -612,15 +854,27 @@ function ContestedPicksSection({ myTeam, enemyTeam }: ContestedPicksSectionProps
     // Get all champion IDs from my team's players
     const myChampionIds = new Set<string>();
     myTeam.players.forEach((player) => {
-      const groups = (player.champion_groups || []) as { id: string; name: string; championIds: string[] }[];
-      groups.forEach((g) => g.championIds.forEach((id) => myChampionIds.add(id)));
+      const groups = (player.champion_groups || []) as {
+        id: string;
+        name: string;
+        championIds: string[];
+      }[];
+      groups.forEach((g) =>
+        g.championIds.forEach((id) => myChampionIds.add(id)),
+      );
     });
 
     // Get all champion IDs from enemy team's players
     const enemyChampionIds = new Set<string>();
     enemyTeam.players.forEach((player) => {
-      const groups = (player.champion_groups || []) as { id: string; name: string; championIds: string[] }[];
-      groups.forEach((g) => g.championIds.forEach((id) => enemyChampionIds.add(id)));
+      const groups = (player.champion_groups || []) as {
+        id: string;
+        name: string;
+        championIds: string[];
+      }[];
+      groups.forEach((g) =>
+        g.championIds.forEach((id) => enemyChampionIds.add(id)),
+      );
     });
 
     // Find intersection
@@ -641,8 +895,18 @@ function ContestedPicksSection({ myTeam, enemyTeam }: ContestedPicksSectionProps
   return (
     <Card variant="bordered" padding="md">
       <h2 className="text-lg font-semibold text-yellow-400 mb-3 flex items-center gap-2">
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        <svg
+          className="w-5 h-5"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+          />
         </svg>
         Contested Picks ({contestedPicks.length})
       </h2>
@@ -656,7 +920,9 @@ function ContestedPicksSection({ myTeam, enemyTeam }: ContestedPicksSectionProps
               className="flex items-center gap-2 px-2 py-1 bg-lol-surface rounded-lg border border-yellow-500/50"
             >
               <ChampionIcon championId={championId} size="sm" />
-              <span className="text-sm text-gray-300">{champion?.name || championId}</span>
+              <span className="text-sm text-gray-300">
+                {champion?.name || championId}
+              </span>
             </div>
           );
         })}
@@ -664,4 +930,3 @@ function ContestedPicksSection({ myTeam, enemyTeam }: ContestedPicksSectionProps
     </Card>
   );
 }
-

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { User, Session, AuthError } from '@supabase/supabase-js';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { supabase, isSupabaseConfigured, clearCachedSession } from '../lib/supabase';
 import type { Profile, UserTier, ProfileRole } from '../types/database';
 
 // Guard against multiple initialization calls (React Strict Mode)
@@ -15,7 +15,7 @@ export interface UserProfile {
   maxTeams: number;
   role: ProfileRole | null;
   roleTeamId: string | null;
-  roleCustom: string | null;
+  roleTeamName: string | null;
   isPrivate: boolean;
 }
 
@@ -34,22 +34,25 @@ interface AuthState {
   // Actions
   initialize: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<{ error: AuthError | null }>;
-  signUpWithEmail: (email: string, password: string) => Promise<{ error: AuthError | null }>;
+  signUpWithEmail: (email: string, password: string) => Promise<{ error: AuthError | null; confirmationRequired?: boolean }>;
   signInWithGoogle: () => Promise<{ error: AuthError | null }>;
   signInWithDiscord: () => Promise<{ error: AuthError | null }>;
+  signInWithTwitch: () => Promise<{ error: AuthError | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   setSession: (session: Session | null) => Promise<void>;
   clearError: () => void;
+  resetPassword: (email: string) => Promise<{ error: AuthError | null }>;
+  updatePassword: (newPassword: string) => Promise<{ error: AuthError | null }>;
   updateDisplayName: (displayName: string) => Promise<{ error: string | null }>;
   updateAvatar: (file: File) => Promise<{ error: string | null }>;
   removeAvatar: () => Promise<{ error: string | null }>;
-  updateRole: (role: ProfileRole | null, teamId: string | null, customRole: string | null) => Promise<{ error: string | null }>;
+  updateRole: (role: ProfileRole | null, teamId: string | null) => Promise<{ error: string | null }>;
   updatePrivacy: (isPrivate: boolean) => Promise<{ error: string | null }>;
   deleteAccount: () => Promise<{ error: string | null }>;
 }
 
-const transformProfile = (dbProfile: Profile): UserProfile => ({
+const transformProfile = (dbProfile: Profile, roleTeamName?: string | null): UserProfile => ({
   id: dbProfile.id,
   email: dbProfile.email,
   displayName: dbProfile.display_name,
@@ -58,7 +61,7 @@ const transformProfile = (dbProfile: Profile): UserProfile => ({
   maxTeams: dbProfile.max_teams,
   role: dbProfile.role,
   roleTeamId: dbProfile.role_team_id,
-  roleCustom: dbProfile.role_custom,
+  roleTeamName: roleTeamName ?? null,
   isPrivate: dbProfile.is_private,
 });
 
@@ -111,7 +114,14 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         });
 
         if (error) {
-          set({ isLoading: false, error: error.message });
+          // Transform auth error messages to be more user-friendly
+          let friendlyMessage = error.message;
+          if (error.message?.includes('Invalid login credentials')) {
+            friendlyMessage = 'Incorrect email or password';
+          } else if (error.message?.includes('Email not confirmed')) {
+            friendlyMessage = 'Please check your email to confirm your account';
+          }
+          set({ isLoading: false, error: friendlyMessage });
           return { error };
         }
 
@@ -144,11 +154,28 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
+          options: {
+            emailRedirectTo: `${window.location.origin}/auth/callback`,
+          },
         });
 
         if (error) {
-          set({ isLoading: false, error: error.message });
+          // Transform auth error messages to be more user-friendly
+          let friendlyMessage = error.message;
+          if (error.message?.includes('already registered') || error.message?.includes('already exists')) {
+            friendlyMessage = 'An account with this email already exists';
+          } else if (error.message?.includes('password')) {
+            friendlyMessage = 'Password must be at least 6 characters';
+          }
+          set({ isLoading: false, error: friendlyMessage });
           return { error };
+        }
+
+        // Check for duplicate email - Supabase returns user with empty identities array
+        if (data.user && (!data.user.identities || data.user.identities.length === 0)) {
+          const duplicateError = { message: 'An account with this email already exists' } as AuthError;
+          set({ isLoading: false, error: duplicateError.message });
+          return { error: duplicateError };
         }
 
         // Note: User might need to confirm email depending on Supabase settings
@@ -166,6 +193,10 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
             isLoading: false,
             error: null,
           });
+        } else if (data.user && !data.session) {
+          // Email confirmation required - return flag instead of error
+          set({ isLoading: false });
+          return { error: null, confirmationRequired: true };
         } else {
           set({ isLoading: false });
         }
@@ -191,7 +222,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         });
 
         if (error) {
-          set({ isLoading: false, error: error.message });
+          set({ isLoading: false, error: 'Could not sign in with Google. Please try again.' });
           return { error };
         }
 
@@ -214,7 +245,30 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         });
 
         if (error) {
-          set({ isLoading: false, error: error.message });
+          set({ isLoading: false, error: 'Could not sign in with Discord. Please try again.' });
+          return { error };
+        }
+
+        // OAuth redirects, so we don't need to handle the response here
+        return { error: null };
+      },
+
+      signInWithTwitch: async () => {
+        if (!supabase) {
+          return { error: { message: 'Supabase not configured' } as AuthError };
+        }
+
+        set({ isLoading: true, error: null });
+
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider: 'twitch',
+          options: {
+            redirectTo: window.location.origin,
+          },
+        });
+
+        if (error) {
+          set({ isLoading: false, error: 'Could not sign in with Twitch. Please try again.' });
           return { error };
         }
 
@@ -223,16 +277,19 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       },
 
       signOut: async () => {
-        if (!supabase) return;
-
         set({ isLoading: true });
 
-        try {
-          await supabase.auth.signOut();
-        } catch (error) {
-          // Continue with sign out even if the API call fails
-          console.error('Sign out error:', error);
+        if (supabase) {
+          try {
+            await supabase.auth.signOut();
+          } catch (error) {
+            // Continue with sign out even if the API call fails
+            console.error('Sign out error:', error);
+          }
         }
+
+        // Always clear cached session as fallback (handles edge cases where supabase call fails)
+        clearCachedSession();
 
         // Clear all local data stores
         const storeKeys = [
@@ -262,14 +319,16 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         const { user } = get();
         if (!user || !supabase) return;
 
-        const { data: profileData } = await supabase
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: profileData } = await (supabase as any)
           .from('profiles')
-          .select('*')
+          .select('*, role_team:my_teams!profiles_role_team_id_fkey(name)')
           .eq('id', user.id)
           .single();
 
         if (profileData) {
-          set({ profile: transformProfile(profileData) });
+          const roleTeamName = profileData.role_team?.name ?? null;
+          set({ profile: transformProfile(profileData, roleTeamName) });
         }
       },
 
@@ -294,15 +353,45 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         set({ error: null });
       },
 
+      resetPassword: async (email: string) => {
+        if (!supabase) {
+          return { error: { message: 'Supabase not configured' } as AuthError };
+        }
+
+        set({ isLoading: true, error: null });
+
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: `${window.location.origin}/reset-password`,
+        });
+
+        set({ isLoading: false, error: error?.message || null });
+
+        return { error };
+      },
+
+      updatePassword: async (newPassword: string) => {
+        if (!supabase) {
+          return { error: { message: 'Supabase not configured' } as AuthError };
+        }
+
+        set({ isLoading: true, error: null });
+
+        const { error } = await supabase.auth.updateUser({ password: newPassword });
+
+        set({ isLoading: false, error: error?.message || null });
+
+        return { error };
+      },
+
       updateDisplayName: async (displayName: string) => {
         const { user } = get();
         if (!user || !supabase) {
-          return { error: 'Not authenticated' };
+          return { error: 'Please sign in to continue' };
         }
 
         const trimmedName = displayName.trim();
         if (!trimmedName) {
-          return { error: 'Display name cannot be empty' };
+          return { error: 'Please enter a display name' };
         }
 
         const client = supabase;
@@ -316,7 +405,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
           .single();
 
         if (existing) {
-          return { error: 'Username is already taken' };
+          return { error: 'This username is already taken' };
         }
 
         // Update the display name
@@ -327,7 +416,12 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
           .eq('id', user.id);
 
         if (error) {
-          return { error: error.message };
+          // Handle unique constraint violation for display name
+          if (error.message?.includes('idx_profiles_display_name_unique') ||
+              error.code === '23505') {
+            return { error: 'This username is already taken' };
+          }
+          return { error: 'Failed to update username. Please try again.' };
         }
 
         // Refresh the profile to get updated data
@@ -339,17 +433,17 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       updateAvatar: async (file: File) => {
         const { user } = get();
         if (!user || !supabase) {
-          return { error: 'Not authenticated' };
+          return { error: 'Please sign in to continue' };
         }
 
         // Validate file type
         if (!file.type.startsWith('image/')) {
-          return { error: 'File must be an image' };
+          return { error: 'Please select an image file' };
         }
 
         // Validate file size (max 2MB)
         if (file.size > 2 * 1024 * 1024) {
-          return { error: 'Image must be less than 2MB' };
+          return { error: 'Image size must be under 2MB' };
         }
 
         const client = supabase;
@@ -391,7 +485,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       removeAvatar: async () => {
         const { user } = get();
         if (!user || !supabase) {
-          return { error: 'Not authenticated' };
+          return { error: 'Please sign in to continue' };
         }
 
         const client = supabase;
@@ -423,10 +517,15 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         return { error: null };
       },
 
-      updateRole: async (role: ProfileRole | null, teamId: string | null, customRole: string | null) => {
-        const { user } = get();
+      updateRole: async (role: ProfileRole | null, teamId: string | null) => {
+        const { user, profile } = get();
         if (!user || !supabase) {
-          return { error: 'Not authenticated' };
+          return { error: 'Please sign in to continue' };
+        }
+
+        // Check if user can select developer role (requires developer tier)
+        if (role === 'developer' && profile?.tier !== 'developer') {
+          return { error: 'The Developer role is only available for developer accounts' };
         }
 
         const client = supabase;
@@ -437,12 +536,11 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
           .update({
             role: role,
             role_team_id: teamId,
-            role_custom: role === 'custom' ? customRole : null,
           })
           .eq('id', user.id);
 
         if (error) {
-          return { error: error.message };
+          return { error: 'Failed to update role. Please try again.' };
         }
 
         // Refresh the profile to get updated data
@@ -454,7 +552,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       updatePrivacy: async (isPrivate: boolean) => {
         const { user } = get();
         if (!user || !supabase) {
-          return { error: 'Not authenticated' };
+          return { error: 'Please sign in to continue' };
         }
 
         const client = supabase;
@@ -466,7 +564,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
           .eq('id', user.id);
 
         if (error) {
-          return { error: error.message };
+          return { error: 'Failed to update privacy settings. Please try again.' };
         }
 
         // Refresh the profile to get updated data
@@ -478,7 +576,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       deleteAccount: async () => {
         const { user } = get();
         if (!user || !supabase) {
-          return { error: 'Not authenticated' };
+          return { error: 'Please sign in to continue' };
         }
 
         const client = supabase;
@@ -538,7 +636,7 @@ export const useTierLimits = () => {
   const isAuthenticated = !!user;
   const tier = !isAuthenticated ? 'guest' : (profile?.tier ?? 'free');
   const isFreeTier = tier === 'free' || tier === 'guest';
-  const isPaidTier = tier === 'paid' || tier === 'supporter' || tier === 'admin';
+  const isPaidTier = tier === 'paid' || tier === 'supporter' || tier === 'admin' || tier === 'developer';
 
   return {
     tier,

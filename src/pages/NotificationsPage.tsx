@@ -6,7 +6,40 @@ import { useFriendsStore } from '../stores/useFriendsStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import { formatDistanceToNow, formatDistanceToNowShort } from '../lib/dateUtils';
 import type { Notification } from '../lib/notificationService';
-import type { Message, ConversationPreview } from '../types/database';
+import type { Message, ConversationPreview, Friend, ProfileRole } from '../types/database';
+
+// Role display labels
+const ROLE_LABELS: Record<ProfileRole, string> = {
+  team_owner: 'Team Owner',
+  head_coach: 'Head Coach',
+  coach: 'Coach',
+  analyst: 'Analyst',
+  player: 'Player',
+  manager: 'Manager',
+  scout: 'Scout',
+  content_creator: 'Content Creator',
+  caster: 'Caster',
+  journalist: 'Journalist',
+  streamer: 'Streamer',
+  groupie: 'Groupie',
+  developer: 'Developer',
+};
+
+function getRoleDisplay(
+  role?: ProfileRole | null,
+  roleTeamName?: string | null
+): string | null {
+  if (!role) return null;
+
+  const roleLabel = ROLE_LABELS[role] || null;
+  if (!roleLabel) return null;
+
+  if (roleTeamName) {
+    return `${roleLabel} for ${roleTeamName}`;
+  }
+
+  return roleLabel;
+}
 
 type TabType = 'updates' | 'messages';
 
@@ -116,14 +149,17 @@ function NotificationItem({
 // Conversation Item Component
 function ConversationItem({
   conversation,
+  friend,
   isActive,
   onClick,
 }: {
   conversation: ConversationPreview;
+  friend?: Friend;
   isActive: boolean;
   onClick: () => void;
 }) {
   const initials = conversation.friendName?.slice(0, 2).toUpperCase() || '??';
+  const roleDisplay = friend ? getRoleDisplay(friend.role, friend.roleTeamName) : null;
 
   return (
     <button
@@ -155,6 +191,11 @@ function ConversationItem({
             {formatDistanceToNowShort(conversation.lastMessageAt)}
           </span>
         </div>
+        {roleDisplay && (
+          <p className="text-[9px] font-medium text-lol-gold truncate">
+            {roleDisplay}
+          </p>
+        )}
         <p className="text-xs text-gray-500 truncate mt-0.5">
           {conversation.lastMessage}
         </p>
@@ -409,6 +450,7 @@ export default function NotificationsPage() {
                   <ConversationItem
                     key={convo.friendId}
                     conversation={convo}
+                    friend={friends.find((f) => f.friendId === convo.friendId)}
                     isActive={convo.friendId === activeConversation}
                     onClick={() => handleSelectConversation(convo.friendId)}
                   />
@@ -452,6 +494,11 @@ export default function NotificationsPage() {
                 <h3 className="font-medium text-white">
                   {activeFriend?.displayName || activeConvo?.friendName || 'Unknown'}
                 </h3>
+                {activeFriend && getRoleDisplay(activeFriend.role, activeFriend.roleTeamName) && (
+                  <p className="text-[10px] font-medium text-lol-gold">
+                    {getRoleDisplay(activeFriend.role, activeFriend.roleTeamName)}
+                  </p>
+                )}
               </div>
             </div>
 

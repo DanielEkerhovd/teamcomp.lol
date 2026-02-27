@@ -8,14 +8,31 @@ const ROLE_LABELS: Record<ProfileRole, string> = {
   coach: 'Coach',
   analyst: 'Analyst',
   player: 'Player',
+  manager: 'Manager',
+  scout: 'Scout',
+  content_creator: 'Content Creator',
+  caster: 'Caster',
+  journalist: 'Journalist',
+  streamer: 'Streamer',
   groupie: 'Groupie',
-  custom: 'Custom',
+  developer: 'Developer',
 };
 
-function getRoleDisplay(role?: ProfileRole | null, roleCustom?: string | null): string | null {
+function getRoleDisplay(
+  role?: ProfileRole | null,
+  roleTeamName?: string | null
+): string | null {
   if (!role) return null;
-  if (role === 'custom' && roleCustom) return roleCustom;
-  return ROLE_LABELS[role] || null;
+
+  const roleLabel = ROLE_LABELS[role] || null;
+  if (!roleLabel) return null;
+
+  // Add team name if available
+  if (roleTeamName) {
+    return `${roleLabel} for ${roleTeamName}`;
+  }
+
+  return roleLabel;
 }
 
 interface FriendCardProps {
@@ -27,6 +44,7 @@ interface FriendCardProps {
 
 export function FriendCard({ friend, onRemove, onMessage, onBlock }: FriendCardProps) {
   const initials = friend.displayName?.slice(0, 2).toUpperCase() || '??';
+  const roleDisplay = getRoleDisplay(friend.role, friend.roleTeamName);
 
   return (
     <div className="flex items-center gap-3 p-3 bg-lol-surface rounded-lg border border-lol-border hover:border-lol-gold/30 transition-colors">
@@ -46,6 +64,11 @@ export function FriendCard({ friend, onRemove, onMessage, onBlock }: FriendCardP
         <p className="text-sm font-medium text-white truncate">
           {friend.displayName}
         </p>
+        {roleDisplay && (
+          <p className="text-[10px] font-medium text-lol-gold truncate">
+            {roleDisplay}
+          </p>
+        )}
         <p className="text-xs text-gray-500">
           Friends since {formatDistanceToNow(friend.acceptedAt)}
         </p>
@@ -104,7 +127,7 @@ export function PendingRequestCard({
   onBlock,
 }: PendingRequestCardProps) {
   const initials = request.displayName?.slice(0, 2).toUpperCase() || '??';
-  const roleDisplay = getRoleDisplay(request.role, request.roleCustom);
+  const roleDisplay = getRoleDisplay(request.role, request.roleTeamName);
 
   return (
     <div className="flex items-center gap-3 p-3 bg-lol-surface rounded-lg border border-lol-border">
@@ -121,16 +144,14 @@ export function PendingRequestCard({
       )}
 
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <p className="text-sm font-medium text-white truncate">
-            {request.displayName}
+        <p className="text-sm font-medium text-white truncate">
+          {request.displayName}
+        </p>
+        {roleDisplay && (
+          <p className="text-[10px] font-medium text-lol-gold truncate">
+            {roleDisplay}
           </p>
-          {roleDisplay && (
-            <span className="px-1.5 py-0.5 text-[10px] font-medium bg-lol-gold/10 text-lol-gold rounded">
-              {roleDisplay}
-            </span>
-          )}
-        </div>
+        )}
         <p className="text-xs text-gray-500">
           {type === 'received' ? 'Wants to be friends' : 'Request pending'} ·{' '}
           {formatDistanceToNow(request.createdAt)}

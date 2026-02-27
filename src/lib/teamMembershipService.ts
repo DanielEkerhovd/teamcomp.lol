@@ -24,12 +24,48 @@ export interface TeamInvite {
   teamId: string;
   token: string;
   invitedEmail: string | null;
+  invitedUserId: string | null;
   role: 'admin' | 'player' | 'viewer';
   playerSlotId: string | null;
   canEditGroups: boolean;
   expiresAt: string;
   createdAt: string;
   acceptedAt: string | null;
+  status: 'pending' | 'accepted' | 'declined';
+}
+
+export interface PendingTeamInvite {
+  inviteId: string;
+  teamId: string;
+  teamName: string;
+  role: 'admin' | 'player' | 'viewer';
+  canEditGroups: boolean;
+  playerSlotId: string | null;
+  createdAt: string;
+  expiresAt: string;
+  invitedBy: {
+    id: string;
+    displayName: string;
+    avatarUrl: string | null;
+  };
+}
+
+export interface SentTeamInvite {
+  inviteId: string;
+  role: 'admin' | 'player' | 'viewer';
+  canEditGroups: boolean;
+  playerSlotId: string | null;
+  createdAt: string;
+  expiresAt: string;
+  status: 'pending' | 'accepted' | 'declined';
+  invitedUser: {
+    id: string;
+    displayName: string;
+    avatarUrl: string | null;
+  } | null;
+  invitedEmail: string | null;
+  token: string;
+  isDirectInvite: boolean;
 }
 
 function mapTeamMember(row: DbTeamMember & { profiles?: { display_name: string | null; email: string | null; avatar_url: string | null } }): TeamMember {
@@ -56,12 +92,14 @@ function mapTeamInvite(row: DbTeamInvite): TeamInvite {
     teamId: row.team_id,
     token: row.token,
     invitedEmail: row.invited_email,
+    invitedUserId: row.invited_user_id || null,
     role: row.role,
     playerSlotId: row.player_slot_id,
     canEditGroups: row.can_edit_groups,
     expiresAt: row.expires_at,
     createdAt: row.created_at,
     acceptedAt: row.accepted_at,
+    status: row.status || 'pending',
   };
 }
 
@@ -96,10 +134,10 @@ export const teamMembershipService = {
       email?: string;
     } = {}
   ): Promise<TeamInvite> {
-    if (!supabase) throw new Error('Supabase not configured');
+    if (!supabase) throw new Error('Unable to connect. Please check your internet connection.');
 
     const { data: user } = await supabase.auth.getUser();
-    if (!user.user) throw new Error('Must be authenticated to create invite');
+    if (!user.user) throw new Error('Please sign in to create an invite');
 
     const { data, error } = await (supabase
       .from('team_invites' as 'profiles')
@@ -170,7 +208,7 @@ export const teamMembershipService = {
     inviteTeamName?: string;
     inviteRole?: string;
   }> {
-    if (!supabase) return { success: false, error: 'Supabase not configured' };
+    if (!supabase) return { success: false, error: 'Unable to connect. Please check your internet connection.' };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase.rpc as any)('accept_team_invite', {
@@ -178,7 +216,7 @@ export const teamMembershipService = {
     });
 
     if (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: 'Could not accept invite. Please try again.' };
     }
 
     return data;
@@ -188,7 +226,7 @@ export const teamMembershipService = {
    * Leave a team (for non-owners)
    */
   async leaveTeam(teamId: string): Promise<{ success: boolean; error?: string }> {
-    if (!supabase) return { success: false, error: 'Supabase not configured' };
+    if (!supabase) return { success: false, error: 'Unable to connect. Please check your internet connection.' };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase.rpc as any)('leave_team', {
@@ -196,7 +234,7 @@ export const teamMembershipService = {
     });
 
     if (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: 'Could not leave team. Please try again.' };
     }
 
     return data;
@@ -209,7 +247,7 @@ export const teamMembershipService = {
     membershipId: string,
     playerSlotId: string | null
   ): Promise<{ success: boolean; error?: string }> {
-    if (!supabase) return { success: false, error: 'Supabase not configured' };
+    if (!supabase) return { success: false, error: 'Unable to connect. Please check your internet connection.' };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase.rpc as any)('assign_player_slot', {
@@ -218,7 +256,7 @@ export const teamMembershipService = {
     });
 
     if (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: 'Could not assign player slot. Please try again.' };
     }
 
     return data;
@@ -231,7 +269,7 @@ export const teamMembershipService = {
     membershipId: string,
     canEditGroups: boolean
   ): Promise<{ success: boolean; error?: string }> {
-    if (!supabase) return { success: false, error: 'Supabase not configured' };
+    if (!supabase) return { success: false, error: 'Unable to connect. Please check your internet connection.' };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase.rpc as any)('update_member_permissions', {
@@ -240,7 +278,7 @@ export const teamMembershipService = {
     });
 
     if (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: 'Could not update permissions. Please try again.' };
     }
 
     return data;
@@ -387,6 +425,45 @@ export const teamMembershipService = {
   },
 
   /**
+   * Remove all members from a team (except owner) and return their user IDs
+   * Used when deleting a team to notify all members
+   */
+  async removeAllTeamMembers(teamId: string): Promise<string[]> {
+    if (!supabase) return [];
+
+    // First get all member user IDs (excluding the owner who is deleting)
+    const { data: members, error: fetchError } = await (supabase
+      .from('team_members' as 'profiles')
+      .select('user_id')
+      .eq('team_id' as 'id', teamId) as unknown as Promise<{ data: { user_id: string }[] | null; error: Error | null }>);
+
+    if (fetchError) {
+      console.error('Error fetching team members:', fetchError);
+      return [];
+    }
+
+    const userIds = (members || []).map(m => m.user_id);
+
+    // Delete all team members
+    const { error: deleteError } = await (supabase
+      .from('team_members' as 'profiles')
+      .delete()
+      .eq('team_id' as 'id', teamId) as unknown as Promise<{ data: unknown; error: Error | null }>);
+
+    if (deleteError) {
+      console.error('Error removing team members:', deleteError);
+    }
+
+    // Also delete any pending invites for this team
+    await (supabase
+      .from('team_invites' as 'profiles')
+      .delete()
+      .eq('team_id' as 'id', teamId) as unknown as Promise<{ data: unknown; error: Error | null }>);
+
+    return userIds;
+  },
+
+  /**
    * Generate the full invite URL for a token
    */
   getInviteUrl(token: string): string {
@@ -403,5 +480,144 @@ export const teamMembershipService = {
     } catch {
       return false;
     }
+  },
+
+  /**
+   * Send a team invite by username or email
+   */
+  async sendTeamInvite(
+    teamId: string,
+    identifier: string,
+    role: 'admin' | 'player' | 'viewer' = 'player',
+    options: {
+      playerSlotId?: string;
+      canEditGroups?: boolean;
+    } = {}
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    inviteId?: string;
+    targetUser?: {
+      id: string;
+      displayName: string;
+      avatarUrl: string | null;
+    };
+  }> {
+    if (!supabase) return { success: false, error: 'Unable to connect. Please check your internet connection.' };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.rpc as any)('send_team_invite', {
+      p_team_id: teamId,
+      p_identifier: identifier.trim(),
+      p_role: role,
+      p_player_slot_id: options.playerSlotId || null,
+      p_can_edit_groups: options.canEditGroups || false,
+    });
+
+    if (error) {
+      console.error('Error sending team invite:', error);
+      // Return user-friendly error message
+      if (error.message?.includes('not found') || error.message?.includes('User not found')) {
+        return { success: false, error: 'User not found. Please check the username or email.' };
+      }
+      if (error.message?.includes('already a member')) {
+        return { success: false, error: 'This user is already a member of the team.' };
+      }
+      return { success: false, error: 'Could not send invite. Please try again.' };
+    }
+
+    return data;
+  },
+
+  /**
+   * Respond to a team invite (accept/decline)
+   */
+  async respondToTeamInvite(
+    inviteId: string,
+    accept: boolean
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    status?: 'accepted' | 'declined';
+    membershipId?: string;
+    teamId?: string;
+    teamName?: string;
+    role?: string;
+    conflict?: 'free_tier_team_limit';
+    existingTeamId?: string;
+    existingTeamName?: string;
+    inviteTeamId?: string;
+    inviteTeamName?: string;
+    inviteRole?: string;
+  }> {
+    if (!supabase) return { success: false, error: 'Unable to connect. Please check your internet connection.' };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.rpc as any)('respond_to_team_invite', {
+      p_invite_id: inviteId,
+      p_accept: accept,
+    });
+
+    if (error) {
+      console.error('Error responding to team invite:', error);
+      return { success: false, error: 'Could not respond to invite. Please try again.' };
+    }
+
+    return data;
+  },
+
+  /**
+   * Get pending team invites for the current user
+   */
+  async getPendingTeamInvitesForUser(): Promise<PendingTeamInvite[]> {
+    if (!supabase) return [];
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.rpc as any)('get_pending_team_invites');
+
+    if (error) {
+      console.error('Error fetching pending team invites:', error);
+      return [];
+    }
+
+    return data || [];
+  },
+
+  /**
+   * Get sent invites for a team (both direct and link-based)
+   */
+  async getSentTeamInvites(teamId: string): Promise<SentTeamInvite[]> {
+    if (!supabase) return [];
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.rpc as any)('get_sent_team_invites', {
+      p_team_id: teamId,
+    });
+
+    if (error) {
+      console.error('Error fetching sent team invites:', error);
+      return [];
+    }
+
+    return data || [];
+  },
+
+  /**
+   * Cancel a pending team invite
+   */
+  async cancelTeamInvite(inviteId: string): Promise<{ success: boolean; error?: string }> {
+    if (!supabase) return { success: false, error: 'Unable to connect. Please check your internet connection.' };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.rpc as any)('cancel_team_invite', {
+      p_invite_id: inviteId,
+    });
+
+    if (error) {
+      console.error('Error canceling team invite:', error);
+      return { success: false, error: 'Could not cancel invite. Please try again.' };
+    }
+
+    return data;
   },
 };

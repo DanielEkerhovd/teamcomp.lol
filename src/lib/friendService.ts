@@ -33,7 +33,6 @@ export const friendService = {
         avatarUrl: string | null;
         acceptedAt: string;
         role: string | null;
-        roleCustom: string | null;
         roleTeamName: string | null;
       }>;
       pendingReceived: Array<{
@@ -43,7 +42,6 @@ export const friendService = {
         avatarUrl: string | null;
         createdAt: string;
         role: string | null;
-        roleCustom: string | null;
         roleTeamName: string | null;
       }>;
       pendingSent: Array<{
@@ -53,7 +51,6 @@ export const friendService = {
         avatarUrl: string | null;
         createdAt: string;
         role: string | null;
-        roleCustom: string | null;
         roleTeamName: string | null;
       }>;
       blocked: Array<{
@@ -78,7 +75,7 @@ export const friendService = {
    */
   async sendFriendRequest(identifier: string): Promise<FriendRequestResponse> {
     if (!isSupabaseConfigured() || !supabase) {
-      return { success: false, error: 'Not connected to server' };
+      return { success: false, error: 'Unable to connect. Please check your internet connection.' };
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -88,7 +85,11 @@ export const friendService = {
 
     if (error) {
       console.error('Error sending friend request:', error);
-      return { success: false, error: error.message };
+      // Return user-friendly error message
+      if (error.message?.includes('not found') || error.message?.includes('User not found')) {
+        return { success: false, error: 'User not found. Please check the username or email.' };
+      }
+      return { success: false, error: 'Could not send friend request. Please try again.' };
     }
 
     return data as FriendRequestResponse;
@@ -102,7 +103,7 @@ export const friendService = {
     accept: boolean
   ): Promise<{ success: boolean; error?: string; friend?: Friend }> {
     if (!isSupabaseConfigured() || !supabase) {
-      return { success: false, error: 'Not connected to server' };
+      return { success: false, error: 'Unable to connect. Please check your internet connection.' };
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -113,7 +114,7 @@ export const friendService = {
 
     if (error) {
       console.error('Error responding to friend request:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: 'Could not respond to friend request. Please try again.' };
     }
 
     const result = data as {
@@ -148,7 +149,7 @@ export const friendService = {
    */
   async removeFriend(friendshipId: string): Promise<{ success: boolean; error?: string }> {
     if (!isSupabaseConfigured() || !supabase) {
-      return { success: false, error: 'Not connected to server' };
+      return { success: false, error: 'Unable to connect. Please check your internet connection.' };
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -158,7 +159,7 @@ export const friendService = {
 
     if (error) {
       console.error('Error removing friend:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: 'Could not remove friend. Please try again.' };
     }
 
     return data as { success: boolean; error?: string };
@@ -169,7 +170,7 @@ export const friendService = {
    */
   async blockUser(userId: string): Promise<{ success: boolean; error?: string; blockedUser?: BlockedUser }> {
     if (!isSupabaseConfigured() || !supabase) {
-      return { success: false, error: 'Not connected to server' };
+      return { success: false, error: 'Unable to connect. Please check your internet connection.' };
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -179,7 +180,7 @@ export const friendService = {
 
     if (error) {
       console.error('Error blocking user:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: 'Could not block user. Please try again.' };
     }
 
     const result = data as {
@@ -213,7 +214,7 @@ export const friendService = {
    */
   async unblockUser(userId: string): Promise<{ success: boolean; error?: string }> {
     if (!isSupabaseConfigured() || !supabase) {
-      return { success: false, error: 'Not connected to server' };
+      return { success: false, error: 'Unable to connect. Please check your internet connection.' };
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -223,7 +224,7 @@ export const friendService = {
 
     if (error) {
       console.error('Error unblocking user:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: 'Could not unblock user. Please try again.' };
     }
 
     return data as { success: boolean; error?: string };

@@ -9,8 +9,14 @@ import DraftDetailPage from './pages/DraftDetailPage';
 import ToolsPage from './pages/ToolsPage';
 import SharedDraftPage from './pages/SharedDraftPage';
 import AcceptInvitePage from './pages/AcceptInvitePage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
+import AuthCallbackPage from './pages/AuthCallbackPage';
 import ProfilePage from './pages/ProfilePage';
 import FriendsPage from './pages/FriendsPage';
+import LiveDraftLobbyPage from './pages/LiveDraftLobbyPage';
+import LiveDraftListPage from './pages/LiveDraftListPage';
+import JoinLiveDraftPage from './pages/JoinLiveDraftPage';
+import LiveDraftPage from './pages/LiveDraftPage';
 import FirstTimeSetupModal from './components/onboarding/FirstTimeSetupModal';
 import UsernameSetupModal from './components/onboarding/UsernameSetupModal';
 import { AuthProvider } from './contexts/AuthContext';
@@ -56,6 +62,12 @@ const ToolsIcon = () => (
   </svg>
 );
 
+const LiveDraftIcon = () => (
+  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+  </svg>
+);
+
 const CollapseIcon = ({ collapsed }: { collapsed: boolean }) => (
   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
     {/* Sidebar panel icon */}
@@ -75,12 +87,14 @@ const CollapseIcon = ({ collapsed }: { collapsed: boolean }) => (
 function NavDivider({ label, collapsed }: { label?: string; collapsed: boolean }) {
   return (
     <div className="py-2">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center">
         <div className="flex-1 h-px bg-lol-border" />
-        {label && !collapsed && (
+        {label && (
           <>
-            <span className="text-[10px] uppercase tracking-wider text-gray-500 font-medium">{label}</span>
-            <div className="flex-1 h-px bg-lol-border" />
+            <span className={`text-[10px] uppercase tracking-wider text-gray-500 font-medium transition-all duration-300 overflow-hidden whitespace-nowrap ${collapsed ? 'max-w-0 opacity-0 mx-0' : 'max-w-[100px] opacity-100 mx-2'}`}>
+              {label}
+            </span>
+            <div className={`h-px bg-lol-border transition-all duration-300 ${collapsed ? 'flex-0 w-0' : 'flex-1'}`} />
           </>
         )}
       </div>
@@ -97,13 +111,14 @@ function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed
   ];
 
   const draftNavItems = [
-    { to: '/draft', label: 'Draft', icon: DraftIcon },
+    { to: '/draft', label: 'Drafts', icon: DraftIcon },
     { to: '/enemy-teams', label: 'Enemy Teams', icon: EnemyIcon },
     { to: '/my-teams', label: myTeamLabel, icon: TeamIcon },
     { to: '/champion-pool', label: 'Pools', icon: ChampionIcon },
   ];
 
   const utilNavItems = [
+    { to: '/live-draft', label: 'Live Draft', icon: LiveDraftIcon },
     { to: '/tools', label: 'Tools', icon: ToolsIcon },
   ];
 
@@ -113,7 +128,7 @@ function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed
       to={item.to}
       end={item.to === '/'}
       className={({ isActive }) =>
-        `flex items-center gap-3 px-3 py-3 rounded-xl font-medium transition-all duration-200 group relative
+        `flex items-center py-3 px-3 rounded-xl font-medium transition-all duration-300 group relative
         ${isActive
           ? 'bg-gradient-to-r from-lol-gold/20 to-transparent text-lol-gold'
           : 'text-gray-400 hover:text-white hover:bg-lol-surface'
@@ -127,7 +142,9 @@ function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed
             <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-lol-gold rounded-r-full" />
           )}
           <span className="shrink-0"><item.icon /></span>
-          <span className={`whitespace-nowrap transition-all duration-300 ${collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100'}`}>{item.label}</span>
+          <span className={`whitespace-nowrap transition-all duration-300 overflow-hidden ${collapsed ? 'max-w-0 opacity-0 ml-0' : 'max-w-[200px] opacity-100 ml-3'}`}>
+            {item.label}
+          </span>
           {/* Tooltip when collapsed */}
           {collapsed && (
             <div className="absolute left-full ml-3 px-3 py-2 bg-lol-card border border-lol-border rounded-lg text-sm text-white whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 shadow-xl z-50">
@@ -144,17 +161,17 @@ function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed
       className={`
         fixed left-0 top-0 h-screen bg-lol-dark border-r border-lol-border
         flex flex-col z-50 transition-all duration-300 ease-in-out
-        ${collapsed ? 'w-[72px]' : 'w-[240px]'}
+        ${collapsed ? 'w-20' : 'w-[240px]'}
       `}
     >
       {/* Logo */}
-      <div className="h-16 flex items-center border-b border-lol-border shrink-0 px-4">
-        <NavLink to="/" className="flex items-center gap-3 group overflow-hidden">
-          <div className="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br from-lol-gold-light to-lol-gold flex items-center justify-center text-lol-dark font-bold text-lg shadow-lg shadow-lol-gold/20">
-            TC
+      <div className="h-16 flex items-center border-b border-lol-border shrink-0 px-3">
+        <NavLink to="/" className="flex items-center group overflow-hidden">
+          <div>
+            <img src="/images/logo.png" alt="Teamcomp logo" className="size-10" />
           </div>
-          <span className={`text-lg font-bold text-white group-hover:text-lol-gold transition-all duration-300 whitespace-nowrap ${collapsed ? 'opacity-0 w-0' : 'opacity-100'}`}>
-            Teamcomp.lol
+          <span className={`text-lg font-bold text-white group-hover:text-lol-gold whitespace-nowrap transition-all duration-300 overflow-hidden ${collapsed ? 'max-w-0 opacity-0 ml-0' : 'max-w-[200px] opacity-100 ml-3'}`}>
+            teamcomp.<span className='text-lol-gold'>lol</span>
           </span>
         </NavLink>
       </div>
@@ -194,10 +211,12 @@ function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed
         {/* Collapse toggle */}
         <button
           onClick={() => setCollapsed(!collapsed)}
-          className="flex items-center gap-3 w-full px-3 py-3 rounded-xl font-medium text-gray-400 hover:text-white hover:bg-lol-surface transition-all duration-200"
+          className="flex items-center w-full py-3 px-3 rounded-xl font-medium text-gray-400 hover:text-white hover:bg-lol-surface transition-all duration-300"
         >
           <span className="shrink-0"><CollapseIcon collapsed={collapsed} /></span>
-          <span className={`whitespace-nowrap transition-all duration-300 ${collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100'}`}>Collapse</span>
+          <span className={`whitespace-nowrap transition-all duration-300 overflow-hidden ${collapsed ? 'max-w-0 opacity-0 ml-0' : 'max-w-[200px] opacity-100 ml-3'}`}>
+            Collapse
+          </span>
         </button>
       </div>
     </aside>
@@ -215,7 +234,7 @@ function Layout({ children }: { children: React.ReactNode }) {
       />
       <main
         className={`transition-all duration-300 ease-in-out min-h-screen ${
-          collapsed ? 'ml-[72px]' : 'ml-[240px]'
+          collapsed ? 'ml-20' : 'ml-[240px]'
         }`}
       >
         <div className="px-8 py-6">{children}</div>
@@ -236,6 +255,8 @@ export default function App() {
           {/* Public routes (no sidebar) */}
           <Route path="/share/:token" element={<SharedDraftPage />} />
           <Route path="/invite/:token" element={<AcceptInvitePage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
 
           {/* App routes (with sidebar layout) */}
           <Route
@@ -252,6 +273,11 @@ export default function App() {
                   <Route path="/tools" element={<ToolsPage />} />
                   <Route path="/profile" element={<ProfilePage />} />
                   <Route path="/friends" element={<FriendsPage />} />
+                  <Route path="/live-draft" element={<LiveDraftListPage />} />
+                  <Route path="/live-draft/join/:token" element={<JoinLiveDraftPage />} />
+                  <Route path="/live-draft/lobby/:sessionId" element={<LiveDraftPage />} />
+                  <Route path="/live-draft/:sessionId/game" element={<LiveDraftPage />} />
+                  <Route path="/live-draft/:sessionId" element={<LiveDraftPage />} />
                 </Routes>
               </Layout>
             }

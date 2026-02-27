@@ -39,7 +39,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
         {/* App Info */}
         <div className="text-center text-gray-500 text-sm">
-          <p>Teamcomp.lol</p>
+          <p>teamcomp.<span className="text-lol-gold">lol</span></p>
           <p className="text-xs mt-1">Draft planning and team management</p>
         </div>
       </div>

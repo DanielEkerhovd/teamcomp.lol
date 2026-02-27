@@ -1,9 +1,22 @@
 // Supabase database types
 // These match the schema in supabase/schema.sql
 
-export type UserTier = 'free' | 'paid' | 'supporter' | 'admin';
+export type UserTier = 'free' | 'paid' | 'supporter' | 'admin' | 'developer';
 
-export type ProfileRole = 'team_owner' | 'head_coach' | 'coach' | 'analyst' | 'player' | 'groupie' | 'custom';
+export type ProfileRole =
+  | 'team_owner'
+  | 'head_coach'
+  | 'coach'
+  | 'analyst'
+  | 'player'
+  | 'manager'
+  | 'scout'
+  | 'content_creator'
+  | 'caster'
+  | 'journalist'
+  | 'streamer'
+  | 'groupie'
+  | 'developer';
 
 export type TeamMemberRole = 'owner' | 'admin' | 'player' | 'viewer';
 export type FriendshipStatus = 'pending' | 'accepted' | 'blocked';
@@ -11,6 +24,7 @@ export type NotificationType =
   | 'team_invite'
   | 'team_member_joined'
   | 'team_member_left'
+  | 'team_deleted'
   | 'team_role_changed'
   | 'player_assignment'
   | 'friend_request'
@@ -30,7 +44,6 @@ export interface Database {
           max_teams: number;
           role: ProfileRole | null;
           role_team_id: string | null;
-          role_custom: string | null;
           is_private: boolean;
           created_at: string;
           updated_at: string;
@@ -44,7 +57,6 @@ export interface Database {
           max_teams?: number;
           role?: ProfileRole | null;
           role_team_id?: string | null;
-          role_custom?: string | null;
           is_private?: boolean;
           created_at?: string;
           updated_at?: string;
@@ -58,7 +70,6 @@ export interface Database {
           max_teams?: number;
           role?: ProfileRole | null;
           role_team_id?: string | null;
-          role_custom?: string | null;
           is_private?: boolean;
           updated_at?: string;
         };
@@ -406,6 +417,7 @@ export interface Database {
           team_id: string;
           token: string;
           invited_email: string | null;
+          invited_user_id: string | null;
           role: 'admin' | 'player' | 'viewer';
           player_slot_id: string | null;
           created_by: string;
@@ -414,12 +426,14 @@ export interface Database {
           accepted_by: string | null;
           created_at: string;
           can_edit_groups: boolean;
+          status: 'pending' | 'accepted' | 'declined';
         };
         Insert: {
           id?: string;
           team_id: string;
           token?: string;
           invited_email?: string | null;
+          invited_user_id?: string | null;
           role?: 'admin' | 'player' | 'viewer';
           player_slot_id?: string | null;
           created_by: string;
@@ -428,15 +442,18 @@ export interface Database {
           accepted_by?: string | null;
           created_at?: string;
           can_edit_groups?: boolean;
+          status?: 'pending' | 'accepted' | 'declined';
         };
         Update: {
           invited_email?: string | null;
+          invited_user_id?: string | null;
           role?: 'admin' | 'player' | 'viewer';
           player_slot_id?: string | null;
           expires_at?: string;
           accepted_at?: string | null;
           accepted_by?: string | null;
           can_edit_groups?: boolean;
+          status?: 'pending' | 'accepted' | 'declined';
         };
       };
       draft_shares: {
@@ -537,6 +554,203 @@ export interface Database {
           read_at?: string | null;
         };
       };
+      live_draft_sessions: {
+        Row: {
+          id: string;
+          name: string;
+          created_by: string | null;
+          team1_name: string;
+          team2_name: string;
+          team1_captain_id: string | null;
+          team2_captain_id: string | null;
+          team1_captain_display_name: string | null;
+          team2_captain_display_name: string | null;
+          team1_side: 'blue' | 'red' | null;
+          team1_linked_draft_id: string | null;
+          team2_linked_draft_id: string | null;
+          team1_linked_team_id: string | null;
+          team2_linked_team_id: string | null;
+          team1_linked_enemy_id: string | null;
+          team2_linked_enemy_id: string | null;
+          draft_mode: 'normal' | 'fearless' | 'ironman';
+          planned_games: number;
+          pick_time_seconds: number;
+          ban_time_seconds: number;
+          status: 'lobby' | 'in_progress' | 'paused' | 'completed' | 'cancelled';
+          current_game_number: number;
+          invite_token: string;
+          started_at: string | null;
+          completed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          created_by?: string | null;
+          team1_name?: string;
+          team2_name?: string;
+          team1_captain_id?: string | null;
+          team2_captain_id?: string | null;
+          team1_captain_display_name?: string | null;
+          team2_captain_display_name?: string | null;
+          team1_side?: 'blue' | 'red' | null;
+          team1_linked_draft_id?: string | null;
+          team2_linked_draft_id?: string | null;
+          team1_linked_team_id?: string | null;
+          team2_linked_team_id?: string | null;
+          team1_linked_enemy_id?: string | null;
+          team2_linked_enemy_id?: string | null;
+          draft_mode?: 'normal' | 'fearless' | 'ironman';
+          planned_games?: number;
+          pick_time_seconds?: number;
+          ban_time_seconds?: number;
+          status?: 'lobby' | 'in_progress' | 'paused' | 'completed' | 'cancelled';
+          current_game_number?: number;
+          invite_token?: string;
+          started_at?: string | null;
+          completed_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          name?: string;
+          team1_name?: string;
+          team2_name?: string;
+          team1_captain_id?: string | null;
+          team2_captain_id?: string | null;
+          team1_captain_display_name?: string | null;
+          team2_captain_display_name?: string | null;
+          team1_side?: 'blue' | 'red' | null;
+          draft_mode?: 'normal' | 'fearless' | 'ironman';
+          planned_games?: number;
+          pick_time_seconds?: number;
+          ban_time_seconds?: number;
+          status?: 'lobby' | 'in_progress' | 'paused' | 'completed' | 'cancelled';
+          current_game_number?: number;
+          started_at?: string | null;
+          completed_at?: string | null;
+          updated_at?: string;
+        };
+      };
+      live_draft_games: {
+        Row: {
+          id: string;
+          session_id: string;
+          game_number: number;
+          blue_side_team: 'team1' | 'team2';
+          status: 'pending' | 'drafting' | 'completed' | 'editing';
+          current_phase: 'ban1' | 'pick1' | 'ban2' | 'pick2' | null;
+          current_turn: 'blue' | 'red' | null;
+          current_action_index: number;
+          turn_started_at: string | null;
+          blue_bans: (string | null)[];
+          red_bans: (string | null)[];
+          blue_picks: (string | null)[];
+          red_picks: (string | null)[];
+          edited_picks: unknown;
+          winner: 'blue' | 'red' | null;
+          started_at: string | null;
+          completed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          session_id: string;
+          game_number: number;
+          blue_side_team?: 'team1' | 'team2';
+          status?: 'pending' | 'drafting' | 'completed' | 'editing';
+          current_phase?: 'ban1' | 'pick1' | 'ban2' | 'pick2' | null;
+          current_turn?: 'blue' | 'red' | null;
+          current_action_index?: number;
+          turn_started_at?: string | null;
+          blue_bans?: (string | null)[];
+          red_bans?: (string | null)[];
+          blue_picks?: (string | null)[];
+          red_picks?: (string | null)[];
+          edited_picks?: unknown;
+          winner?: 'blue' | 'red' | null;
+          started_at?: string | null;
+          completed_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          game_number?: number;
+          blue_side_team?: 'team1' | 'team2';
+          status?: 'pending' | 'drafting' | 'completed' | 'editing';
+          current_phase?: 'ban1' | 'pick1' | 'ban2' | 'pick2' | null;
+          current_turn?: 'blue' | 'red' | null;
+          current_action_index?: number;
+          turn_started_at?: string | null;
+          blue_bans?: (string | null)[];
+          red_bans?: (string | null)[];
+          blue_picks?: (string | null)[];
+          red_picks?: (string | null)[];
+          edited_picks?: unknown;
+          winner?: 'blue' | 'red' | null;
+          started_at?: string | null;
+          completed_at?: string | null;
+          updated_at?: string;
+        };
+      };
+      live_draft_participants: {
+        Row: {
+          id: string;
+          session_id: string;
+          user_id: string | null;
+          participant_type: 'controller' | 'spectator';
+          team: 'blue' | 'red' | null;
+          display_name: string | null;
+          is_connected: boolean;
+          last_seen_at: string;
+          is_captain: boolean;
+          joined_at: string;
+        };
+        Insert: {
+          id?: string;
+          session_id: string;
+          user_id?: string | null;
+          participant_type: 'controller' | 'spectator';
+          team?: 'blue' | 'red' | null;
+          display_name?: string | null;
+          is_connected?: boolean;
+          last_seen_at?: string;
+          is_captain?: boolean;
+          joined_at?: string;
+        };
+        Update: {
+          participant_type?: 'controller' | 'spectator';
+          team?: 'blue' | 'red' | null;
+          display_name?: string | null;
+          is_connected?: boolean;
+          last_seen_at?: string;
+          is_captain?: boolean;
+        };
+      };
+      live_draft_messages: {
+        Row: {
+          id: string;
+          session_id: string;
+          user_id: string | null;
+          display_name: string;
+          content: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          session_id: string;
+          user_id?: string | null;
+          display_name: string;
+          content: string;
+          created_at?: string;
+        };
+        Update: {
+          display_name?: string;
+          content?: string;
+        };
+      };
     };
   };
 }
@@ -600,7 +814,6 @@ export interface Friend {
   avatarUrl: string | null;
   acceptedAt: string;
   role?: ProfileRole | null;
-  roleCustom?: string | null;
   roleTeamName?: string | null;
 }
 
@@ -612,7 +825,6 @@ export interface PendingFriendRequest {
   avatarUrl: string | null;
   createdAt: string;
   role?: ProfileRole | null;
-  roleCustom?: string | null;
   roleTeamName?: string | null;
 }
 

@@ -35,7 +35,7 @@ export default function AddFriendModal({ isOpen, onClose }: AddFriendModalProps)
         onClose();
       }, 1500);
     } else {
-      setError(result.error || 'Failed to send friend request');
+      setError(result.error || 'Couldn\'t send friend request. Please try again.');
     }
 
     setIsSubmitting(false);

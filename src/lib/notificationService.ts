@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConfigured } from './supabase';
-import { DbNotification } from '../types/database';
+import { DbNotification, NotificationType } from '../types/database';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
 export interface Notification {
@@ -119,6 +119,72 @@ export const notificationService = {
 
     if (error) {
       console.error('Error deleting notification:', error);
+      return false;
+    }
+
+    return true;
+  },
+
+  /**
+   * Send a notification to a user
+   */
+  async sendNotification(
+    userId: string,
+    type: NotificationType,
+    title: string,
+    body?: string,
+    data?: Record<string, unknown>
+  ): Promise<boolean> {
+    if (!isSupabaseConfigured() || !supabase) {
+      return false;
+    }
+
+    const { error } = await supabase
+      .from('notifications')
+      .insert({
+        user_id: userId,
+        type,
+        title,
+        body: body || null,
+        data: data || {},
+      });
+
+    if (error) {
+      console.error('Error sending notification:', error);
+      return false;
+    }
+
+    return true;
+  },
+
+  /**
+   * Send notifications to multiple users
+   */
+  async sendNotificationToMany(
+    userIds: string[],
+    type: NotificationType,
+    title: string,
+    body?: string,
+    data?: Record<string, unknown>
+  ): Promise<boolean> {
+    if (!isSupabaseConfigured() || !supabase || userIds.length === 0) {
+      return false;
+    }
+
+    const notifications = userIds.map(userId => ({
+      user_id: userId,
+      type,
+      title,
+      body: body || null,
+      data: data || {},
+    }));
+
+    const { error } = await supabase
+      .from('notifications')
+      .insert(notifications);
+
+    if (error) {
+      console.error('Error sending notifications:', error);
       return false;
     }
 
