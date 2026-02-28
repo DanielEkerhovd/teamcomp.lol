@@ -39,7 +39,7 @@ export default function CreateSessionModal({
   const [sessionName, setSessionName] = useState("");
   const [team1Name, setTeam1Name] = useState("");
   const [team2Name, setTeam2Name] = useState("");
-  const [draftMode, setDraftMode] = useState<DraftMode>("normal");
+  const [draftMode, setDraftMode] = useState<DraftMode>("fearless");
   const [plannedGames, setPlannedGames] = useState(3);
   const [pickTime, setPickTime] = useState(30);
   const [banTime, setBanTime] = useState(30);
@@ -75,7 +75,7 @@ export default function CreateSessionModal({
     setSessionName("");
     setTeam1Name("");
     setTeam2Name("");
-    setDraftMode("normal");
+    setDraftMode("fearless");
     setPlannedGames(3);
     setPickTime(30);
     setBanTime(30);
@@ -109,6 +109,7 @@ export default function CreateSessionModal({
           value={sessionName}
           onChange={(e) => setSessionName(e.target.value)}
           placeholder="e.g., Scrimmage vs Team Alpha"
+          maxLength={30}
         />
 
         {/* Team Names */}
@@ -118,12 +119,14 @@ export default function CreateSessionModal({
             value={team1Name}
             onChange={(e) => setTeam1Name(e.target.value)}
             placeholder="Team 1"
+            maxLength={30}
           />
           <Input
             label="Team 2"
             value={team2Name}
             onChange={(e) => setTeam2Name(e.target.value)}
             placeholder="Team 2"
+            maxLength={30}
           />
         </div>
         <p className="text-xs text-gray-500 -mt-4">

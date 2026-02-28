@@ -4,12 +4,20 @@ import { Team, Player, createEmptyTeam, createSubPlayer, generateId, Region, Rol
 import { useSettingsStore } from './useSettingsStore';
 import { cloudSync } from './middleware/cloudSync';
 import { syncManager } from '../lib/syncManager';
+import { useAuthStore } from './useAuthStore';
 
 // Maximum number of subs per team
 export const MAX_SUBS = 5;
 
-// Maximum number of enemy teams a user can create
-export const MAX_TEAMS = 100;
+// Guest/free default for enemy teams
+export const MAX_ENEMY_TEAMS_DEFAULT = 10;
+
+// Get the maximum enemy teams allowed based on auth state
+export const getMaxEnemyTeams = (): number => {
+  const { user, profile } = useAuthStore.getState();
+  if (!user) return MAX_ENEMY_TEAMS_DEFAULT;
+  return profile?.maxEnemyTeams ?? MAX_ENEMY_TEAMS_DEFAULT;
+};
 
 // Result type for team operations that can fail
 export interface EnemyTeamOperationResult {
@@ -73,7 +81,8 @@ export const useEnemyTeamStore = create<EnemyTeamState>()(
 
       addTeam: (name: string): EnemyTeamOperationResult => {
         const currentTeams = get().teams;
-        if (currentTeams.length >= MAX_TEAMS) {
+        const maxEnemyTeams = getMaxEnemyTeams();
+        if (currentTeams.length >= maxEnemyTeams) {
           return { success: false, error: 'max_teams_reached' };
         }
         if (isTeamNameTaken(currentTeams, name)) {
@@ -91,7 +100,8 @@ export const useEnemyTeamStore = create<EnemyTeamState>()(
 
       importTeamFromOpgg: (name: string, region: Region, players: { summonerName: string; tagLine: string }[]): EnemyTeamOperationResult => {
         const currentTeams = get().teams;
-        if (currentTeams.length >= MAX_TEAMS) {
+        const maxEnemyTeams = getMaxEnemyTeams();
+        if (currentTeams.length >= maxEnemyTeams) {
           return { success: false, error: 'max_teams_reached' };
         }
         if (isTeamNameTaken(currentTeams, name)) {

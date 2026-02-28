@@ -24,8 +24,8 @@ export default function UsernameSetupModal() {
       return;
     }
 
-    if (trimmed.length > 20) {
-      setError('Username must be 20 characters or less');
+    if (trimmed.length > 30) {
+      setError('Username must be 30 characters or less');
       return;
     }
 
@@ -79,6 +79,7 @@ export default function UsernameSetupModal() {
                   if (e.key === 'Enter' && !isSaving) handleSubmit();
                 }}
                 disabled={isSaving}
+                maxLength={30}
                 placeholder="Enter a unique username"
                 className={`w-full px-4 py-3 bg-lol-dark border rounded-xl text-white placeholder-gray-500 focus:outline-none transition-colors ${
                   error
@@ -98,7 +99,7 @@ export default function UsernameSetupModal() {
             </div>
 
             <ul className="text-xs text-gray-500 space-y-1 pl-4">
-              <li className="list-disc">3-20 characters</li>
+              <li className="list-disc">3-30 characters</li>
               <li className="list-disc">Letters, numbers, underscores, and hyphens only</li>
               <li className="list-disc">Must be unique</li>
             </ul>

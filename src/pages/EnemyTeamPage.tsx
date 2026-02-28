@@ -14,7 +14,8 @@ import {
   horizontalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { useDroppable } from "@dnd-kit/core";
-import { useEnemyTeamStore, MAX_SUBS, MAX_TEAMS } from "../stores/useEnemyTeamStore";
+import { useEnemyTeamStore, MAX_SUBS } from "../stores/useEnemyTeamStore";
+import { useTierLimits } from "../stores/useAuthStore";
 import { useRankStore } from "../stores/useRankStore";
 import { useMasteryStore } from "../stores/useMasteryStore";
 import { parseOpggMultiSearchUrl, ROLES, Role, Player } from "../types";
@@ -88,7 +89,8 @@ export default function EnemyTeamPage() {
   const [teamToDelete, setTeamToDelete] = useState<string | null>(null);
   const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
 
-  const isAtLimit = teams.length >= MAX_TEAMS;
+  const { maxEnemyTeams } = useTierLimits();
+  const isAtLimit = teams.length >= maxEnemyTeams;
 
   const {
     fetchRanksForContext,
@@ -201,7 +203,7 @@ export default function EnemyTeamPage() {
         if (result.error === 'duplicate_name') {
           setAddTeamError('A team with this name already exists');
         } else if (result.error === 'max_teams_reached') {
-          setAddTeamError(`You've reached the maximum limit of ${MAX_TEAMS} teams`);
+          setAddTeamError(`You've reached the maximum limit of ${maxEnemyTeams} teams`);
         }
         return;
       }
@@ -236,7 +238,7 @@ export default function EnemyTeamPage() {
       if (result.error === 'duplicate_name') {
         setImportError('A team with this name already exists. Please choose a different name.');
       } else if (result.error === 'max_teams_reached') {
-        setImportError(`You've reached the maximum limit of ${MAX_TEAMS} teams. Please delete some teams to add new ones.`);
+        setImportError(`You've reached the maximum limit of ${maxEnemyTeams} teams. Please delete some teams to add new ones.`);
       }
       return;
     }
@@ -331,14 +333,14 @@ export default function EnemyTeamPage() {
             variant="secondary"
             onClick={() => setIsImportModalOpen(true)}
             disabled={isAtLimit}
-            title={isAtLimit ? `Maximum of ${MAX_TEAMS} teams reached` : undefined}
+            title={isAtLimit ? `Maximum of ${maxEnemyTeams} teams reached` : undefined}
           >
             Import from OP.GG
           </Button>
           <Button
             onClick={() => setIsAddModalOpen(true)}
             disabled={isAtLimit}
-            title={isAtLimit ? `Maximum of ${MAX_TEAMS} teams reached` : undefined}
+            title={isAtLimit ? `Maximum of ${maxEnemyTeams} teams reached` : undefined}
           >
             + Add Team
           </Button>
@@ -348,7 +350,7 @@ export default function EnemyTeamPage() {
           <p className="text-gray-400 mt-1">
             Scout and track your opponents
             <span className="ml-2 text-gray-500">
-              ({teams.length}/{MAX_TEAMS})
+              ({teams.length}/{maxEnemyTeams})
             </span>
           </p>
         </div>
@@ -363,7 +365,7 @@ export default function EnemyTeamPage() {
           <div>
             <p className="text-red-400 font-medium">Team limit reached</p>
             <p className="text-red-400/70 text-sm">
-              You've reached the maximum of {MAX_TEAMS} enemy teams. Delete some teams to add new ones.
+              You've reached the maximum of {maxEnemyTeams} enemy teams. Delete some teams to add new ones.
             </p>
           </div>
         </div>

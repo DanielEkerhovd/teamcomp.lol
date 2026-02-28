@@ -97,13 +97,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
           // Session is valid - restore it
           await setSession(cachedSession);
-          useAuthStore.setState({ isInitialized: true, isLoading: false });
 
-          // Load cloud data in background
+          // Load cloud data and WAIT for it before marking as initialized
+          // (prevents app rendering with empty stores before cloud data arrives)
           isLoadingCloudData = true;
-          syncManager.loadAllFromCloud()
-            .catch(err => console.warn('Background cloud sync failed:', err))
-            .finally(() => { isLoadingCloudData = false; });
+          try {
+            await Promise.race([
+              syncManager.loadAllFromCloud(),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Cloud load timeout')), 15000))
+            ]);
+          } catch (err) {
+            console.warn('Cloud sync failed or timed out:', err);
+          } finally {
+            isLoadingCloudData = false;
+          }
+
+          useAuthStore.setState({ isInitialized: true, isLoading: false });
         } catch (err) {
           // Any error during validation - clear cache and stay logged out
           console.warn('Session validation error, clearing cache:', err);
@@ -117,6 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     // Fallback timeout in case INITIAL_SESSION never fires and no cached session
+    // Use longer timeout when validating a cached session (validation + cloud data loading)
     const fallbackTimeout = setTimeout(() => {
       if (!useAuthStore.getState().isInitialized) {
         console.warn('Auth initialization fallback - no session found');
@@ -124,7 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         clearCachedSession();
         useAuthStore.setState({ user: null, profile: null, isInitialized: true, isLoading: false });
       }
-    }, 3000);
+    }, cachedSession ? 25000 : 3000);
 
     // Set up auth state listener
     if (isSupabaseConfigured() && supabase) {
@@ -151,15 +161,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 isLoadingCloudData = false;
               }
             } else if (session && hasHandledSignIn) {
-              // Cached session path is already handling this - wait for profile to be loaded
-              // before marking as initialized to avoid showing stale email-based display name
-              const maxWait = 5000;
-              const startTime = Date.now();
-              while (!useAuthStore.getState().profile && (Date.now() - startTime) < maxWait) {
-                await new Promise(resolve => setTimeout(resolve, 50));
-              }
+              // Cached session path (validateAndRestore) is handling initialization.
+              // Don't set isInitialized here — validateAndRestore will do it after
+              // both session restore AND cloud data loading are complete.
+              return;
             }
-            // Mark as initialized regardless of session state
+            // Mark as initialized for no-session case
             useAuthStore.setState({ isInitialized: true, isLoading: false });
             return;
           }

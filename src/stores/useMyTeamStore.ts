@@ -698,6 +698,11 @@ export const useMyTeamStore = create<MyTeamState>()(
     {
       name: 'teamcomp-lol-my-team',
       version: 4,
+      partialize: (state) => ({
+        teams: state.teams,
+        selectedTeamId: state.selectedTeamId,
+        memberships: state.memberships,
+      }),
       migrate: (persistedState: unknown, version: number) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const state = persistedState as any;

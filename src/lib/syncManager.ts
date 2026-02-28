@@ -1142,11 +1142,11 @@ export const syncManager = {
       try {
         const { useDraftTheoryStore } = await import('../stores/useDraftTheoryStore');
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: draftTheory } = await (supabase as any)
+        const { data: draftTheoryRows } = await (supabase as any)
           .from('draft_theory')
           .select('*')
-          .eq('user_id', user.id)
-          .single();
+          .eq('user_id', user.id);
+        const draftTheory = draftTheoryRows?.[0] ?? null;
 
         if (draftTheory) {
           useDraftTheoryStore.setState({

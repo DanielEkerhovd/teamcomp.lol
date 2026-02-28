@@ -14,6 +14,9 @@ export type TeamSide = 'team1' | 'team2';
 export type ParticipantType = 'controller' | 'spectator';
 export type DraftActionType = 'ban' | 'pick' | 'timeout';
 
+/** Sentinel champion ID used when a ban/pick times out with no selection */
+export const NONE_CHAMPION = '__none__';
+
 // ============================================
 // DATABASE ROW TYPES
 // ============================================

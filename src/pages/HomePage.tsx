@@ -64,6 +64,7 @@ export default function HomePage() {
         <div className="flex flex-row-reverse justify-center gap-5">
           <h1 className="text-5xl font-bold text-white mb-4">
             teamcomp.<span className="text-lol-gold">lol</span>
+            <span className="ml-2 text-xs font-semibold uppercase tracking-wide bg-lol-gold/20 text-lol-gold px-2 py-1 rounded-full align-middle">beta</span>
           </h1>
           <div>
             <img

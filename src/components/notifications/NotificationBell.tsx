@@ -44,6 +44,13 @@ function NotificationItem({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
           </svg>
         );
+      case 'draft_invite':
+        return (
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        );
       default:
         return (
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -63,6 +70,8 @@ function NotificationItem({
         return 'bg-green-500/20 text-green-400';
       case 'team_role_changed':
         return 'bg-yellow-500/20 text-yellow-400';
+      case 'draft_invite':
+        return 'bg-orange-500/20 text-orange-400';
       default:
         return 'bg-gray-500/20 text-gray-400';
     }
@@ -74,6 +83,8 @@ function NotificationItem({
         return '/friends?tab=pending';
       case 'team_invite':
         return notification.data?.inviteToken ? `/invite/${notification.data.inviteToken}` : null;
+      case 'draft_invite':
+        return notification.data?.inviteToken ? `/live-draft/join/${notification.data.inviteToken}` : null;
       default:
         return null;
     }

@@ -1,7 +1,7 @@
 // Supabase database types
 // These match the schema in supabase/schema.sql
 
-export type UserTier = 'free' | 'paid' | 'supporter' | 'admin' | 'developer';
+export type UserTier = 'free' | 'beta' | 'paid' | 'supporter' | 'admin' | 'developer';
 
 export type ProfileRole =
   | 'team_owner'
@@ -29,7 +29,8 @@ export type NotificationType =
   | 'player_assignment'
   | 'friend_request'
   | 'friend_accepted'
-  | 'message';
+  | 'message'
+  | 'draft_invite';
 
 export interface Database {
   public: {
@@ -42,6 +43,8 @@ export interface Database {
           avatar_url: string | null;
           tier: UserTier;
           max_teams: number;
+          max_enemy_teams: number;
+          max_drafts: number;
           role: ProfileRole | null;
           role_team_id: string | null;
           is_private: boolean;
@@ -55,6 +58,8 @@ export interface Database {
           avatar_url?: string | null;
           tier?: UserTier;
           max_teams?: number;
+          max_enemy_teams?: number;
+          max_drafts?: number;
           role?: ProfileRole | null;
           role_team_id?: string | null;
           is_private?: boolean;
@@ -68,6 +73,8 @@ export interface Database {
           avatar_url?: string | null;
           tier?: UserTier;
           max_teams?: number;
+          max_enemy_teams?: number;
+          max_drafts?: number;
           role?: ProfileRole | null;
           role_team_id?: string | null;
           is_private?: boolean;

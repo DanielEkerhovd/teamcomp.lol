@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { liveDraftService } from '../../lib/liveDraftService';
+import { useFriendsStore } from '../../stores/useFriendsStore';
 import { Button, Modal } from '../ui';
 import JoinTeamModal from './JoinTeamModal';
 import type {
@@ -32,6 +33,11 @@ interface LiveDraftLobbyModalProps {
   defaultDisplayName: string;
   loadSession: () => Promise<void>;
   setError: (error: string | null) => void;
+  broadcastSessionUpdate: () => void;
+  onDeleteSession?: () => Promise<void>;
+  onLeaveSession?: () => Promise<void>;
+  onEndSession?: () => Promise<void>;
+  hasActiveDraft?: boolean;
 }
 
 export default function LiveDraftLobbyModal({
@@ -45,11 +51,55 @@ export default function LiveDraftLobbyModal({
   defaultDisplayName,
   loadSession,
   setError,
+  broadcastSessionUpdate,
+  onDeleteSession,
+  onLeaveSession,
+  onEndSession,
+  hasActiveDraft,
 }: LiveDraftLobbyModalProps) {
   const [copied, setCopied] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [pendingJoinTeam, setPendingJoinTeam] = useState<'team1' | 'team2' | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+  const [inviteUsername, setInviteUsername] = useState('');
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [invitedFriendIds, setInvitedFriendIds] = useState<Set<string>>(new Set());
+  const [friendInviteLoading, setFriendInviteLoading] = useState<string | null>(null);
+
+  const { friends, isLoading: friendsLoading, loadFriends } = useFriendsStore();
+
+  useEffect(() => {
+    if (isOpen && currentUserId) {
+      loadFriends();
+    }
+  }, [isOpen, currentUserId, loadFriends]);
+
+  const participantUserIds = new Set(
+    participants.filter((p) => p.user_id).map((p) => p.user_id)
+  );
+
+  const handleInviteFriend = useCallback(async (displayName: string, friendId: string) => {
+    setFriendInviteLoading(friendId);
+    try {
+      const result = await liveDraftService.sendDraftInvite(session.id, displayName);
+      if (result.success) {
+        setInvitedFriendIds((prev) => new Set(prev).add(friendId));
+      } else {
+        setInviteError(result.error || 'Failed to send invite');
+        setTimeout(() => setInviteError(null), 3000);
+      }
+    } catch (err) {
+      setInviteError(err instanceof Error ? err.message : 'Failed to send invite');
+      setTimeout(() => setInviteError(null), 3000);
+    } finally {
+      setFriendInviteLoading(null);
+    }
+  }, [session.id]);
 
   const handleCopyLink = async () => {
     const url = liveDraftService.getSessionUrl(session.invite_token);
@@ -57,6 +107,27 @@ export default function LiveDraftLobbyModal({
     if (success) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleSendDraftInvite = async () => {
+    if (!inviteUsername.trim()) return;
+    setInviteLoading(true);
+    setInviteError(null);
+    setInviteSuccess(null);
+    try {
+      const result = await liveDraftService.sendDraftInvite(session.id, inviteUsername.trim());
+      if (result.success) {
+        setInviteSuccess(`Invite sent to ${result.targetUser?.displayName || inviteUsername}`);
+        setInviteUsername('');
+        setTimeout(() => setInviteSuccess(null), 3000);
+      } else {
+        setInviteError(result.error || 'Failed to send invite');
+      }
+    } catch (err) {
+      setInviteError(err instanceof Error ? err.message : 'Failed to send invite');
+    } finally {
+      setInviteLoading(false);
     }
   };
 
@@ -78,6 +149,7 @@ export default function LiveDraftLobbyModal({
         }
       }
 
+      broadcastSessionUpdate();
       await loadSession();
     } catch (err) {
       console.error('Failed to join as captain:', err);
@@ -120,6 +192,7 @@ export default function LiveDraftLobbyModal({
 
     try {
       await liveDraftService.selectTeamSide(session.id, side, team);
+      broadcastSessionUpdate();
       await loadSession();
     } catch (err) {
       console.error('Failed to select side:', err);
@@ -158,6 +231,7 @@ export default function LiveDraftLobbyModal({
         }
       }
 
+      broadcastSessionUpdate();
       await loadSession();
     } catch (err) {
       console.error('Failed to leave captain role:', err);
@@ -199,6 +273,7 @@ export default function LiveDraftLobbyModal({
         await liveDraftService.selectTeamSide(session.id, currentSide, currentUserId ? undefined : toTeam);
       }
 
+      broadcastSessionUpdate();
       await loadSession();
     } catch (err) {
       console.error('Failed to switch team:', err);
@@ -214,7 +289,9 @@ export default function LiveDraftLobbyModal({
     setError(null);
 
     try {
-      await liveDraftService.joinAsSpectator(session.id);
+      const spectatorName = currentUserId ? (defaultDisplayName || undefined) : undefined;
+      await liveDraftService.joinAsSpectator(session.id, spectatorName);
+      broadcastSessionUpdate();
       await loadSession();
     } catch (err) {
       console.error('Failed to join as spectator:', err);
@@ -230,6 +307,7 @@ export default function LiveDraftLobbyModal({
 
     try {
       await liveDraftService.leaveSession(session.id);
+      broadcastSessionUpdate();
       await loadSession();
     } catch (err) {
       console.error('Failed to leave spectator:', err);
@@ -298,6 +376,55 @@ export default function LiveDraftLobbyModal({
     return null;
   };
 
+  // Check if current user is the session creator
+  const isCreator = !!currentUserId && session.created_by === currentUserId;
+
+  const handleKickCaptain = async (team: 'team1' | 'team2') => {
+    setActionLoading(`kick-${team}`);
+    setError(null);
+
+    try {
+      await liveDraftService.kickCaptain(session.id, team);
+      broadcastSessionUpdate();
+      await loadSession();
+    } catch (err) {
+      console.error('Failed to kick captain:', err);
+      setError(err instanceof Error ? err.message : 'Failed to kick captain');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDeleteSession = async () => {
+    if (!onDeleteSession) return;
+    setActionLoading('delete');
+    setError(null);
+    try {
+      await onDeleteSession();
+    } catch (err) {
+      console.error('Failed to delete session:', err);
+      setError(err instanceof Error ? err.message : 'Failed to delete session');
+      setShowDeleteConfirm(false);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleEndSession = async () => {
+    if (!onEndSession) return;
+    setActionLoading('end');
+    setError(null);
+    try {
+      await onEndSession();
+    } catch (err) {
+      console.error('Failed to end session:', err);
+      setError(err instanceof Error ? err.message : 'Failed to end session');
+      setShowEndConfirm(false);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   // Check which sides are taken
   const blueTaken = session.team1_side === 'blue' || session.team2_side === 'blue';
   const redTaken = session.team1_side === 'red' || session.team2_side === 'red';
@@ -309,6 +436,134 @@ export default function LiveDraftLobbyModal({
         onClose={onClose}
         title="Draft Lobby"
         size="xl"
+        headerActions={
+          (isCreator || (session.status === 'completed' && !!currentUserId && onLeaveSession)) ? (
+            <div className="relative">
+              <button
+                onClick={() => {
+                  setShowSettingsMenu(!showSettingsMenu);
+                  setShowDeleteConfirm(false);
+                  setShowEndConfirm(false);
+                }}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-lol-surface transition-colors"
+                title="Session settings"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </button>
+
+              {showSettingsMenu && (
+                <>
+                  {/* Backdrop to close dropdown */}
+                  <div className="fixed inset-0 z-10" onClick={() => {
+                    setShowSettingsMenu(false);
+                    setShowDeleteConfirm(false);
+                    setShowEndConfirm(false);
+                  }} />
+
+                  {/* Dropdown menu */}
+                  <div className="absolute right-0 top-full mt-1 z-20 w-56 bg-lol-card border border-lol-border rounded-lg shadow-xl shadow-black/50 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                    {/* Complete Session — only when in_progress and not actively drafting */}
+                    {session.status === 'in_progress' && !hasActiveDraft && onEndSession && (
+                      showEndConfirm ? (
+                        <div className="p-3 border-b border-lol-border bg-lol-gold/5">
+                          <p className="text-xs text-gray-300 mb-2">Complete this draft session?</p>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={handleEndSession}
+                              disabled={actionLoading === 'end'}
+                              className="flex-1 px-3 py-1.5 rounded text-xs font-medium bg-lol-gold/20 text-lol-gold hover:bg-lol-gold/30 transition-colors disabled:opacity-50"
+                            >
+                              {actionLoading === 'end' ? 'Finishing...' : 'Confirm'}
+                            </button>
+                            <button
+                              onClick={() => setShowEndConfirm(false)}
+                              disabled={actionLoading === 'end'}
+                              className="px-3 py-1.5 rounded text-xs text-gray-400 hover:text-white hover:bg-lol-surface transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setShowEndConfirm(true)}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-300 hover:bg-lol-surface hover:text-white transition-colors border-b border-lol-border"
+                        >
+                          <svg className="w-4 h-4 text-lol-gold" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                          Complete Session
+                        </button>
+                      )
+                    )}
+
+                    {/* Leave Draft — for completed sessions, any logged-in user */}
+                    {session.status === 'completed' && !!currentUserId && onLeaveSession && (
+                      <button
+                        onClick={async () => {
+                          setActionLoading('leave');
+                          try {
+                            await onLeaveSession();
+                          } catch (err) {
+                            console.error('Failed to leave session:', err);
+                            setError(err instanceof Error ? err.message : 'Failed to leave session');
+                          } finally {
+                            setActionLoading(null);
+                          }
+                        }}
+                        disabled={actionLoading === 'leave'}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-300 hover:bg-lol-surface hover:text-white transition-colors border-b border-lol-border"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                        </svg>
+                        {actionLoading === 'leave' ? 'Leaving...' : 'Leave Draft'}
+                      </button>
+                    )}
+
+                    {/* Delete Session — not for completed sessions */}
+                    {onDeleteSession && (
+                      showDeleteConfirm ? (
+                        <div className="p-3 bg-red-500/5">
+                          <p className="text-xs text-gray-300 mb-2">Permanently delete this session and all data?</p>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={handleDeleteSession}
+                              disabled={actionLoading === 'delete'}
+                              className="flex-1 px-3 py-1.5 rounded text-xs font-medium bg-red-600 text-white hover:bg-red-500 transition-colors disabled:opacity-50"
+                            >
+                              {actionLoading === 'delete' ? 'Deleting...' : 'Confirm Delete'}
+                            </button>
+                            <button
+                              onClick={() => setShowDeleteConfirm(false)}
+                              disabled={actionLoading === 'delete'}
+                              className="px-3 py-1.5 rounded text-xs text-gray-400 hover:text-white hover:bg-lol-surface transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setShowDeleteConfirm(true)}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                          Delete Session
+                        </button>
+                      )
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          ) : undefined
+        }
       >
         <div className="space-y-4">
           {/* Session Info */}
@@ -341,8 +596,10 @@ export default function LiveDraftLobbyModal({
               onJoin={() => handleJoinAsTeamCaptain('team1')}
               onLeave={isTeam1Captain ? handleLeaveCaptainRole : undefined}
               onSwitch={isTeam2Captain ? () => handleSwitchTeam('team1') : undefined}
+              onKick={isCreator && !isTeam1Captain && session.status === 'lobby' ? () => handleKickCaptain('team1') : undefined}
               loading={actionLoading === 'join-team1' || actionLoading === 'switch-team1'}
               leaveLoading={actionLoading === 'leave'}
+              kickLoading={actionLoading === 'kick-team1'}
             />
 
             {/* Team 2 Card */}
@@ -361,8 +618,10 @@ export default function LiveDraftLobbyModal({
               onJoin={() => handleJoinAsTeamCaptain('team2')}
               onLeave={isTeam2Captain ? handleLeaveCaptainRole : undefined}
               onSwitch={isTeam1Captain ? () => handleSwitchTeam('team2') : undefined}
+              onKick={isCreator && !isTeam2Captain && session.status === 'lobby' ? () => handleKickCaptain('team2') : undefined}
               loading={actionLoading === 'join-team2' || actionLoading === 'switch-team2'}
               leaveLoading={actionLoading === 'leave'}
+              kickLoading={actionLoading === 'kick-team2'}
             />
           </div>
 
@@ -507,6 +766,113 @@ export default function LiveDraftLobbyModal({
             </div>
           </div>
 
+          {/* Invite by Username — logged-in users only */}
+          {currentUserId && (
+            <div className="p-3 bg-lol-dark rounded-lg">
+              <h4 className="text-sm font-medium text-white mb-2">Invite by Username</h4>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={inviteUsername}
+                  onChange={(e) => {
+                    setInviteUsername(e.target.value);
+                    setInviteError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSendDraftInvite();
+                  }}
+                  placeholder="Enter username..."
+                  className="flex-1 px-3 py-2 bg-lol-surface border border-lol-border rounded text-sm text-white placeholder-gray-500 focus:outline-none focus:border-lol-gold"
+                  disabled={inviteLoading}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSendDraftInvite}
+                  disabled={inviteLoading || !inviteUsername.trim()}
+                >
+                  {inviteLoading ? (
+                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                  ) : (
+                    'Send'
+                  )}
+                </Button>
+              </div>
+              {inviteSuccess && (
+                <p className="text-xs text-green-400 mt-2">{inviteSuccess}</p>
+              )}
+              {inviteError && (
+                <p className="text-xs text-red-400 mt-2">{inviteError}</p>
+              )}
+
+              {/* Friends List */}
+              {friendsLoading ? (
+                <div className="flex items-center justify-center py-3">
+                  <svg className="animate-spin h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                </div>
+              ) : friends.length > 0 ? (
+                <div className="mt-3">
+                  <h5 className="text-xs font-medium text-gray-400 mb-1.5">Friends</h5>
+                  <div className="max-h-40 overflow-y-auto space-y-1 scrollbar-thin scrollbar-thumb-lol-border">
+                    {friends.map((friend) => {
+                      const isInSession = participantUserIds.has(friend.friendId);
+                      const isInvited = invitedFriendIds.has(friend.friendId);
+                      const isLoading = friendInviteLoading === friend.friendId;
+
+                      return (
+                        <div
+                          key={friend.friendId}
+                          className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-lol-surface/50"
+                        >
+                          {friend.avatarUrl ? (
+                            <img
+                              src={friend.avatarUrl}
+                              alt=""
+                              className="w-6 h-6 rounded-full object-cover shrink-0"
+                            />
+                          ) : (
+                            <div className="w-6 h-6 rounded-full bg-lol-surface flex items-center justify-center shrink-0">
+                              <span className="text-xs text-gray-400">
+                                {friend.displayName.charAt(0).toUpperCase()}
+                              </span>
+                            </div>
+                          )}
+                          <span className="text-sm text-white truncate flex-1">
+                            {friend.displayName}
+                          </span>
+                          {isInSession ? (
+                            <span className="text-xs text-blue-400 shrink-0">Joined</span>
+                          ) : isInvited ? (
+                            <span className="text-xs text-green-400 shrink-0">Sent</span>
+                          ) : (
+                            <button
+                              onClick={() => handleInviteFriend(friend.displayName, friend.friendId)}
+                              disabled={isLoading}
+                              className="text-xs px-2 py-0.5 rounded bg-lol-gold/20 text-lol-gold hover:bg-lol-gold/30 disabled:opacity-50 shrink-0 transition-colors"
+                            >
+                              {isLoading ? '...' : 'Invite'}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500 mt-2">
+                  Add friends from your profile to quickly invite them here.
+                </p>
+              )}
+            </div>
+          )}
+
+
           {/* Close button hint */}
           {isCaptain && mySide && (
             <p className="text-center text-gray-500 text-xs">
@@ -548,8 +914,10 @@ interface TeamCardProps {
   onJoin: () => void;
   onLeave?: () => void;
   onSwitch?: () => void;
+  onKick?: () => void;
   loading: boolean;
   leaveLoading?: boolean;
+  kickLoading?: boolean;
 }
 
 function TeamCard({
@@ -567,9 +935,12 @@ function TeamCard({
   onJoin,
   onLeave,
   onSwitch,
+  onKick,
   loading,
   leaveLoading,
+  kickLoading,
 }: TeamCardProps) {
+  const [showKickConfirm, setShowKickConfirm] = useState(false);
   const hasCaptain = !!captainId || !!captainDisplayName;
 
   const getBorderColor = () => {
@@ -653,7 +1024,54 @@ function TeamCard({
                 )}
               </button>
             )}
+            {!isMe && onKick && !showKickConfirm && (
+              <button
+                onClick={() => setShowKickConfirm(true)}
+                className="p-1.5 rounded hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition-all"
+                title="Kick captain"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                </svg>
+              </button>
+            )}
           </div>
+
+          {/* Kick Confirmation */}
+          {!isMe && onKick && showKickConfirm && (
+            <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30">
+              <span className="text-xs text-red-400">Kick {captainDisplayName}?</span>
+              <div className="flex gap-1.5">
+                <button
+                  onClick={() => setShowKickConfirm(false)}
+                  disabled={kickLoading}
+                  className="px-2 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    onKick();
+                    setShowKickConfirm(false);
+                  }}
+                  disabled={kickLoading}
+                  className="px-2 py-1 rounded text-xs font-medium text-red-400 bg-red-500/20 hover:bg-red-500/30 transition-colors disabled:opacity-50"
+                >
+                  {kickLoading ? (
+                    <span className="flex items-center gap-1">
+                      <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Kicking...
+                    </span>
+                  ) : (
+                    'Kick'
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Ready Status */}
           <div className={`flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium ${

@@ -104,14 +104,14 @@ export default function UserMenu({ collapsed }: UserMenuProps) {
     role.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 
   const roleLabel = profile?.role
-    ? formatRole(profile.role) + (profile.roleTeamName ? ` of ${profile.roleTeamName}` : '')
+    ? formatRole(profile.role) + (profile.roleTeamName ? ` for ${profile.roleTeamName}` : '')
     : null;
   const subtitleText = roleLabel ?? (
-    profile?.tier === 'developer' ? 'Developer' : profile?.tier === 'paid' ? 'Pro' : profile?.tier === 'admin' ? 'Admin' : 'Free'
+    profile?.tier === 'developer' ? 'Developer' : profile?.tier === 'beta' ? 'Beta' : profile?.tier === 'paid' ? 'Pro' : profile?.tier === 'admin' ? 'Admin' : 'Free'
   );
   const subtitleColor = profile?.role
     ? 'text-lol-gold'
-    : profile?.tier === 'developer' ? 'text-emerald-400' : profile?.tier === 'paid' ? 'text-lol-gold' : profile?.tier === 'admin' ? 'text-purple-400' : 'text-gray-400';
+    : profile?.tier === 'developer' ? 'text-emerald-400' : profile?.tier === 'beta' ? 'text-blue-400' : profile?.tier === 'paid' ? 'text-lol-gold' : profile?.tier === 'admin' ? 'text-purple-400' : 'text-gray-400';
 
   return (
     <div className="relative">
@@ -134,7 +134,7 @@ export default function UserMenu({ collapsed }: UserMenuProps) {
         )}
         <div className={`min-w-0 text-left transition-all duration-300 overflow-hidden ${collapsed ? 'max-w-0 opacity-0 ml-0' : 'max-w-[200px] opacity-100 ml-3'}`}>
           <div className="text-sm font-medium text-white truncate">{displayName}</div>
-          <div className={`text-xs truncate ${subtitleColor}`}>{subtitleText}</div>
+          <div className={`text-xs leading-tight line-clamp-2 ${subtitleColor}`}>{subtitleText}</div>
         </div>
         {collapsed && (
           <div className="absolute left-full ml-3 px-3 py-2 bg-lol-card border border-lol-border rounded-lg text-sm text-white whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 shadow-xl z-50">

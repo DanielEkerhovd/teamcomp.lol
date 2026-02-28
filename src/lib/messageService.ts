@@ -109,6 +109,12 @@ export const messageService = {
     if (!isSupabaseConfigured() || !supabase) {
       return { success: false, error: 'Not connected to server' };
     }
+    if (!content?.trim()) {
+      return { success: false, error: 'Message cannot be empty' };
+    }
+    if (content.trim().length > 500) {
+      return { success: false, error: 'Message must be 500 characters or less' };
+    }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase.rpc as any)('send_message', {

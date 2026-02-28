@@ -583,7 +583,7 @@ export default function MyTeamPage() {
           {/* For free tier users with max 1 team, always show upgrade prompt */}
           {isFreeTier && user && maxTeams <= 1 ? (
             <Link
-              to="/profile"
+              to="/profile#plan"
               className="flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-lol-gold/50 text-lol-gold/80 hover:border-lol-gold hover:text-lol-gold transition-all"
               title="Upgrade to Pro for more teams"
             >

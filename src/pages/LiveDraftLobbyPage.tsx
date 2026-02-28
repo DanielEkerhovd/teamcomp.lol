@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { liveDraftService } from '../lib/liveDraftService';
 import { supabase } from '../lib/supabase';
+import { useAuthStore } from '../stores/useAuthStore';
 import { Button, Card } from '../components/ui';
 import JoinTeamModal from '../components/live-draft/JoinTeamModal';
 import type {
@@ -26,6 +27,8 @@ const DRAFT_MODE_DESCRIPTIONS: Record<DraftMode, string> = {
 export default function LiveDraftLobbyPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
+  const authUser = useAuthStore((s) => s.user);
+  const authProfile = useAuthStore((s) => s.profile);
 
   // Debug: Log on every render
   console.log('LiveDraftLobbyPage render:', { sessionId });
@@ -42,6 +45,8 @@ export default function LiveDraftLobbyPage() {
   const [pendingJoinTeam, setPendingJoinTeam] = useState<'team1' | 'team2' | null>(null);
   const [myDisplayName, setMyDisplayName] = useState<string | null>(null);
   const [defaultDisplayName, setDefaultDisplayName] = useState<string>('');
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const loadSession = useCallback(async () => {
     if (!sessionId) return;
@@ -53,7 +58,7 @@ export default function LiveDraftLobbyPage() {
       ]);
 
       if (!sessionData) {
-        setError('Session not found');
+        navigate('/live-draft');
         return;
       }
 
@@ -65,47 +70,31 @@ export default function LiveDraftLobbyPage() {
     }
   }, [sessionId]);
 
+  // Sync auth state from store
+  useEffect(() => {
+    setCurrentUserId(authUser?.id ?? null);
+    setDefaultDisplayName(authProfile?.displayName || '');
+  }, [authUser, authProfile]);
+
+  // Restore anonymous user's display name from localStorage
+  useEffect(() => {
+    if (!authUser && sessionId) {
+      try {
+        const savedDisplayName = localStorage.getItem(`live_draft_display_name_${sessionId}`);
+        if (savedDisplayName) {
+          setMyDisplayName(savedDisplayName);
+        }
+      } catch {
+        // Ignore localStorage errors
+      }
+    }
+  }, [authUser, sessionId]);
+
   useEffect(() => {
     const init = async () => {
       setLoading(true);
       setError(null);
-
-      let isLoggedIn = false;
-      if (supabase) {
-        const { data } = await supabase.auth.getUser();
-        setCurrentUserId(data.user?.id ?? null);
-        isLoggedIn = !!data.user?.id;
-
-        // Fetch display name for logged-in user
-        if (data.user?.id) {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('display_name')
-            .eq('id', data.user.id)
-            .single();
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          setDefaultDisplayName((profile as any)?.display_name || '');
-        }
-      }
-
-      // Restore anonymous user's display name from localStorage
-      if (!isLoggedIn && sessionId) {
-        try {
-          const savedDisplayName = localStorage.getItem(`live_draft_display_name_${sessionId}`);
-          console.log('Anonymous user init:', { sessionId, savedDisplayName, isLoggedIn });
-          if (savedDisplayName) {
-            setMyDisplayName(savedDisplayName);
-          }
-        } catch (e) {
-          console.error('localStorage error:', e);
-        }
-      } else {
-        console.log('Logged in user init:', { sessionId, isLoggedIn });
-      }
-
-      console.log('Loading session...');
       await loadSession();
-      console.log('Session loaded');
       setLoading(false);
     };
 
@@ -113,33 +102,6 @@ export default function LiveDraftLobbyPage() {
       init();
     }
   }, [sessionId, loadSession]);
-
-  // Listen for auth state changes
-  useEffect(() => {
-    if (!supabase) return;
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, authSession) => {
-      if (event === 'SIGNED_IN' && authSession?.user && supabase) {
-        setCurrentUserId(authSession.user.id);
-        // Fetch display name for logged-in user
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('display_name')
-          .eq('id', authSession.user.id)
-          .single();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setDefaultDisplayName((profile as any)?.display_name || '');
-      } else if (event === 'SIGNED_OUT') {
-        setCurrentUserId(null);
-        setMyDisplayName(null);
-        setDefaultDisplayName('');
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
 
   // Set up realtime subscription
   useEffect(() => {
@@ -405,7 +367,7 @@ export default function LiveDraftLobbyPage() {
     setError(null);
 
     try {
-      await liveDraftService.joinAsSpectator(session.id);
+      await liveDraftService.joinAsSpectator(session.id, defaultDisplayName || undefined);
       await loadSession();
     } catch (err) {
       console.error('Failed to join as spectator:', err);
@@ -532,9 +494,28 @@ export default function LiveDraftLobbyPage() {
     return null;
   };
 
+  // Check if current user is the session creator
+  const isCreator = !!currentUserId && session?.created_by === currentUserId;
+
   // Check which sides are taken
   const blueTaken = session?.team1_side === 'blue' || session?.team2_side === 'blue';
   const redTaken = session?.team1_side === 'red' || session?.team2_side === 'red';
+
+  const handleDeleteSession = async () => {
+    if (!session) return;
+    setActionLoading('delete');
+    setError(null);
+    try {
+      await liveDraftService.deleteSession(session.id);
+      navigate('/live-draft');
+    } catch (err) {
+      console.error('Failed to delete session:', err);
+      setError(err instanceof Error ? err.message : 'Failed to delete session');
+      setShowDeleteConfirm(false);
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   if (loading) {
     return (
@@ -566,7 +547,68 @@ export default function LiveDraftLobbyPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-8">
       {/* Header */}
-      <div className="text-center">
+      <div className="text-center relative">
+        {/* Settings gear — creator only */}
+        {isCreator && (
+          <div className="absolute right-0 top-0">
+            <button
+              onClick={() => {
+                setShowSettingsMenu(!showSettingsMenu);
+                setShowDeleteConfirm(false);
+              }}
+              className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-lol-surface transition-colors"
+              title="Session settings"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </button>
+
+            {showSettingsMenu && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => {
+                  setShowSettingsMenu(false);
+                  setShowDeleteConfirm(false);
+                }} />
+                <div className="absolute right-0 top-full mt-1 z-20 w-56 bg-lol-card border border-lol-border rounded-lg shadow-xl shadow-black/50 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                  {showDeleteConfirm ? (
+                    <div className="p-3 bg-red-500/5">
+                      <p className="text-xs text-gray-300 mb-2">Permanently delete this session and all data?</p>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleDeleteSession}
+                          disabled={actionLoading === 'delete'}
+                          className="flex-1 px-3 py-1.5 rounded text-xs font-medium bg-red-600 text-white hover:bg-red-500 transition-colors disabled:opacity-50"
+                        >
+                          {actionLoading === 'delete' ? 'Deleting...' : 'Confirm Delete'}
+                        </button>
+                        <button
+                          onClick={() => setShowDeleteConfirm(false)}
+                          disabled={actionLoading === 'delete'}
+                          className="px-3 py-1.5 rounded text-xs text-gray-400 hover:text-white hover:bg-lol-surface transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setShowDeleteConfirm(true)}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                      Delete Session
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         <h1 className="text-3xl font-bold text-white mb-2">{session.name}</h1>
         <div className="flex items-center justify-center gap-4 text-gray-400">
           <span className="px-3 py-1 rounded-full bg-lol-surface border border-lol-border text-sm">

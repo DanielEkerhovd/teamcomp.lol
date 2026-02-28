@@ -4,11 +4,12 @@ interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title?: string;
+  headerActions?: ReactNode;
   children: ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';
 }
 
-export default function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalProps) {
+export default function Modal({ isOpen, onClose, title, headerActions, children, size = 'md' }: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -59,6 +60,8 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' }:
         {title && (
           <div className="flex items-center justify-between px-6 py-3 border-b border-lol-border">
             <h2 className="text-lg font-semibold text-white">{title}</h2>
+            <div className="flex items-center gap-2">
+              {headerActions}
             <button
               onClick={onClose}
               className="p-2 -m-2 text-gray-400 hover:text-white hover:bg-lol-surface rounded-lg transition-colors focus:outline-none"
@@ -71,6 +74,7 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' }:
                 />
               </svg>
             </button>
+            </div>
           </div>
         )}
         <div className="p-5">{children}</div>

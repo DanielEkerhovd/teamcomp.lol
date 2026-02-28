@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useDraftStore } from '../stores/useDraftStore';
 import { useEnemyTeamStore } from '../stores/useEnemyTeamStore';
 import { useMyTeamStore } from '../stores/useMyTeamStore';
-import { useTierLimits, FREE_TIER_MAX_DRAFTS } from '../stores/useAuthStore';
+import { useTierLimits } from '../stores/useAuthStore';
 import { Button, Card, ConfirmationModal, Input, Modal } from '../components/ui';
 
 export default function DraftListPage() {
@@ -13,8 +13,7 @@ export default function DraftListPage() {
   const { selectedTeamId: myTeamId } = useMyTeamStore();
   const { isFreeTier, maxDrafts } = useTierLimits();
 
-  const isAtDraftLimit = isFreeTier && sessions.length >= maxDrafts;
-  const draftsRemaining = Math.max(0, maxDrafts - sessions.length);
+  const isAtDraftLimit = sessions.length >= maxDrafts;
 
   const [isNewSessionModalOpen, setIsNewSessionModalOpen] = useState(false);
   const [newSessionName, setNewSessionName] = useState('');
@@ -55,7 +54,7 @@ export default function DraftListPage() {
       <div className="flex items-center gap-4">
         {isAtDraftLimit ? (
           <Link
-            to="/profile"
+            to="/profile#plan"
             className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-lol-gold/10 border border-lol-gold/50 text-lol-gold hover:bg-lol-gold/20 transition-all font-medium"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -72,11 +71,9 @@ export default function DraftListPage() {
           <h1 className="text-3xl font-bold text-white">Draft Planning</h1>
           <p className="text-gray-400 mt-1">
             Prepare for your next match
-            {isFreeTier && (
-              <span className="ml-2 text-gray-500">
-                ({sessions.length}/{FREE_TIER_MAX_DRAFTS} drafts)
-              </span>
-            )}
+            <span className="ml-2 text-gray-500">
+              ({sessions.length}/{maxDrafts} drafts)
+            </span>
           </p>
         </div>
       </div>

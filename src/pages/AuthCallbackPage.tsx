@@ -5,6 +5,17 @@ import { Card, Button } from '../components/ui';
 
 type CallbackStatus = 'loading' | 'success' | 'error';
 
+function getAndConsumeReturnUrl(): string {
+  try {
+    const stored = localStorage.getItem('teamcomp-lol-auth-return-url');
+    if (stored) {
+      localStorage.removeItem('teamcomp-lol-auth-return-url');
+      return stored;
+    }
+  } catch { /* ignore */ }
+  return '/';
+}
+
 export default function AuthCallbackPage() {
   const navigate = useNavigate();
   const [status, setStatus] = useState<CallbackStatus>('loading');
@@ -49,8 +60,9 @@ export default function AuthCallbackPage() {
           setStatus('success');
 
           // Redirect after a short delay to show success message
+          const returnUrl = getAndConsumeReturnUrl();
           setTimeout(() => {
-            navigate('/', { replace: true });
+            navigate(returnUrl, { replace: true });
           }, 2000);
           return;
         }
@@ -68,8 +80,9 @@ export default function AuthCallbackPage() {
 
           if (session) {
             setStatus('success');
+            const returnUrl = getAndConsumeReturnUrl();
             setTimeout(() => {
-              navigate('/', { replace: true });
+              navigate(returnUrl, { replace: true });
             }, 2000);
             return;
           }

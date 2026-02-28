@@ -40,6 +40,8 @@ function mapMessage(row: DbLiveDraftMessage): LiveDraftMessage {
 // SERVICE
 // ============================================
 
+export const CHAT_MESSAGE_CAP = 50;
+
 export const liveDraftService = {
   // ==========================================
   // SESSION MANAGEMENT
@@ -51,6 +53,10 @@ export const liveDraftService = {
    */
   async createSession(config: CreateLiveDraftSessionConfig): Promise<LiveDraftSession> {
     if (!supabase) throw new Error('Supabase not initialized');
+
+    if (config.name && config.name.length > 30) throw new Error('Session name must be 30 characters or less');
+    if (config.team1Name && config.team1Name.length > 30) throw new Error('Team name must be 30 characters or less');
+    if (config.team2Name && config.team2Name.length > 30) throw new Error('Team name must be 30 characters or less');
 
     const { data: { session: authSession } } = await supabase.auth.getSession();
 
@@ -122,7 +128,38 @@ export const liveDraftService = {
       .order('created_at', { ascending: false });
 
     if (error) throw error;
-    return (data || []).map((row) => mapSession(row as DbLiveDraftSession));
+    const sessions = (data || []).map((row) => mapSession(row as DbLiveDraftSession));
+
+    // For completed/cancelled sessions, patch planned_games and current_game_number
+    // to reflect the actual number of completed games (handles stale data).
+    const doneIds = sessions
+      .filter(s => s.status === 'completed' || s.status === 'cancelled')
+      .map(s => s.id);
+
+    if (doneIds.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: gameCounts } = await (supabase
+        .from('live_draft_games') as any)
+        .select('session_id')
+        .in('session_id', doneIds)
+        .eq('status', 'completed');
+
+      if (gameCounts) {
+        const countMap = new Map<string, number>();
+        for (const g of gameCounts as { session_id: string }[]) {
+          countMap.set(g.session_id, (countMap.get(g.session_id) ?? 0) + 1);
+        }
+        for (const s of sessions) {
+          const cnt = countMap.get(s.id);
+          if (cnt !== undefined) {
+            s.planned_games = cnt;
+            s.current_game_number = cnt;
+          }
+        }
+      }
+    }
+
+    return sessions;
   },
 
   /**
@@ -223,6 +260,10 @@ export const liveDraftService = {
   async startSession(sessionId: string): Promise<void> {
     if (!supabase) return;
 
+    // Get session to determine side assignments
+    const session = await this.getSession(sessionId);
+    if (!session) throw new Error('Session not found');
+
     const { error } = await supabase
       .from('live_draft_sessions')
       .update({
@@ -233,25 +274,45 @@ export const liveDraftService = {
 
     if (error) throw error;
 
-    // Start the first game
+    // Determine which team is on blue side based on lobby side selection
+    const blueSideTeam: 'team1' | 'team2' = session.team1_side === 'blue' ? 'team1' : 'team2';
+
+    // Start the first game with correct side assignment
     const games = await this.getGames(sessionId);
     if (games.length > 0) {
+      // Update the game's blue_side_team before starting
+      await (supabase
+        .from('live_draft_games') as any)
+        .update({ blue_side_team: blueSideTeam })
+        .eq('id', games[0].id);
+
       await this.startGame(games[0].id);
     }
   },
 
   /**
-   * End the session
+   * End the session.
+   * @param completedGames — number of games actually played; when provided
+   *   the session's planned_games and current_game_number are synced so that
+   *   history shows e.g. "3 / 3" instead of "3 / 5".
    */
-  async endSession(sessionId: string): Promise<void> {
+  async endSession(sessionId: string, completedGames?: number): Promise<void> {
     if (!supabase) return;
 
-    const { error } = await supabase
-      .from('live_draft_sessions')
-      .update({
-        status: 'completed',
-        completed_at: new Date().toISOString(),
-      })
+    const updates: Record<string, unknown> = {
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+    };
+
+    if (completedGames !== undefined) {
+      updates.planned_games = completedGames;
+      updates.current_game_number = completedGames;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase
+      .from('live_draft_sessions') as any)
+      .update(updates)
       .eq('id', sessionId);
 
     if (error) throw error;
@@ -269,6 +330,42 @@ export const liveDraftService = {
       .eq('id', sessionId);
 
     if (error) throw error;
+  },
+
+  /**
+   * Delete the session and all related data (only the creator can do this)
+   */
+  async deleteSession(sessionId: string): Promise<void> {
+    if (!supabase) throw new Error('Supabase not initialized');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.rpc as any)('delete_live_draft_session', {
+      p_session_id: sessionId,
+    });
+
+    if (error) throw error;
+    if (!data?.success) {
+      throw new Error(data?.message || 'Failed to delete session');
+    }
+  },
+
+  /**
+   * Kick a captain from a team slot (only the session creator can do this)
+   * Useful when an anonymous user joins then logs in, locking the session
+   */
+  async kickCaptain(sessionId: string, team: 'team1' | 'team2'): Promise<void> {
+    if (!supabase) throw new Error('Supabase not initialized');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.rpc as any)('kick_live_draft_captain', {
+      p_session_id: sessionId,
+      p_team: team,
+    });
+
+    if (error) throw error;
+    if (!data?.success) {
+      throw new Error(data?.message || 'Failed to kick captain');
+    }
   },
 
   // ==========================================
@@ -293,6 +390,13 @@ export const liveDraftService = {
 
     if (error) throw error;
     if (!data) throw new Error('Failed to create game');
+
+    // Keep session's current_game_number in sync
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase
+      .from('live_draft_sessions') as any)
+      .update({ current_game_number: gameNumber })
+      .eq('id', sessionId);
 
     return mapGame(data as DbLiveDraftGame);
   },
@@ -331,6 +435,20 @@ export const liveDraftService = {
     }
 
     return data ? mapGame(data as DbLiveDraftGame) : null;
+  },
+
+  /**
+   * Delete a game (e.g. pending games when ending a session)
+   */
+  async deleteGame(gameId: string): Promise<void> {
+    if (!supabase) return;
+
+    const { error } = await supabase
+      .from('live_draft_games')
+      .delete()
+      .eq('id', gameId);
+
+    if (error) throw error;
   },
 
   /**
@@ -405,6 +523,35 @@ export const liveDraftService = {
   },
 
   /**
+   * Reset a game back to the start of drafting (for testing)
+   */
+  async resetGame(gameId: string): Promise<void> {
+    if (!supabase) return;
+
+    const firstStep = DRAFT_ORDER[0];
+
+    const { error } = await supabase
+      .from('live_draft_games')
+      .update({
+        status: 'drafting',
+        current_phase: firstStep.phase,
+        current_turn: firstStep.turn,
+        current_action_index: 0,
+        turn_started_at: new Date().toISOString(),
+        blue_bans: [null, null, null, null, null],
+        red_bans: [null, null, null, null, null],
+        blue_picks: [null, null, null, null, null],
+        red_picks: [null, null, null, null, null],
+        edited_picks: [],
+        winner: null,
+        completed_at: null,
+      })
+      .eq('id', gameId);
+
+    if (error) throw error;
+  },
+
+  /**
    * Record game result
    */
   async recordGameResult(gameId: string, winner: DraftSide): Promise<void> {
@@ -472,6 +619,7 @@ export const liveDraftService = {
   ): Promise<JoinSessionResult> {
     if (!supabase) throw new Error('Supabase not initialized');
     if (!displayName?.trim()) throw new Error('Display name is required');
+    if (displayName.trim().length > 30) throw new Error('Display name must be 30 characters or less');
 
     const { data: { session: authSession } } = await supabase.auth.getSession();
     const userId = authSession?.user?.id ?? null;
@@ -664,6 +812,26 @@ export const liveDraftService = {
   },
 
   /**
+   * Clear both teams' side selections (for "undo" between games)
+   * Uses RPC function for both logged-in and anonymous users
+   * @param team - Required for anonymous users, optional for logged-in users
+   */
+  async clearSides(sessionId: string, team?: 'team1' | 'team2'): Promise<void> {
+    if (!supabase) throw new Error('Supabase not initialized');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: rpcResult, error: rpcError } = await (supabase.rpc as any)('clear_live_draft_sides', {
+      p_session_id: sessionId,
+      p_team: team ?? null,
+    });
+
+    if (rpcError) throw rpcError;
+    if (!rpcResult?.success) {
+      throw new Error(rpcResult?.message || 'Failed to clear sides');
+    }
+  },
+
+  /**
    * Set ready state for the captain
    * Uses RPC function for both logged-in and anonymous users
    * @param team - Required for anonymous users, optional for logged-in users
@@ -682,6 +850,26 @@ export const liveDraftService = {
     if (rpcError) throw rpcError;
     if (!rpcResult?.success) {
       throw new Error(rpcResult?.message || 'Failed to set ready state');
+    }
+  },
+
+  /**
+   * Extend series by 1 game (max 5)
+   * Uses RPC function for both logged-in and anonymous users
+   * @param team - Required for anonymous users, optional for logged-in users
+   */
+  async extendSeries(sessionId: string, team?: 'team1' | 'team2'): Promise<void> {
+    if (!supabase) throw new Error('Supabase not initialized');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: rpcResult, error: rpcError } = await (supabase.rpc as any)('extend_live_draft_series', {
+      p_session_id: sessionId,
+      p_team: team ?? null,
+    });
+
+    if (rpcError) throw rpcError;
+    if (!rpcResult?.success) {
+      throw new Error(rpcResult?.message || 'Failed to extend series');
     }
   },
 
@@ -916,12 +1104,40 @@ export const liveDraftService = {
     }
   },
 
+  /**
+   * Link an anonymous participant record to an authenticated user.
+   * Called when a user logs in while on a live draft page where they
+   * were previously participating anonymously.
+   */
+  async linkAnonymousParticipant(
+    sessionId: string,
+    participantId: string,
+    userId: string
+  ): Promise<boolean> {
+    if (!supabase) return false;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.rpc as any)('link_anonymous_draft_participant', {
+      p_session_id: sessionId,
+      p_participant_id: participantId,
+      p_user_id: userId,
+    });
+
+    if (error) {
+      console.warn('Failed to link anonymous participant:', error);
+      return false;
+    }
+
+    return data?.success === true;
+  },
+
   // ==========================================
   // DRAFT ACTIONS
   // ==========================================
 
   /**
-   * Submit a ban or pick action
+   * Submit a ban or pick action.
+   * The RPC handles recording the action AND advancing the game atomically.
    */
   async submitAction(gameId: string, championId: string | null): Promise<void> {
     if (!supabase) return;
@@ -932,9 +1148,27 @@ export const liveDraftService = {
     });
 
     if (error) throw error;
+  },
 
-    // Advance to next step
-    await this.advanceGame(gameId);
+  /**
+   * Fill a timed-out slot with a real champion.
+   * Updates game arrays, action record, and fearless/ironman tracking.
+   */
+  async fillTimedOutSlot(
+    gameId: string,
+    slot: string,
+    championId: string
+  ): Promise<void> {
+    if (!supabase) return;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase.rpc as any)('fill_timed_out_slot', {
+      p_game_id: gameId,
+      p_slot: slot,
+      p_champion_id: championId,
+    });
+
+    if (error) throw error;
   },
 
   /**
@@ -1038,6 +1272,18 @@ export const liveDraftService = {
    */
   async sendMessage(sessionId: string, content: string): Promise<LiveDraftMessage> {
     if (!supabase) throw new Error('Supabase not initialized');
+    if (!content?.trim()) throw new Error('Message cannot be empty');
+    if (content.trim().length > 500) throw new Error('Message must be 500 characters or less');
+
+    // Check message cap before sending
+    const { count } = await supabase
+      .from('live_draft_messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('session_id', sessionId);
+
+    if (count !== null && count >= CHAT_MESSAGE_CAP) {
+      throw new Error(`Message limit reached (${CHAT_MESSAGE_CAP} per draft)`);
+    }
 
     const { data: { session: authSession } } = await supabase.auth.getSession();
 
@@ -1098,6 +1344,27 @@ export const liveDraftService = {
       }
       return message;
     });
+  },
+
+  // ==========================================
+  // INVITES
+  // ==========================================
+
+  async sendDraftInvite(
+    sessionId: string,
+    username: string
+  ): Promise<{ success: boolean; error?: string; targetUser?: { id: string; displayName: string; avatarUrl: string | null } }> {
+    if (!supabase) throw new Error('Supabase not initialized');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.rpc as any)('send_draft_invite', {
+      p_session_id: sessionId,
+      p_username: username.trim(),
+    });
+
+    if (error) throw error;
+
+    return data as { success: boolean; error?: string; targetUser?: { id: string; displayName: string; avatarUrl: string | null } };
   },
 
   // ==========================================

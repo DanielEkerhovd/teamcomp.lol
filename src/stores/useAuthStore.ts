@@ -13,6 +13,8 @@ export interface UserProfile {
   avatarUrl: string | null;
   tier: UserTier;
   maxTeams: number;
+  maxEnemyTeams: number;
+  maxDrafts: number;
   role: ProfileRole | null;
   roleTeamId: string | null;
   roleTeamName: string | null;
@@ -59,6 +61,8 @@ const transformProfile = (dbProfile: Profile, roleTeamName?: string | null): Use
   avatarUrl: dbProfile.avatar_url,
   tier: dbProfile.tier,
   maxTeams: dbProfile.max_teams,
+  maxEnemyTeams: dbProfile.max_enemy_teams,
+  maxDrafts: dbProfile.max_drafts,
   role: dbProfile.role,
   roleTeamId: dbProfile.role_team_id,
   roleTeamName: roleTeamName ?? null,
@@ -151,6 +155,9 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
         set({ isLoading: true, error: null });
 
+        // Save current page so email confirmation can redirect back
+        try { localStorage.setItem('teamcomp-lol-auth-return-url', window.location.pathname + window.location.search); } catch { /* ignore */ }
+
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
@@ -211,10 +218,13 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
         set({ isLoading: true, error: null });
 
+        // Save current page so we can redirect back after OAuth
+        try { localStorage.setItem('teamcomp-lol-auth-return-url', window.location.pathname + window.location.search); } catch { /* ignore */ }
+
         const { error } = await supabase.auth.signInWithOAuth({
           provider: 'google',
           options: {
-            redirectTo: window.location.origin,
+            redirectTo: `${window.location.origin}/auth/callback`,
             queryParams: {
               prompt: 'select_account',
             },
@@ -237,10 +247,13 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
         set({ isLoading: true, error: null });
 
+        // Save current page so we can redirect back after OAuth
+        try { localStorage.setItem('teamcomp-lol-auth-return-url', window.location.pathname + window.location.search); } catch { /* ignore */ }
+
         const { error } = await supabase.auth.signInWithOAuth({
           provider: 'discord',
           options: {
-            redirectTo: window.location.origin,
+            redirectTo: `${window.location.origin}/auth/callback`,
           },
         });
 
@@ -260,10 +273,13 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
         set({ isLoading: true, error: null });
 
+        // Save current page so we can redirect back after OAuth
+        try { localStorage.setItem('teamcomp-lol-auth-return-url', window.location.pathname + window.location.search); } catch { /* ignore */ }
+
         const { error } = await supabase.auth.signInWithOAuth({
           provider: 'twitch',
           options: {
-            redirectTo: window.location.origin,
+            redirectTo: `${window.location.origin}/auth/callback`,
           },
         });
 
@@ -392,6 +408,9 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         const trimmedName = displayName.trim();
         if (!trimmedName) {
           return { error: 'Please enter a display name' };
+        }
+        if (trimmedName.length > 30) {
+          return { error: 'Display name must be 30 characters or less' };
         }
 
         const client = supabase;
@@ -625,7 +644,9 @@ export const useTeamLimit = () => {
   };
 };
 
-// Constants for tier limits
+// Default tier limits (used for guests and as fallbacks)
+export const FREE_TIER_MAX_TEAMS = 1;
+export const FREE_TIER_MAX_ENEMY_TEAMS = 10;
 export const FREE_TIER_MAX_DRAFTS = 20;
 
 // Helper hook for checking tier limits (drafts, teams, etc.)
@@ -636,14 +657,15 @@ export const useTierLimits = () => {
   const isAuthenticated = !!user;
   const tier = !isAuthenticated ? 'guest' : (profile?.tier ?? 'free');
   const isFreeTier = tier === 'free' || tier === 'guest';
-  const isPaidTier = tier === 'paid' || tier === 'supporter' || tier === 'admin' || tier === 'developer';
+  const isPaidTier = tier === 'beta' || tier === 'paid' || tier === 'supporter' || tier === 'admin' || tier === 'developer';
 
   return {
     tier,
     isFreeTier,
     isPaidTier,
     isAuthenticated,
-    maxTeams: !isAuthenticated ? 3 : (profile?.maxTeams ?? 1),
-    maxDrafts: isPaidTier ? Infinity : FREE_TIER_MAX_DRAFTS,
+    maxTeams: !isAuthenticated ? FREE_TIER_MAX_TEAMS : (profile?.maxTeams ?? FREE_TIER_MAX_TEAMS),
+    maxEnemyTeams: !isAuthenticated ? FREE_TIER_MAX_ENEMY_TEAMS : (profile?.maxEnemyTeams ?? FREE_TIER_MAX_ENEMY_TEAMS),
+    maxDrafts: !isAuthenticated ? FREE_TIER_MAX_DRAFTS : (profile?.maxDrafts ?? FREE_TIER_MAX_DRAFTS),
   };
 };

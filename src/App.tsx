@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { BrowserRouter, Routes, Route, NavLink, useNavigate } from 'react-router-dom';
 import HomePage from './pages/HomePage';
 import EnemyTeamPage from './pages/EnemyTeamPage';
 import MyTeamPage from './pages/MyTeamPage';
@@ -23,7 +23,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import UserMenu from './components/auth/UserMenu';
 import { FriendsNavItem } from './components/notifications';
 import { NotificationBell } from './components/notifications';
-import { useTierLimits } from './stores/useAuthStore';
+import { useAuthStore, useTierLimits } from './stores/useAuthStore';
 
 // Icons as components
 const HomeIcon = () => (
@@ -172,6 +172,7 @@ function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed
           </div>
           <span className={`text-lg font-bold text-white group-hover:text-lol-gold whitespace-nowrap transition-all duration-300 overflow-hidden ${collapsed ? 'max-w-0 opacity-0 ml-0' : 'max-w-[200px] opacity-100 ml-3'}`}>
             teamcomp.<span className='text-lol-gold'>lol</span>
+            <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide bg-lol-gold/20 text-lol-gold px-1.5 py-0.5 rounded-full align-middle">beta</span>
           </span>
         </NavLink>
       </div>
@@ -247,10 +248,37 @@ function Layout({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * Handles redirect back to the original page after OAuth sign-in.
+ * OAuth flows land on `/` (the app root), so this picks up the stored
+ * return URL and navigates there once the user is authenticated.
+ */
+function AuthRedirectHandler() {
+  const { user } = useAuthStore();
+  const navigate = useNavigate();
+  const hasRedirected = useRef(false);
+
+  useEffect(() => {
+    if (user && !hasRedirected.current) {
+      try {
+        const returnUrl = localStorage.getItem('teamcomp-lol-auth-return-url');
+        if (returnUrl) {
+          localStorage.removeItem('teamcomp-lol-auth-return-url');
+          hasRedirected.current = true;
+          navigate(returnUrl, { replace: true });
+        }
+      } catch { /* ignore */ }
+    }
+  }, [user, navigate]);
+
+  return null;
+}
+
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <AuthRedirectHandler />
         <Routes>
           {/* Public routes (no sidebar) */}
           <Route path="/share/:token" element={<SharedDraftPage />} />
