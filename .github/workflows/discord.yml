@@ -33,7 +33,10 @@ jobs:
                     \"value\": \"[View Commit](${{ github.event.head_commit.url }})\",
                     \"inline\": false
                 }
-              ]
+              ],
+              \"footer\": {
+                \"text\": \"${{ github.repository }}\                                                         "
+              }
             }]
           }" \
           ${{ secrets.DISCORD_WEBHOOK }}
