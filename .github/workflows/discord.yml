@@ -8,10 +8,30 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Send Discord message
+      - name: Send Discord embed
         run: |
           curl -H "Content-Type: application/json" \
           -d "{
-            \"content\":\"🟢 **New commit pushed**\n👤 **${{ github.actor }}**\n🌿 **${{ github.ref_name }}**\n📝 ${{ github.event.head_commit.message }}\n🔗 ${{ github.event.head_commit.url }}\"
+            \"embeds\": [{
+              \"title\": \"🟢 New Commit\",
+              \"description\": \"**${{ github.event.head_commit.message }}\",
+              \"url\": \"${{ github.event.head_commit.url }}\",
+              \"color\": 3066993,
+              \"fields\": [
+                {
+                  \"name\": \"👤 Author\",
+                  \"value\": \"${{ github.actor }}\",
+                  \"inline\": true
+                },
+                {
+                  \"name\": \"🌿 Branch\",
+                  \"value\": \"${{ github.ref_name }}\",
+                  \"inline\": true
+                }
+              ],
+              \"footer\": {
+                \"text\": \"${{ github.repository }}\"
+              }
+            }]
           }" \
           ${{ secrets.DISCORD_WEBHOOK }}
