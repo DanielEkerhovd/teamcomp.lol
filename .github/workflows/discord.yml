@@ -35,7 +35,7 @@ jobs:
                 }
               ],
               \"footer\": {
-                \"text\": \"${{ github.repository }}\                                                         "
+                \"text\": \"${{ github.repository }}\                                                      \"
               }
             }]
           }" \
