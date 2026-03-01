@@ -8,8 +8,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Send message to Discord
+      - name: Send Discord message
         run: |
           curl -H "Content-Type: application/json" \
-          -d "{\"content\":\"🚀 New commit by ${{ github.actor }}: ${{ github.event.head_commit.message }}\"}" \
+          -d "{
+            \"content\":\"🟢 **New commit pushed**\n👤 **${{ github.actor }}**\n🌿 **${{ github.ref_name }}**\n📝 ${{ github.event.head_commit.message }}\n🔗 ${{ github.event.head_commit.url }}\"
+          }" \
           ${{ secrets.DISCORD_WEBHOOK }}
