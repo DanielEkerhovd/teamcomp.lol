@@ -19,19 +19,21 @@ jobs:
               \"color\": 3066993,
               \"fields\": [
                 {
-                  \"name\": \"👤 Author\",
-                  \"value\": \"${{ github.actor }}\",
-                  \"inline\": true
+                    \"name\": \"👤 Author\",
+                    \"value\": \"${{ github.actor }}\",
+                    \"inline\": true
                 },
                 {
-                  \"name\": \"🌿 Branch\",
-                  \"value\": \"${{ github.ref_name }}\",
-                  \"inline\": true
+                    \"name\": \"🌿 Branch\",
+                    \"value\": \"${{ github.ref_name }}\",
+                    \"inline\": true
+                },
+                {
+                    \"name\": \"⬘ Commit\",
+                    \"value\": \"[View Commit](${{ github.event.head_commit.url }})\",
+                    \"inline\": false
                 }
-              ],
-              \"footer\": {
-                \"text\": \"${{ github.repository }}\"
-              }
+              ]
             }]
           }" \
           ${{ secrets.DISCORD_WEBHOOK }}
