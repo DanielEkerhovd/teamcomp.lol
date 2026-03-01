@@ -59,6 +59,9 @@ interface MyTeamState {
   memberships: TeamMembership[];
   membershipsLoading: boolean;
   membershipsError: string | null;
+  // Membership team data - full team data loaded from DB for the selected membership team
+  membershipTeamData: Team | null;
+  membershipTeamLoading: boolean;
   // Team management
   addTeam: (name: string) => TeamOperationResult;
   deleteTeam: (id: string) => void;
@@ -67,12 +70,13 @@ interface MyTeamState {
   checkTeamNameGloballyAvailable: (name: string, excludeTeamId?: string) => Promise<{ available: boolean; error?: string }>;
   // Membership management
   loadMemberships: () => Promise<void>;
+  loadMembershipTeamData: (teamId: string) => Promise<void>;
   leaveTeam: (teamId: string) => Promise<{ success: boolean; error?: string }>;
   getMyPermissions: (teamId: string) => TeamPermissions;
   // Existing actions (operate on selected team)
   updateTeam: (updates: Partial<Omit<Team, 'id' | 'createdAt'>>) => { success: boolean; error?: 'duplicate_name' };
   updatePlayer: (playerId: string, updates: Partial<Omit<Player, 'id'>>) => void;
-  importFromOpgg: (region: Region, players: { summonerName: string; tagLine: string }[]) => void;
+  importFromOpgg: (region: Region, players: { summonerName: string; tagLine: string }[]) => { added: number; duplicates: number; overflow: number };
   addSub: () => void;
   removeSub: (playerId: string) => void;
   resetTeam: () => void;
@@ -115,6 +119,18 @@ export const useMyTeamStore = create<MyTeamState>()(
         memberships: [],
         membershipsLoading: false,
         membershipsError: null,
+        membershipTeamData: null,
+        membershipTeamLoading: false,
+
+      loadMembershipTeamData: async (teamId: string) => {
+        set({ membershipTeamLoading: true, membershipTeamData: null });
+        try {
+          const data = await teamMembershipService.fetchTeamData(teamId);
+          set({ membershipTeamData: data, membershipTeamLoading: false });
+        } catch {
+          set({ membershipTeamData: null, membershipTeamLoading: false });
+        }
+      },
 
       loadMemberships: async () => {
         set({ membershipsLoading: true, membershipsError: null });
@@ -130,11 +146,18 @@ export const useMyTeamStore = create<MyTeamState>()(
       },
 
       leaveTeam: async (teamId: string) => {
+        const membership = get().memberships.find((m) => m.teamId === teamId);
+
+        // Optimistic: remove from memberships immediately
+        set((state) => ({
+          memberships: state.memberships.filter((m) => m.teamId !== teamId),
+        }));
+
         const result = await teamMembershipService.leaveTeam(teamId);
-        if (result.success) {
-          // Remove from local memberships
+        if (!result.success && membership) {
+          // Revert on failure
           set((state) => ({
-            memberships: state.memberships.filter((m) => m.teamId !== teamId),
+            memberships: [...state.memberships, membership],
           }));
         }
         return result;
@@ -262,8 +285,12 @@ export const useMyTeamStore = create<MyTeamState>()(
         // Allow selecting owned teams or membership teams
         const isOwnedTeam = state.teams.some((t) => t.id === id);
         const isMembershipTeam = state.memberships.some((m) => m.teamId === id);
-        if (isOwnedTeam || isMembershipTeam) {
+        if (isOwnedTeam) {
+          set({ selectedTeamId: id, membershipTeamData: null });
+        } else if (isMembershipTeam) {
           set({ selectedTeamId: id });
+          // Load the full team data from the database
+          get().loadMembershipTeamData(id);
         }
       },
 
@@ -298,23 +325,54 @@ export const useMyTeamStore = create<MyTeamState>()(
       },
 
       importFromOpgg: (region: Region, players: { summonerName: string; tagLine: string }[]) => {
-        set((state) => {
-          const mainPlayers = players.slice(0, 5);
-          const subPlayers = players.slice(5);
+        const state = get();
+        const selectedTeam = state.teams.find((t) => t.id === state.selectedTeamId);
+        if (!selectedTeam) return { added: 0, duplicates: 0, overflow: 0 };
 
-          const newMainRoster: Player[] = ROLES.map((role, index) => ({
-            id: generateId(),
-            summonerName: mainPlayers[index]?.summonerName || '',
-            tagLine: mainPlayers[index]?.tagLine || '',
-            role: role.value as Role,
-            notes: '',
+        const existingMain = selectedTeam.players.filter((p) => !p.isSub);
+        const existingSubs = selectedTeam.players.filter((p) => p.isSub);
+
+        // Build set of existing summoner names (lowercase) for duplicate detection
+        const existingNames = new Set(
+          selectedTeam.players
+            .filter((p) => p.summonerName)
+            .map((p) => p.summonerName.toLowerCase())
+        );
+
+        // Filter out duplicates
+        const uniquePlayers = players.filter(
+          (p) => !existingNames.has(p.summonerName.toLowerCase())
+        );
+        const duplicates = players.length - uniquePlayers.length;
+
+        // Find empty main roster slots (roles without a summoner name)
+        const emptyMainSlots = existingMain.filter((p) => !p.summonerName);
+        const availableSubSlots = MAX_SUBS - existingSubs.length;
+
+        let added = 0;
+        let remaining = [...uniquePlayers];
+        const updatedPlayers = [...selectedTeam.players];
+
+        // Fill empty main roster slots first
+        for (const slot of emptyMainSlots) {
+          if (remaining.length === 0) break;
+          const incoming = remaining.shift()!;
+          const idx = updatedPlayers.findIndex((p) => p.id === slot.id);
+          updatedPlayers[idx] = {
+            ...updatedPlayers[idx],
+            summonerName: incoming.summonerName,
+            tagLine: incoming.tagLine,
             region,
-            isSub: false,
-            championPool: [],
-            championGroups: [],
-          }));
+          };
+          added++;
+        }
 
-          const newSubs: Player[] = subPlayers.map((p) => ({
+        // Fill sub slots with the rest
+        const subsToAdd = remaining.slice(0, availableSubSlots);
+        const overflow = remaining.length - subsToAdd.length;
+
+        for (const p of subsToAdd) {
+          updatedPlayers.push({
             id: generateId(),
             summonerName: p.summonerName,
             tagLine: p.tagLine,
@@ -324,14 +382,19 @@ export const useMyTeamStore = create<MyTeamState>()(
             isSub: true,
             championPool: [],
             championGroups: [],
-          }));
+          });
+          added++;
+        }
 
-          return updateSelectedTeam(state, (team) => ({
+        set((state) =>
+          updateSelectedTeam(state, (team) => ({
             ...team,
-            players: [...newMainRoster, ...newSubs],
+            players: updatedPlayers,
             updatedAt: Date.now(),
-          }));
-        });
+          }))
+        );
+
+        return { added, duplicates, overflow };
       },
 
       addSub: () => {

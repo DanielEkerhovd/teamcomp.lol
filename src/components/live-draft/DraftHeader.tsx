@@ -227,7 +227,7 @@ function SidePickerCard({
     return (
       <div
         className={`
-          flex-1 max-w-80 px-3 py-1.5 rounded-lg border transition-all duration-300
+          flex-1 max-w-80 px-3 py-1.5 rounded-lg border-2 transition-all duration-300
           ${borderClass} ${bgClass}
         `}
       >
@@ -344,7 +344,7 @@ function SidePickerCard({
     return (
       <div
         className={`
-          flex-1 max-w-80 px-3 py-1.5 rounded-lg border transition-all duration-300
+          flex-1 max-w-80 px-3 py-1.5 rounded-lg border-2 transition-all duration-300
           ${borderClass} ${bgClass}
         `}
       >
@@ -494,12 +494,7 @@ export default function DraftHeader({
   const isCritical = timerRemaining !== null && timerRemaining <= 5;
 
   const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    if (mins > 0) {
-      return `${mins}:${secs.toString().padStart(2, "0")}`;
-    }
-    return `${secs}`;
+    return seconds.toString();
   };
 
   const showSidePicker = isSidePicking && showReadyState;

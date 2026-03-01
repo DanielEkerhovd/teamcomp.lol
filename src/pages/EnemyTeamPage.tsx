@@ -22,6 +22,7 @@ import { parseOpggMultiSearchUrl, ROLES, Role, Player } from "../types";
 import { Button, Card, ConfirmationModal, Input, Modal } from "../components/ui";
 import { RoleSlot, SubSlot } from "../components/team";
 import { useOpgg } from "../hooks/useOpgg";
+import { checkModerationAndRecord, getViolationWarning } from "../lib/moderation";
 
 function SubsDropZone({
   children,
@@ -67,19 +68,15 @@ export default function EnemyTeamPage() {
     deleteNote,
   } = useEnemyTeamStore();
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [newTeamName, setNewTeamName] = useState("");
   const [importUrl, setImportUrl] = useState("");
-  const [importTeamName, setImportTeamName] = useState("");
   const [importError, setImportError] = useState("");
   const [expandedTeamId, setExpandedTeamId] = useState<string | null>(null);
   const [activePlayer, setActivePlayer] = useState<Player | null>(null);
-  const [inlineImportUrl, setInlineImportUrl] = useState<
-    Record<string, string>
-  >({});
-  const [inlineImportError, setInlineImportError] = useState<
-    Record<string, string>
-  >({});
+  const [importToTeamId, setImportToTeamId] = useState<string | null>(null);
+  const [importToTeamUrl, setImportToTeamUrl] = useState('');
+  const [importToTeamError, setImportToTeamError] = useState('');
+  const [importToTeamSuccess, setImportToTeamSuccess] = useState('');
   const [activeDragTeamId, setActiveDragTeamId] = useState<string | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -196,22 +193,31 @@ export default function EnemyTeamPage() {
     }
   };
 
-  const handleAddTeam = () => {
-    if (newTeamName.trim()) {
-      const result = addTeam(newTeamName.trim());
-      if (!result.success) {
-        if (result.error === 'duplicate_name') {
-          setAddTeamError('A team with this name already exists');
-        } else if (result.error === 'max_teams_reached') {
-          setAddTeamError(`You've reached the maximum limit of ${maxEnemyTeams} teams`);
-        }
-        return;
-      }
-      setNewTeamName("");
-      setAddTeamError("");
-      setIsAddModalOpen(false);
-      setExpandedTeamId(result.team!.id);
+  const handleAddTeam = async () => {
+    if (!newTeamName.trim()) {
+      setAddTeamError('Please enter a team name');
+      return;
     }
+
+    const modResult = await checkModerationAndRecord(newTeamName.trim(), 'enemy_team_name');
+    if (modResult.flagged) {
+      setAddTeamError(getViolationWarning(modResult));
+      return;
+    }
+
+    const result = addTeam(newTeamName.trim());
+    if (!result.success) {
+      if (result.error === 'duplicate_name') {
+        setAddTeamError('A team with this name already exists');
+      } else if (result.error === 'max_teams_reached') {
+        setAddTeamError(`You've reached the maximum limit of ${maxEnemyTeams} teams`);
+      }
+      return;
+    }
+    setNewTeamName("");
+    setAddTeamError("");
+    setIsAddModalOpen(false);
+    setExpandedTeamId(result.team!.id);
   };
 
   const handleImport = () => {
@@ -231,7 +237,7 @@ export default function EnemyTeamPage() {
     }
 
     const teamName =
-      importTeamName.trim() || `Imported Team ${teams.length + 1}`;
+      newTeamName.trim() || `Imported Team ${teams.length + 1}`;
     const result = importTeamFromOpgg(teamName, parsed.region, parsed.players);
 
     if (!result.success) {
@@ -244,36 +250,30 @@ export default function EnemyTeamPage() {
     }
 
     setImportUrl("");
-    setImportTeamName("");
-    setIsImportModalOpen(false);
+    setNewTeamName("");
+    setIsAddModalOpen(false);
     setExpandedTeamId(result.team!.id);
   };
 
-  const handleInlineImport = (teamId: string) => {
-    const url = inlineImportUrl[teamId] || "";
-    setInlineImportError((prev) => ({ ...prev, [teamId]: "" }));
+  const handleImportToTeam = () => {
+    if (!importToTeamId) return;
+    setImportToTeamError('');
 
-    const parsed = parseOpggMultiSearchUrl(url);
+    const parsed = parseOpggMultiSearchUrl(importToTeamUrl);
 
     if (!parsed) {
-      setInlineImportError((prev) => ({
-        ...prev,
-        [teamId]:
-          "Invalid OP.GG URL. Use format: https://www.op.gg/multisearch/euw?summoners=...",
-      }));
+      setImportToTeamError('Invalid OP.GG multi-search URL. Make sure it looks like: https://www.op.gg/multisearch/euw?summoners=...');
       return;
     }
 
     if (parsed.players.length === 0) {
-      setInlineImportError((prev) => ({
-        ...prev,
-        [teamId]: "No players found in URL",
-      }));
+      setImportToTeamError('No players found in URL');
       return;
     }
 
-    importPlayersToTeam(teamId, parsed.region, parsed.players);
-    setInlineImportUrl((prev) => ({ ...prev, [teamId]: "" }));
+    importPlayersToTeam(importToTeamId, parsed.region, parsed.players);
+    setImportToTeamUrl('');
+    setImportToTeamSuccess(`Imported ${parsed.players.length} player${parsed.players.length !== 1 ? 's' : ''}.`);
   };
 
   const handleDeleteTeam = (id: string) => {
@@ -329,14 +329,6 @@ export default function EnemyTeamPage() {
     <div className="space-y-8">
       <div className="flex items-center gap-4">
         <div className="flex gap-3">
-          <Button
-            variant="secondary"
-            onClick={() => setIsImportModalOpen(true)}
-            disabled={isAtLimit}
-            title={isAtLimit ? `Maximum of ${maxEnemyTeams} teams reached` : undefined}
-          >
-            Import from OP.GG
-          </Button>
           <Button
             onClick={() => setIsAddModalOpen(true)}
             disabled={isAtLimit}
@@ -469,17 +461,9 @@ export default function EnemyTeamPage() {
             </svg>
           </div>
           <p className="text-gray-400 mb-6">No enemy teams added yet</p>
-          <div className="flex gap-3 justify-center">
-            <Button
-              variant="secondary"
-              onClick={() => setIsImportModalOpen(true)}
-            >
-              Import from OP.GG
-            </Button>
-            <Button onClick={() => setIsAddModalOpen(true)}>
-              Add Manually
-            </Button>
-          </div>
+          <Button onClick={() => setIsAddModalOpen(true)}>
+            + Add Team
+          </Button>
         </Card>
       ) : filteredTeams.length === 0 ? (
         <Card className="text-center py-8">
@@ -657,6 +641,16 @@ export default function EnemyTeamPage() {
                               });
                             }
                           }}
+                          onBlur={async () => {
+                            const trimmed = team.name.trim();
+                            if (trimmed) {
+                              const modResult = await checkModerationAndRecord(trimmed, 'enemy_team_name');
+                              if (modResult.flagged) {
+                                setTeamNameErrors(prev => ({ ...prev, [team.id]: getViolationWarning(modResult) }));
+                                updateTeam(team.id, { name: 'Enemy Team' });
+                              }
+                            }
+                          }}
                         />
                         {teamNameErrors[team.id] && (
                           <p className="text-red-500 text-sm mt-1">{teamNameErrors[team.id]}</p>
@@ -713,40 +707,14 @@ export default function EnemyTeamPage() {
                             </Button>
                           );
                         })()}
-                      <div className="ml-auto w-96">
-                        <label className="block text-sm font-medium text-gray-300 mb-2 text-end">
-                          Import players from OP.GG
-                        </label>
-                        <div className="flex gap-2 justify-end">
-                          <Input
-                            value={inlineImportUrl[team.id] || ""}
-                            onChange={(e) => {
-                              setInlineImportUrl((prev) => ({
-                                ...prev,
-                                [team.id]: e.target.value,
-                              }));
-                              setInlineImportError((prev) => ({
-                                ...prev,
-                                [team.id]: "",
-                              }));
-                            }}
-                            placeholder="Paste OP.GG multi-search URL..."
-                            className="flex-1"
-                          />
-                          <Button
-                            onClick={() => handleInlineImport(team.id)}
-                            disabled={!inlineImportUrl[team.id]?.trim()}
-                          >
-                            Import
-                          </Button>
-                        </div>
-                      </div>
+                      <Button
+                        variant="secondary"
+                        onClick={() => setImportToTeamId(team.id)}
+                        className="ml-auto"
+                      >
+                        Import from OP.GG
+                      </Button>
                     </div>
-                    {inlineImportError[team.id] && (
-                      <p className="text-sm text-red-400 -mt-4">
-                        {inlineImportError[team.id]}
-                      </p>
-                    )}
 
                     <DndContext
                       sensors={sensors}
@@ -902,6 +870,8 @@ export default function EnemyTeamPage() {
         onClose={() => {
           setIsAddModalOpen(false);
           setAddTeamError("");
+          setImportUrl("");
+          setImportError("");
         }}
         title="Add Enemy Team"
       >
@@ -914,76 +884,106 @@ export default function EnemyTeamPage() {
                 setNewTeamName(e.target.value);
                 setAddTeamError("");
               }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleAddTeam();
+                }
+              }}
               placeholder="e.g., Team Liquid"
               autoFocus
               size="lg"
             />
-            {addTeamError && (
-              <p className="text-red-500 text-sm mt-1">{addTeamError}</p>
-            )}
           </div>
+
+          <div className="border-t border-lol-border pt-4">
+            <p className="text-sm text-gray-400 mb-3">
+              Optionally paste an OP.GG multi-search URL to import players automatically.
+            </p>
+            <Input
+              label="OP.GG Multi-Search URL (optional)"
+              value={importUrl}
+              onChange={(e) => {
+                setImportUrl(e.target.value);
+                setImportError("");
+                setAddTeamError("");
+              }}
+              placeholder="https://www.op.gg/multisearch/euw?summoners=..."
+            />
+          </div>
+
+          {(addTeamError || importError) && (
+            <p className="text-sm text-red-400 bg-red-500/10 rounded-lg p-3 border border-red-500/20">
+              {addTeamError || importError}
+            </p>
+          )}
+
           <div className="flex gap-3 justify-end">
             <Button variant="ghost" onClick={() => {
               setIsAddModalOpen(false);
               setAddTeamError("");
+              setImportUrl("");
+              setImportError("");
             }}>
               Cancel
             </Button>
-            <Button onClick={handleAddTeam} disabled={!newTeamName.trim()}>
-              Add Team
+            <Button
+              onClick={() => {
+                if (importUrl.trim()) {
+                  handleImport();
+                } else {
+                  handleAddTeam();
+                }
+              }}
+              disabled={!newTeamName.trim() && !importUrl.trim()}
+            >
+              {importUrl.trim() ? "Import Team" : "Add Team"}
             </Button>
           </div>
         </div>
       </Modal>
 
-      {/* Import Modal */}
+      {/* Import to existing team modal */}
       <Modal
-        isOpen={isImportModalOpen}
+        isOpen={!!importToTeamId}
         onClose={() => {
-          setIsImportModalOpen(false);
-          setImportError("");
-          setImportUrl("");
-          setImportTeamName("");
+          setImportToTeamId(null);
+          setImportToTeamUrl('');
+          setImportToTeamError('');
+          setImportToTeamSuccess('');
         }}
         title="Import from OP.GG"
       >
         <div className="space-y-5">
           <p className="text-sm text-gray-400 bg-lol-dark rounded-lg p-4 border border-lol-border">
-            Paste an OP.GG multi-search URL to automatically import player
-            names.
+            Paste an OP.GG multi-search URL to import players into this team.
           </p>
           <Input
-            label="OP.GG Multi-Search URL"
-            value={importUrl}
+            label="OP.GG URL"
+            value={importToTeamUrl}
             onChange={(e) => {
-              setImportUrl(e.target.value);
-              setImportError("");
+              setImportToTeamUrl(e.target.value);
+              setImportToTeamError('');
+              setImportToTeamSuccess('');
             }}
             placeholder="https://www.op.gg/multisearch/euw?summoners=..."
             autoFocus
           />
-          <Input
-            label="Team Name (optional)"
-            value={importTeamName}
-            onChange={(e) => setImportTeamName(e.target.value)}
-            placeholder="e.g., Week 3 Opponent"
-          />
-          {importError && (
-            <p className="text-sm text-red-400 bg-red-500/10 rounded-lg p-3 border border-red-500/20">
-              {importError}
-            </p>
+          {importToTeamSuccess && (
+            <p className="text-sm text-green-400 bg-green-500/10 rounded-lg p-3 border border-green-500/20">{importToTeamSuccess}</p>
+          )}
+          {importToTeamError && (
+            <p className="text-sm text-red-400 bg-red-500/10 rounded-lg p-3 border border-red-500/20">{importToTeamError}</p>
           )}
           <div className="flex gap-3 justify-end pt-2">
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setIsImportModalOpen(false);
-                setImportError("");
-              }}
-            >
+            <Button variant="ghost" onClick={() => {
+              setImportToTeamId(null);
+              setImportToTeamUrl('');
+              setImportToTeamError('');
+              setImportToTeamSuccess('');
+            }}>
               Cancel
             </Button>
-            <Button onClick={handleImport} disabled={!importUrl.trim()}>
+            <Button onClick={handleImportToTeam} disabled={!importToTeamUrl.trim()}>
               Import
             </Button>
           </div>

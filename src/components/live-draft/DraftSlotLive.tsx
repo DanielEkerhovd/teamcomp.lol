@@ -1,5 +1,6 @@
 import { useChampionData } from '../../hooks/useChampionData';
 import { getCenteredSplashUrl } from '../../lib/datadragon';
+import { shouldFlipSplash } from '../../data/championFacing';
 import { NONE_CHAMPION } from '../../types/liveDraft';
 import type { DraftSide } from '../../types/liveDraft';
 
@@ -95,6 +96,7 @@ export default function DraftSlotLive({
 
   // === PICK SLOT (tall card with splash art) ===
   const splashUrl = displayChampionId ? getCenteredSplashUrl(displayChampionId) : null;
+  const flipSplash = displayChampionId ? shouldFlipSplash(displayChampionId, side) : false;
   const isClickable = isNone && canFill && !isFilling;
 
   return (
@@ -113,7 +115,7 @@ export default function DraftSlotLive({
         <img
           src={splashUrl}
           alt={champion.name}
-          className="absolute inset-0 w-full h-full object-cover object-[center_15%] brightness-130"
+          className={`absolute inset-0 w-full h-full object-cover object-[center_15%] brightness-[1.3] ${flipSplash ? '-scale-x-100' : ''}`}
         />
       )}
 

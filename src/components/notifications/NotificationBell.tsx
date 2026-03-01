@@ -12,10 +12,12 @@ interface NotificationBellProps {
 function NotificationItem({
   notification,
   onMarkRead,
+  onDelete,
   onClose,
 }: {
   notification: Notification;
   onMarkRead: (id: string) => void;
+  onDelete: (id: string) => void;
   onClose: () => void;
 }) {
   const getIcon = () => {
@@ -80,9 +82,13 @@ function NotificationItem({
   const getActionLink = () => {
     switch (notification.type) {
       case 'friend_request':
-        return '/friends?tab=pending';
+        return '/social?tab=pending';
       case 'team_invite':
-        return notification.data?.inviteToken ? `/invite/${notification.data.inviteToken}` : null;
+        return '/social?tab=team_invites';
+      case 'team_member_joined':
+      case 'team_member_left':
+      case 'team_role_changed':
+        return notification.data?.teamId ? `/my-teams?team=${notification.data.teamId}` : '/my-teams';
       case 'draft_invite':
         return notification.data?.inviteToken ? `/live-draft/join/${notification.data.inviteToken}` : null;
       default:
@@ -108,9 +114,20 @@ function NotificationItem({
           {formatDistanceToNow(notification.createdAt)}
         </p>
       </div>
-      {!notification.readAt && (
-        <div className="w-2 h-2 rounded-full bg-lol-gold shrink-0" />
-      )}
+      <div className="flex items-center gap-1 shrink-0">
+        {!notification.readAt && (
+          <div className="w-2 h-2 rounded-full bg-lol-gold" />
+        )}
+        <button
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(notification.id); }}
+          className="p-0.5 text-gray-600 hover:text-red-400 rounded transition-colors opacity-0 group-hover/item:opacity-100"
+          title="Delete"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
     </>
   );
 
@@ -122,7 +139,7 @@ function NotificationItem({
           if (!notification.readAt) onMarkRead(notification.id);
           onClose();
         }}
-        className={`w-full flex items-start gap-3 p-3 rounded-lg transition-colors text-left ${
+        className={`w-full flex items-start gap-3 p-3 rounded-lg transition-colors text-left group/item ${
           notification.readAt
             ? 'bg-lol-surface/30 hover:bg-lol-surface/50'
             : 'bg-lol-surface hover:bg-lol-border'
@@ -136,7 +153,7 @@ function NotificationItem({
   return (
     <button
       onClick={() => !notification.readAt && onMarkRead(notification.id)}
-      className={`w-full flex items-start gap-3 p-3 rounded-lg transition-colors text-left ${
+      className={`w-full flex items-start gap-3 p-3 rounded-lg transition-colors text-left group/item ${
         notification.readAt
           ? 'bg-lol-surface/30 hover:bg-lol-surface/50'
           : 'bg-lol-surface hover:bg-lol-border'
@@ -152,7 +169,7 @@ export default function NotificationBell({ collapsed }: NotificationBellProps) {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const { user } = useAuthStore();
-  const { notifications, unreadCount, loadNotifications, markAsRead, markAllAsRead, subscribeToRealtime } = useNotificationsStore();
+  const { notifications, unreadCount, loadNotifications, markAsRead, markAllAsRead, deleteNotification, subscribeToRealtime } = useNotificationsStore();
 
   // Load notifications and subscribe when authenticated
   useEffect(() => {
@@ -258,6 +275,7 @@ export default function NotificationBell({ collapsed }: NotificationBellProps) {
                   key={notification.id}
                   notification={notification}
                   onMarkRead={markAsRead}
+                  onDelete={deleteNotification}
                   onClose={() => setShowDropdown(false)}
                 />
               ))

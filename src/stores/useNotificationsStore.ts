@@ -28,7 +28,8 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const notifications = await notificationService.getNotifications();
-      const unreadCount = notifications.filter((n) => !n.readAt).length;
+      // Exclude message-type notifications from unread count (messages have their own unread tracking)
+      const unreadCount = notifications.filter((n) => !n.readAt && n.type !== 'message').length;
       set({ notifications, unreadCount, isLoading: false });
     } catch (error) {
       set({
@@ -44,13 +45,25 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
   },
 
   markAsRead: async (notificationId: string) => {
+    const notification = get().notifications.find((n) => n.id === notificationId);
+    const shouldDecrement = notification && !notification.readAt && notification.type !== 'message';
+
+    // Optimistic: mark as read immediately in UI
+    set((state) => ({
+      notifications: state.notifications.map((n) =>
+        n.id === notificationId ? { ...n, readAt: new Date().toISOString() } : n
+      ),
+      unreadCount: shouldDecrement ? Math.max(0, state.unreadCount - 1) : state.unreadCount,
+    }));
+
     const success = await notificationService.markAsRead(notificationId);
-    if (success) {
+    if (!success && notification) {
+      // Revert on failure
       set((state) => ({
         notifications: state.notifications.map((n) =>
-          n.id === notificationId ? { ...n, readAt: new Date().toISOString() } : n
+          n.id === notificationId ? { ...n, readAt: notification.readAt } : n
         ),
-        unreadCount: Math.max(0, state.unreadCount - 1),
+        unreadCount: shouldDecrement ? state.unreadCount + 1 : state.unreadCount,
       }));
     }
   },
@@ -68,13 +81,25 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
 
   deleteNotification: async (notificationId: string) => {
     const notification = get().notifications.find((n) => n.id === notificationId);
+
+    // Optimistic: remove immediately from UI
+    set((state) => ({
+      notifications: state.notifications.filter((n) => n.id !== notificationId),
+      unreadCount: notification && !notification.readAt && notification.type !== 'message'
+        ? Math.max(0, state.unreadCount - 1)
+        : state.unreadCount,
+    }));
+
     const success = await notificationService.deleteNotification(notificationId);
-    if (success) {
+    if (!success && notification) {
+      // Revert on failure
       set((state) => ({
-        notifications: state.notifications.filter((n) => n.id !== notificationId),
-        unreadCount: notification && !notification.readAt
-          ? Math.max(0, state.unreadCount - 1)
-          : state.unreadCount,
+        notifications: [...state.notifications, notification].sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        ),
+        unreadCount: notification.readAt || notification.type === 'message'
+          ? state.unreadCount
+          : state.unreadCount + 1,
       }));
     }
   },
@@ -82,7 +107,8 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
   addNotification: (notification: Notification) => {
     set((state) => ({
       notifications: [notification, ...state.notifications],
-      unreadCount: state.unreadCount + 1,
+      // Only increment unreadCount for non-message notifications
+      unreadCount: notification.type !== 'message' ? state.unreadCount + 1 : state.unreadCount,
     }));
   },
 

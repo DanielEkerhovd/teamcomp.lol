@@ -30,7 +30,8 @@ export type NotificationType =
   | 'friend_request'
   | 'friend_accepted'
   | 'message'
-  | 'draft_invite';
+  | 'draft_invite'
+  | 'moderation';
 
 export interface Database {
   public: {
@@ -48,6 +49,11 @@ export interface Database {
           role: ProfileRole | null;
           role_team_id: string | null;
           is_private: boolean;
+          stripe_customer_id: string | null;
+          tier_expires_at: string | null;
+          banned_at: string | null;
+          ban_reason: string | null;
+          avatar_moderated_until: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -63,6 +69,11 @@ export interface Database {
           role?: ProfileRole | null;
           role_team_id?: string | null;
           is_private?: boolean;
+          stripe_customer_id?: string | null;
+          tier_expires_at?: string | null;
+          banned_at?: string | null;
+          ban_reason?: string | null;
+          avatar_moderated_until?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -78,6 +89,11 @@ export interface Database {
           role?: ProfileRole | null;
           role_team_id?: string | null;
           is_private?: boolean;
+          stripe_customer_id?: string | null;
+          tier_expires_at?: string | null;
+          banned_at?: string | null;
+          ban_reason?: string | null;
+          avatar_moderated_until?: string | null;
           updated_at?: string;
         };
       };
@@ -736,6 +752,92 @@ export interface Database {
           is_captain?: boolean;
         };
       };
+      champion_facing: {
+        Row: {
+          champion_id: string;
+          facing: 'left' | 'right';
+          updated_at: string;
+        };
+        Insert: {
+          champion_id: string;
+          facing?: 'left' | 'right';
+          updated_at?: string;
+        };
+        Update: {
+          facing?: 'left' | 'right';
+          updated_at?: string;
+        };
+      };
+      subscriptions: {
+        Row: {
+          id: string;
+          user_id: string;
+          stripe_subscription_id: string;
+          stripe_customer_id: string;
+          status: string;
+          price_id: string;
+          tier: 'paid' | 'supporter';
+          current_period_start: string | null;
+          current_period_end: string | null;
+          cancel_at_period_end: boolean;
+          canceled_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          stripe_subscription_id: string;
+          stripe_customer_id: string;
+          status?: string;
+          price_id: string;
+          tier: 'paid' | 'supporter';
+          current_period_start?: string | null;
+          current_period_end?: string | null;
+          cancel_at_period_end?: boolean;
+          canceled_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          status?: string;
+          price_id?: string;
+          tier?: 'paid' | 'supporter';
+          current_period_start?: string | null;
+          current_period_end?: string | null;
+          cancel_at_period_end?: boolean;
+          canceled_at?: string | null;
+          updated_at?: string;
+        };
+      };
+      donations: {
+        Row: {
+          id: string;
+          user_id: string | null;
+          stripe_payment_intent_id: string | null;
+          stripe_checkout_session_id: string | null;
+          amount: number;
+          currency: string;
+          status: string;
+          donor_email: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string | null;
+          stripe_payment_intent_id?: string | null;
+          stripe_checkout_session_id?: string | null;
+          amount: number;
+          currency?: string;
+          status?: string;
+          donor_email?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          status?: string;
+          donor_email?: string | null;
+        };
+      };
       live_draft_messages: {
         Row: {
           id: string;
@@ -756,6 +858,29 @@ export interface Database {
         Update: {
           display_name?: string;
           content?: string;
+        };
+      };
+      moderation_violations: {
+        Row: {
+          id: string;
+          user_id: string;
+          context: string;
+          content: string | null;
+          categories: string[];
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          context: string;
+          content?: string | null;
+          categories?: string[];
+          created_at?: string;
+        };
+        Update: {
+          context?: string;
+          content?: string | null;
+          categories?: string[];
         };
       };
     };
@@ -780,6 +905,8 @@ export type DbDraftShare = Database['public']['Tables']['draft_shares']['Row'];
 export type DbFriendship = Database['public']['Tables']['friendships']['Row'];
 export type DbMessage = Database['public']['Tables']['messages']['Row'];
 export type DbNotification = Database['public']['Tables']['notifications']['Row'];
+export type DbSubscription = Database['public']['Tables']['subscriptions']['Row'];
+export type DbDonation = Database['public']['Tables']['donations']['Row'];
 
 // Types for RPC responses
 export interface SharedDraftData {
@@ -868,6 +995,7 @@ export interface Message {
   content: string;
   readAt: string | null;
   createdAt: string;
+  revertedAt: string | null;
   senderName: string;
   senderAvatar: string | null;
 }

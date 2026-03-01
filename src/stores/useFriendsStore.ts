@@ -75,48 +75,100 @@ export const useFriendsStore = create<FriendsState>((set, get) => ({
   },
 
   acceptRequest: async (friendshipId: string) => {
+    const request = get().pendingReceived.find((p) => p.friendshipId === friendshipId);
+
+    // Optimistic: remove from pending immediately
+    set((state) => ({
+      pendingReceived: state.pendingReceived.filter((p) => p.friendshipId !== friendshipId),
+    }));
+
     const result = await friendService.respondToFriendRequest(friendshipId, true);
     if (result.success && result.friend) {
       set((state) => ({
-        pendingReceived: state.pendingReceived.filter((p) => p.friendshipId !== friendshipId),
         friends: [...state.friends, result.friend!],
+      }));
+    } else if (request) {
+      // Revert on failure
+      set((state) => ({
+        pendingReceived: [...state.pendingReceived, request],
       }));
     }
   },
 
   declineRequest: async (friendshipId: string) => {
+    const request = get().pendingReceived.find((p) => p.friendshipId === friendshipId);
+
+    // Optimistic: remove from pending immediately
+    set((state) => ({
+      pendingReceived: state.pendingReceived.filter((p) => p.friendshipId !== friendshipId),
+    }));
+
     const result = await friendService.respondToFriendRequest(friendshipId, false);
-    if (result.success) {
+    if (!result.success && request) {
+      // Revert on failure
       set((state) => ({
-        pendingReceived: state.pendingReceived.filter((p) => p.friendshipId !== friendshipId),
+        pendingReceived: [...state.pendingReceived, request],
       }));
     }
   },
 
   removeFriend: async (friendshipId: string) => {
+    const friend = get().friends.find((f) => f.friendshipId === friendshipId);
+    const pendingSent = get().pendingSent.find((p) => p.friendshipId === friendshipId);
+
+    // Optimistic: remove immediately
+    set((state) => ({
+      friends: state.friends.filter((f) => f.friendshipId !== friendshipId),
+      pendingSent: state.pendingSent.filter((p) => p.friendshipId !== friendshipId),
+    }));
+
     const result = await friendService.removeFriend(friendshipId);
-    if (result.success) {
+    if (!result.success) {
+      // Revert on failure
       set((state) => ({
-        friends: state.friends.filter((f) => f.friendshipId !== friendshipId),
-        pendingSent: state.pendingSent.filter((p) => p.friendshipId !== friendshipId),
+        friends: friend ? [...state.friends, friend] : state.friends,
+        pendingSent: pendingSent ? [...state.pendingSent, pendingSent] : state.pendingSent,
       }));
     }
   },
 
   blockUser: async (userId: string) => {
+    const friend = get().friends.find((f) => f.friendId === userId);
+    const request = get().pendingReceived.find((p) => p.fromUserId === userId);
+
+    // Optimistic: remove from friends/pending immediately
+    set((state) => ({
+      friends: state.friends.filter((f) => f.friendId !== userId),
+      pendingReceived: state.pendingReceived.filter((p) => p.fromUserId !== userId),
+    }));
+
     const result = await friendService.blockUser(userId);
     if (result.success) {
-      // Reload to get the updated state (removes from friends, adds to blocked)
+      // Reload to get the blocked list updated with server data
       await get().loadFriends();
+    } else {
+      // Revert on failure
+      set((state) => ({
+        friends: friend ? [...state.friends, friend] : state.friends,
+        pendingReceived: request ? [...state.pendingReceived, request] : state.pendingReceived,
+      }));
     }
     return { success: result.success, error: result.error };
   },
 
   unblockUser: async (userId: string) => {
+    const blockedUser = get().blocked.find((b) => b.blockedUserId === userId);
+
+    // Optimistic: remove from blocked immediately
+    set((state) => ({
+      blocked: state.blocked.filter((b) => b.blockedUserId !== userId),
+    }));
+
     const result = await friendService.unblockUser(userId);
-    if (result.success) {
+    if (!result.success && blockedUser) {
+      // Revert on failure
       set((state) => ({
-        blocked: state.blocked.filter((b) => b.blockedUserId !== userId),
+        blocked: [...state.blocked, blockedUser],
       }));
     }
     return { success: result.success, error: result.error };

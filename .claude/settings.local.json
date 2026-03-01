@@ -48,7 +48,9 @@
       "Bash(findstr:*)",
       "Bash(Select-String -Pattern \"my_teams\")",
       "Bash(npx vite build)",
-      "WebFetch(domain:raw.communitydragon.org)"
+      "WebFetch(domain:raw.communitydragon.org)",
+      "WebFetch(domain:ddragon.leagueoflegends.com)",
+      "WebFetch(domain:supabase.com)"
     ],
     "defaultMode": "acceptEdits"
   }

@@ -106,17 +106,13 @@ const cloudSyncImpl: CloudSyncImpl = (f, options) => (set, get, store) => {
       syncManager.syncArrayToCloud(storeKey, tableName, dataToSync as { id: string }[], {
         debounceMs,
         transformItem: transformItem as (item: { id: string }, userId: string, index: number) => unknown,
+        onAfterSync: onAfterSync as ((data: { id: string }[], storeKey: string, debounceMs: number) => void) | undefined,
       });
     } else {
       syncManager.syncToCloud(storeKey, tableName, dataToSync, {
         debounceMs,
         transform: transformForCloud as (data: unknown, userId: string) => unknown,
       });
-    }
-
-    // Trigger related data sync (e.g., players for teams)
-    if (onAfterSync) {
-      onAfterSync(dataToSync, storeKey, debounceMs);
     }
   };
 

@@ -1,6 +1,7 @@
-import { useState, forwardRef, HTMLAttributes } from "react";
+import { useState, useMemo, forwardRef, HTMLAttributes } from "react";
 import { Player, ROLES, REGIONS } from "../../types";
 import { useOpgg } from "../../hooks/useOpgg";
+import { usePlayerPoolStore } from "../../stores/usePlayerPoolStore";
 import { ChampionIcon } from "../champion";
 import RankBadge from "./RankBadge";
 import RoleIcon from "./RoleIcon";
@@ -34,6 +35,18 @@ const PlayerCard = forwardRef<HTMLDivElement, PlayerCardProps>(
   ) => {
     const [showNotes, setShowNotes] = useState(false);
     const { openPlayerProfile } = useOpgg();
+    const poolStore = usePlayerPoolStore((s) => s.findPool);
+
+    // Prefer champion data from the dedicated pool store over legacy player.championPool
+    const previewChampionIds = useMemo(() => {
+      const pool = player.summonerName ? poolStore(player.summonerName, player.role) : null;
+      if (pool) {
+        // Use pool store data (new format)
+        return pool.championGroups.flatMap((g) => g.championIds);
+      }
+      // Fall back to legacy player.championPool for backwards compat (e.g. enemy teams)
+      return player.championPool?.map((c) => c.championId) || [];
+    }, [player.summonerName, player.role, player.championPool, poolStore]);
 
     const roleLabel =
       ROLES.find((r) => r.value === player.role)?.label || player.role;
@@ -123,18 +136,18 @@ const PlayerCard = forwardRef<HTMLDivElement, PlayerCardProps>(
             </div>
           )}
 
-          {player.championPool && player.championPool.length > 0 && (
+          {previewChampionIds.length > 0 && (
             <div className="flex items-center gap-1 mt-2 flex-wrap">
-              {player.championPool.slice(0, compact ? 3 : 5).map((champ) => (
+              {previewChampionIds.slice(0, compact ? 3 : 5).map((champId) => (
                 <ChampionIcon
-                  key={champ.championId}
-                  championId={champ.championId}
+                  key={champId}
+                  championId={champId}
                   size="xs"
                 />
               ))}
-              {player.championPool.length > (compact ? 3 : 5) && (
+              {previewChampionIds.length > (compact ? 3 : 5) && (
                 <span className="text-[10px] text-gray-500 ml-0.5 bg-lol-surface px-1.5 py-0.5 rounded">
-                  +{player.championPool.length - (compact ? 3 : 5)}
+                  +{previewChampionIds.length - (compact ? 3 : 5)}
                 </span>
               )}
             </div>

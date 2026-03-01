@@ -75,7 +75,7 @@ export const notificationService = {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase.rpc as any)('mark_notification_read', {
-      p_notification_id: notificationId,
+      notification_id: notificationId,
     });
 
     if (error) {

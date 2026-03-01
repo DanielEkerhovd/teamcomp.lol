@@ -30,21 +30,37 @@ export default function AuthCallbackPage() {
       }
 
       try {
-        // Get the hash from the URL - Supabase returns tokens in the hash fragment
+        // Check for error in hash or query params
         const hashParams = new URLSearchParams(window.location.hash.substring(1));
-        const accessToken = hashParams.get('access_token');
-        const refreshToken = hashParams.get('refresh_token');
-        const type = hashParams.get('type');
+        const queryParams = new URLSearchParams(window.location.search);
 
-        // Also check for error in hash
-        const errorDescription = hashParams.get('error_description');
+        const errorDescription = hashParams.get('error_description') || queryParams.get('error_description');
         if (errorDescription) {
           setStatus('error');
           setErrorMessage(decodeURIComponent(errorDescription));
           return;
         }
 
-        // If we have tokens, set the session
+        // PKCE flow: exchange the `code` query parameter for a session
+        const code = queryParams.get('code');
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) {
+            setStatus('error');
+            setErrorMessage(error.message);
+            return;
+          }
+
+          setStatus('success');
+          const returnUrl = getAndConsumeReturnUrl();
+          setTimeout(() => navigate(returnUrl, { replace: true }), 2000);
+          return;
+        }
+
+        // Implicit flow: tokens in the hash fragment
+        const accessToken = hashParams.get('access_token');
+        const refreshToken = hashParams.get('refresh_token');
+
         if (accessToken && refreshToken) {
           const { error } = await supabase.auth.setSession({
             access_token: accessToken,
@@ -58,37 +74,30 @@ export default function AuthCallbackPage() {
           }
 
           setStatus('success');
-
-          // Redirect after a short delay to show success message
           const returnUrl = getAndConsumeReturnUrl();
-          setTimeout(() => {
-            navigate(returnUrl, { replace: true });
-          }, 2000);
+          setTimeout(() => navigate(returnUrl, { replace: true }), 2000);
           return;
         }
 
-        // If no tokens but this is a signup/recovery callback, try to get session
-        if (type === 'signup' || type === 'recovery' || type === 'magiclink') {
-          // The session might already be set by Supabase's automatic handling
-          const { data: { session }, error } = await supabase.auth.getSession();
+        // Fallback: detectSessionInUrl may have already consumed the tokens.
+        // Wait briefly then check if a session was established automatically.
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const { data: { session }, error } = await supabase.auth.getSession();
 
-          if (error) {
-            setStatus('error');
-            setErrorMessage(error.message);
-            return;
-          }
-
-          if (session) {
-            setStatus('success');
-            const returnUrl = getAndConsumeReturnUrl();
-            setTimeout(() => {
-              navigate(returnUrl, { replace: true });
-            }, 2000);
-            return;
-          }
+        if (error) {
+          setStatus('error');
+          setErrorMessage(error.message);
+          return;
         }
 
-        // No valid tokens found
+        if (session) {
+          setStatus('success');
+          const returnUrl = getAndConsumeReturnUrl();
+          setTimeout(() => navigate(returnUrl, { replace: true }), 2000);
+          return;
+        }
+
+        // Nothing worked
         setStatus('error');
         setErrorMessage('Invalid or expired confirmation link');
       } catch (err) {
@@ -141,9 +150,9 @@ export default function AuthCallbackPage() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
           </svg>
         </div>
-        <h2 className="text-xl font-bold text-white mb-2">Account Confirmed!</h2>
+        <h2 className="text-xl font-bold text-white mb-2">Sign In Successful!</h2>
         <p className="text-gray-400 mb-6">
-          Your email has been verified. You're now being signed in...
+          You're now being signed in...
         </p>
         <div className="flex items-center justify-center gap-2 text-gray-500">
           <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">

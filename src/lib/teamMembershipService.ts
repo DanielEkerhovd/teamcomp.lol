@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import type { DbTeamMember, DbTeamInvite, InviteDetails } from '../types/database';
+import type { Team } from '../types';
 
 export type MemberRole = 'owner' | 'admin' | 'player' | 'viewer';
 
@@ -105,11 +106,12 @@ function mapTeamInvite(row: DbTeamInvite): TeamInvite {
 
 export const teamMembershipService = {
   /**
-   * Get all members of a team
+   * Get all members of a team, including the owner
    */
   async getTeamMembers(teamId: string): Promise<TeamMember[]> {
     if (!supabase) return [];
 
+    // Fetch team members (non-owners)
     const { data, error } = await (supabase
       .from('team_members' as 'profiles')
       .select(`
@@ -119,7 +121,51 @@ export const teamMembershipService = {
       .eq('team_id' as 'id', teamId) as unknown as Promise<{ data: (DbTeamMember & { profiles?: { display_name: string | null; email: string | null; avatar_url: string | null } })[] | null; error: Error | null }>);
 
     if (error) throw error;
-    return (data || []).map(mapTeamMember);
+    const members = (data || []).map(mapTeamMember);
+
+    // Fetch team owner from my_teams
+    const { data: teamData, error: teamError } = await supabase
+      .from('my_teams')
+      .select('user_id, profiles:user_id(display_name, email, avatar_url)')
+      .eq('id', teamId)
+      .single();
+
+    if (!teamError && teamData) {
+      const ownerProfile = (teamData as unknown as { user_id: string; profiles: { display_name: string | null; email: string | null; avatar_url: string | null } | null });
+
+      // Try to fetch owner_player_slot_id (column may not exist yet if migration hasn't run)
+      let ownerSlotId: string | null = null;
+      try {
+        const { data: slotData } = await supabase
+          .from('my_teams')
+          .select('owner_player_slot_id')
+          .eq('id', teamId)
+          .single();
+        ownerSlotId = (slotData as unknown as { owner_player_slot_id: string | null })?.owner_player_slot_id || null;
+      } catch {
+        // Column doesn't exist yet — ignore
+      }
+
+      const ownerMember: TeamMember = {
+        id: `owner-${teamId}`,
+        teamId,
+        userId: ownerProfile.user_id,
+        role: 'owner',
+        playerSlotId: ownerSlotId,
+        canEditGroups: true,
+        joinedAt: '',
+        invitedBy: null,
+        user: ownerProfile.profiles ? {
+          displayName: ownerProfile.profiles.display_name,
+          email: ownerProfile.profiles.email,
+          avatarUrl: ownerProfile.profiles.avatar_url,
+        } : undefined,
+      };
+      // Put owner first
+      members.unshift(ownerMember);
+    }
+
+    return members;
   },
 
   /**
@@ -326,36 +372,59 @@ export const teamMembershipService = {
   },
 
   /**
-   * Remove a member from a team
+   * Remove a member from a team.
+   * Returns true if the member was actually deleted, false if RLS silently blocked it.
    */
-  async removeMember(memberId: string): Promise<void> {
-    if (!supabase) return;
+  async removeMember(memberId: string): Promise<boolean> {
+    if (!supabase) return false;
 
-    const { error } = await (supabase
+    const { data, error } = await (supabase
       .from('team_members' as 'profiles')
       .delete()
-      .eq('id', memberId) as unknown as Promise<{ data: unknown; error: Error | null }>);
+      .eq('id', memberId)
+      .select('id') as unknown as Promise<{ data: { id: string }[] | null; error: Error | null }>);
 
     if (error) throw error;
+    return (data && data.length > 0) || false;
   },
 
   /**
-   * Update a member's role or assigned player slot
+   * Update a member's role or assigned player slot.
+   * Returns true if the row was actually updated, false if RLS silently blocked it.
    */
   async updateMember(
     memberId: string,
     updates: { role?: MemberRole; playerSlotId?: string | null }
-  ): Promise<void> {
-    if (!supabase) return;
+  ): Promise<boolean> {
+    if (!supabase) return false;
 
     const updateData: Record<string, unknown> = {};
     if (updates.role) updateData.role = updates.role;
     if (updates.playerSlotId !== undefined) updateData.player_slot_id = updates.playerSlotId;
 
-    const { error } = await (supabase
+    const { data, error } = await (supabase
       .from('team_members' as 'profiles')
       .update(updateData as never)
-      .eq('id', memberId) as unknown as Promise<{ data: unknown; error: Error | null }>);
+      .eq('id', memberId)
+      .select('id') as unknown as Promise<{ data: { id: string }[] | null; error: Error | null }>);
+
+    if (error) throw error;
+    return (data && data.length > 0) || false;
+  },
+
+  /**
+   * Update the owner's assigned player slot (stored on my_teams)
+   */
+  async updateOwnerSlot(
+    teamId: string,
+    playerSlotId: string | null
+  ): Promise<void> {
+    if (!supabase) return;
+
+    const { error } = await supabase
+      .from('my_teams')
+      .update({ owner_player_slot_id: playerSlotId } as never)
+      .eq('id', teamId);
 
     if (error) throw error;
   },
@@ -619,5 +688,46 @@ export const teamMembershipService = {
     }
 
     return data;
+  },
+
+  /**
+   * Fetch full team data (info + players) for a team the user is a member of.
+   * Returns a Team object compatible with the store format.
+   */
+  async fetchTeamData(teamId: string): Promise<Team | null> {
+    if (!supabase) return null;
+
+    // Fetch team info and players in parallel
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const [teamRes, playersRes] = await Promise.all([
+      (supabase as any).from('my_teams').select('*').eq('id', teamId).single(),
+      (supabase as any).from('players').select('*').eq('team_id', teamId).order('sort_order'),
+    ]);
+
+    if (teamRes.error || !teamRes.data) return null;
+
+    const team = teamRes.data;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const players = (playersRes.data || []).map((p: any) => ({
+      id: p.id,
+      summonerName: p.summoner_name,
+      tagLine: p.tag_line || '',
+      role: p.role,
+      notes: p.notes || '',
+      region: p.region || 'euw',
+      isSub: p.is_sub || false,
+      championPool: p.champion_pool || [],
+      championGroups: p.champion_groups || [],
+    }));
+
+    return {
+      id: team.id,
+      name: team.name,
+      notes: team.notes || '',
+      championPool: team.champion_pool || [],
+      players,
+      createdAt: new Date(team.created_at).getTime(),
+      updatedAt: new Date(team.updated_at).getTime(),
+    };
   },
 };

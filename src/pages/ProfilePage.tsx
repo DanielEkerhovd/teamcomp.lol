@@ -1,12 +1,15 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { useAuthStore } from "../stores/useAuthStore";
+import { useAuthStore, useTierLimits } from "../stores/useAuthStore";
 import { useSettingsStore } from "../stores/useSettingsStore";
 import { useMyTeamStore } from "../stores/useMyTeamStore";
 import { Region, REGIONS } from "../types";
 import type { ProfileRole } from "../types/database";
 import LoginModal from "../components/auth/LoginModal";
 import ConfirmationModal from "../components/ui/ConfirmationModal";
+import { createCheckoutSession, createPortalSession, STRIPE_PRICES, isStripeConfigured } from "../lib/stripeService";
+import { supabase } from "../lib/supabase";
+import type { DbSubscription } from "../types/database";
 
 // Role options for the role selector
 const ROLE_OPTIONS: {
@@ -41,6 +44,8 @@ function AvatarUsernameRow({
   onSaveUsername,
   fileInputRef,
   onFileChange,
+  isFreeTier,
+  avatarCooldownUntil,
 }: {
   avatarUrl?: string | null;
   initials: string;
@@ -52,6 +57,8 @@ function AvatarUsernameRow({
   onSaveUsername: (value: string) => Promise<{ error: string | null }>;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  isFreeTier?: boolean;
+  avatarCooldownUntil?: string | null;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(displayName);
@@ -98,24 +105,31 @@ function AvatarUsernameRow({
 
   const avatarSize = "size-20";
 
+  const isAvatarCooldown = avatarCooldownUntil && new Date(avatarCooldownUntil) > new Date();
+  const cooldownDateStr = avatarCooldownUntil
+    ? new Date(avatarCooldownUntil).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+    : null;
+
   const displayError = localError || error;
 
   return (
     <div className="group">
       <div className="flex items-center gap-4 p-4 rounded-xl hover:bg-lol-surface/50 transition-colors -mx-4">
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          onChange={onFileChange}
-          className="hidden"
-        />
+        {!isFreeTier && (
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={onFileChange}
+            className="hidden"
+          />
+        )}
         {/* Avatar */}
         <div className="relative shrink-0">
           <button
-            onClick={onAvatarClick}
-            disabled={isUploading}
-            className="relative group/avatar"
+            onClick={isAvatarCooldown ? undefined : onAvatarClick}
+            disabled={isUploading || !!isAvatarCooldown}
+            className={`relative group/avatar ${isAvatarCooldown ? 'cursor-not-allowed opacity-60' : ''}`}
           >
             {avatarUrl ? (
               <img
@@ -150,6 +164,20 @@ function AvatarUsernameRow({
                     className="opacity-75"
                     fill="currentColor"
                     d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  />
+                </svg>
+              ) : isFreeTier ? (
+                <svg
+                  className="w-5 h-5 text-white"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                   />
                 </svg>
               ) : (
@@ -376,6 +404,18 @@ function AvatarUsernameRow({
           </button>
         )}
       </div>
+      {/* Avatar moderation cooldown warning */}
+      {isAvatarCooldown && (
+        <div className="flex items-center gap-2 mx-0 mt-1 mb-2 px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400">
+          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+          </svg>
+          <span>
+            Your avatar was removed by a moderator. You can set a new avatar after{' '}
+            <span className="font-medium text-red-300">{cooldownDateStr}</span>.
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -1016,6 +1056,183 @@ function RoleRow({
   );
 }
 
+// Editable email row for email/password users
+function EmailRow({
+  currentEmail,
+  onSave,
+}: {
+  currentEmail: string;
+  onSave: (newEmail: string) => Promise<{ error: string | null }>;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  const handleSave = async () => {
+    const trimmed = editValue.trim();
+    if (!trimmed) {
+      setError("Please enter an email address");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      setError("Please enter a valid email address");
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    const result = await onSave(trimmed);
+    if (result.error) {
+      setError(result.error);
+    } else {
+      setShowSuccess(true);
+    }
+    setIsSaving(false);
+  };
+
+  const handleCancel = () => {
+    setEditValue("");
+    setError(null);
+    setShowSuccess(false);
+    setIsEditing(false);
+  };
+
+  const emailIcon = (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+    </svg>
+  );
+
+  return (
+    <div className="group">
+      <div className="flex items-center gap-4 p-4 rounded-xl hover:bg-lol-surface/50 transition-colors -mx-4">
+        <div className="w-10 h-10 rounded-xl bg-lol-surface flex items-center justify-center text-gray-400 shrink-0">
+          {emailIcon}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">
+            Email
+          </div>
+
+          {isEditing ? (
+            showSuccess ? (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 px-3 py-2 bg-green-500/10 border border-green-500/20 rounded-lg">
+                  <svg className="w-4 h-4 text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span className="text-green-400 text-sm font-medium">Confirmation emails sent</span>
+                </div>
+                <div className="text-xs text-gray-400 px-1">
+                  Please confirm the change on both your current email ({currentEmail}) and your new email ({editValue.trim()}). The change will take effect after both are confirmed.
+                </div>
+                <button
+                  onClick={handleCancel}
+                  className="px-3 py-1.5 text-sm text-gray-400 hover:text-white bg-lol-surface hover:bg-lol-border rounded-lg transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="email"
+                      value={editValue}
+                      onChange={(e) => {
+                        setEditValue(e.target.value);
+                        setError(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !isSaving) handleSave();
+                        if (e.key === "Escape" && !isSaving) handleCancel();
+                      }}
+                      disabled={isSaving}
+                      className={`w-full pl-3 pr-3 py-1.5 bg-lol-dark/80 border-2 rounded-lg text-white text-base focus:outline-none transition-all ${
+                        error
+                          ? "border-red-500/70 bg-red-500/5"
+                          : "border-lol-gold/50 focus:border-lol-gold"
+                      } disabled:opacity-70`}
+                      placeholder="Enter new email address"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={handleSave}
+                      disabled={isSaving}
+                      className="p-2 bg-lol-gold hover:bg-lol-gold-light text-lol-dark rounded-lg transition-colors disabled:opacity-70"
+                      title="Save"
+                    >
+                      {isSaving ? (
+                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                      ) : (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </button>
+                    <button
+                      onClick={handleCancel}
+                      disabled={isSaving}
+                      className="p-2 bg-lol-surface hover:bg-lol-border text-gray-400 hover:text-white rounded-lg transition-colors disabled:opacity-50"
+                      title="Cancel"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+                <div className="text-xs text-gray-500 px-1">
+                  You will need to confirm the change on both your current and new email address.
+                </div>
+                {error && (
+                  <div className="flex items-center gap-2 px-1 text-red-400 text-sm">
+                    <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span>{error}</span>
+                  </div>
+                )}
+              </div>
+            )
+          ) : (
+            <>
+              <div className="text-white font-medium truncate">
+                {currentEmail}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Change email button */}
+        {!isEditing && (
+          <button
+            onClick={() => {
+              setEditValue("");
+              setError(null);
+              setShowSuccess(false);
+              setIsEditing(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-gray-400 hover:text-white text-sm font-medium bg-lol-surface hover:bg-lol-border rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+            </svg>
+            Change email
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ProfilePage() {
   const navigate = useNavigate();
   const {
@@ -1026,10 +1243,13 @@ export default function ProfilePage() {
     updateDisplayName,
     updateAvatar,
     removeAvatar,
+    generateRandomAvatar,
     updateRole,
+    updateEmail,
     updatePrivacy,
     deleteAccount,
   } = useAuthStore();
+  const { isFreeTier } = useTierLimits();
   const { defaultRegion, setDefaultRegion } = useSettingsStore();
   const { teams } = useMyTeamStore();
 
@@ -1041,8 +1261,59 @@ export default function ProfilePage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  // Stripe checkout state
+  const [checkingOutPlan, setCheckingOutPlan] = useState<"pro" | "supporter" | null>(null);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [checkoutSuccess, setCheckoutSuccess] = useState<string | null>(null);
+  const [isDonating, setIsDonating] = useState(false);
+  const [donationAmount, setDonationAmount] = useState("");
+  const [activeSubscription, setActiveSubscription] = useState<DbSubscription | null>(null);
+  const { refreshProfile } = useAuthStore();
+
   const location = useLocation();
   const isAuthenticated = !!user;
+
+  // Handle checkout return URLs
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const checkoutParam = params.get("checkout");
+    const donationParam = params.get("donation");
+
+    if (checkoutParam === "success") {
+      setCheckoutSuccess("Your subscription is being activated. It may take a moment to reflect.");
+      refreshProfile();
+      // Clean URL params
+      const url = new URL(window.location.href);
+      url.searchParams.delete("checkout");
+      window.history.replaceState({}, "", url.toString());
+    } else if (checkoutParam === "cancelled") {
+      setCheckoutError("Checkout was cancelled.");
+      const url = new URL(window.location.href);
+      url.searchParams.delete("checkout");
+      window.history.replaceState({}, "", url.toString());
+    } else if (donationParam === "success") {
+      setCheckoutSuccess("Thank you for your donation!");
+      const url = new URL(window.location.href);
+      url.searchParams.delete("donation");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [location.search, refreshProfile]);
+
+  // Fetch active subscription for display
+  useEffect(() => {
+    if (!isStripeConfigured || !supabase || !user) return;
+    supabase
+      .from("subscriptions")
+      .select("*")
+      .eq("user_id", user.id)
+      .in("status", ["active", "past_due", "trialing"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => {
+        setActiveSubscription(data);
+      });
+  }, [user, profile?.tier]);
 
   useEffect(() => {
     if (location.hash) {
@@ -1052,6 +1323,46 @@ export default function ProfilePage() {
       }
     }
   }, [location.hash]);
+
+  const handleCheckout = async (plan: "pro" | "supporter") => {
+    setCheckingOutPlan(plan);
+    setCheckoutError(null);
+    setCheckoutSuccess(null);
+    const result = await createCheckoutSession({
+      mode: "subscription",
+      priceId: STRIPE_PRICES[plan],
+    });
+    if (result.error) {
+      setCheckoutError(result.error);
+      setCheckingOutPlan(null);
+    }
+  };
+
+  const handleDonate = async () => {
+    if (!donationAmount || Number(donationAmount) < 1) {
+      setCheckoutError("Minimum donation is €1.00");
+      return;
+    }
+    setIsDonating(true);
+    setCheckoutError(null);
+    setCheckoutSuccess(null);
+    const result = await createCheckoutSession({
+      mode: "donation",
+      amount: Math.round(Number(donationAmount) * 100),
+    });
+    if (result.error) {
+      setCheckoutError(result.error);
+      setIsDonating(false);
+    }
+  };
+
+  const handleManageSubscription = async () => {
+    setCheckoutError(null);
+    const result = await createPortalSession();
+    if (result.error) {
+      setCheckoutError(result.error);
+    }
+  };
 
   const handleSignOut = async () => {
     await signOut();
@@ -1073,8 +1384,18 @@ export default function ProfilePage() {
     }
   };
 
-  const handleAvatarClick = () => {
-    fileInputRef.current?.click();
+  const handleAvatarClick = async () => {
+    if (isFreeTier) {
+      setIsUploadingAvatar(true);
+      setAvatarError(null);
+      const result = await generateRandomAvatar();
+      if (result.error) {
+        setAvatarError(result.error);
+      }
+      setIsUploadingAvatar(false);
+    } else {
+      fileInputRef.current?.click();
+    }
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1219,6 +1540,30 @@ export default function ProfilePage() {
             : profile?.tier === "developer"
               ? "bg-emerald-500/20 text-emerald-400"
               : "bg-gray-500/20 text-gray-400";
+  const planCardBorder =
+    profile?.tier === "paid"
+      ? "border-lol-gold/20"
+      : profile?.tier === "beta"
+        ? "border-blue-500/20"
+        : profile?.tier === "supporter"
+          ? "border-purple-500/20"
+          : profile?.tier === "admin"
+            ? "border-red-500/20"
+            : profile?.tier === "developer"
+              ? "border-emerald-500/20"
+              : "border-lol-border";
+  const planCardBg =
+    profile?.tier === "paid"
+      ? "bg-lol-gold/5"
+      : profile?.tier === "beta"
+        ? "bg-blue-500/5"
+        : profile?.tier === "supporter"
+          ? "bg-purple-500/5"
+          : profile?.tier === "admin"
+            ? "bg-red-500/5"
+            : profile?.tier === "developer"
+              ? "bg-emerald-500/5"
+              : "bg-lol-surface/50";
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -1256,6 +1601,8 @@ export default function ProfilePage() {
             onSaveUsername={updateDisplayName}
             fileInputRef={fileInputRef}
             onFileChange={handleFileChange}
+            isFreeTier={isFreeTier}
+            avatarCooldownUntil={profile?.avatarModeratedUntil}
           />
 
           {/* Role Row */}
@@ -1267,26 +1614,34 @@ export default function ProfilePage() {
             onSave={updateRole}
           />
 
-          <InfoRow
-            label="Email"
-            value={user.email || "No email"}
-            icon={
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                />
-              </svg>
-            }
-            infoTooltip="Contact support@teamcomp.lol or Discord to change your email"
-          />
+          {/* Email: editable for email/password users, read-only for OAuth */}
+          {user.identities?.some((i) => i.provider === "email") ? (
+            <EmailRow
+              currentEmail={user.email || ""}
+              onSave={updateEmail}
+            />
+          ) : (
+            <InfoRow
+              label="Email"
+              value={user.email || "No email"}
+              icon={
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                  />
+                </svg>
+              }
+              infoTooltip="Contact support@teamcomp.lol or Discord to change your email"
+            />
+          )}
         </div>
       </div>
 
@@ -1408,8 +1763,20 @@ export default function ProfilePage() {
           <h3 className="text-lg font-semibold text-white">Plan</h3>
         </div>
 
+        {/* Checkout feedback */}
+        {checkoutSuccess && (
+          <div className="mb-4 p-3 rounded-lg bg-green-500/10 border border-green-500/30 text-green-400 text-sm">
+            {checkoutSuccess}
+          </div>
+        )}
+        {checkoutError && (
+          <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+            {checkoutError}
+          </div>
+        )}
+
         {/* Current Plan Display */}
-        <div className="p-5 rounded-xl bg-lol-surface/50 border border-lol-border mb-6">
+        <div className={`p-5 rounded-xl ${planCardBg} border ${planCardBorder} mb-6`}>
           <div className="flex items-center justify-between mb-4">
             <span className="text-gray-400 text-sm uppercase tracking-wide">
               Current Plan
@@ -1421,7 +1788,7 @@ export default function ProfilePage() {
             </span>
           </div>
           <ul className="space-y-2 text-sm text-gray-300">
-            {profile?.tier !== "developer" && profile?.tier !== "beta" && (
+            {profile?.tier === "free" && (
               <>
                 <li className="flex items-center gap-2 font-medium">
                   <svg
@@ -1521,11 +1888,32 @@ export default function ProfilePage() {
                 </li>
               </>
             )}
-            {profile?.tier === "beta" && (
+            {(profile?.tier === "paid" ||
+              profile?.tier === "beta" ||
+              profile?.tier === "supporter" ||
+              profile?.tier === "admin") && (
               <>
-                <li className="flex items-center gap-2">
+                {profile?.tier === "beta" && (
+                  <li className="flex items-center gap-2 font-medium">
+                    <svg
+                      className="w-4 h-4 text-blue-400 shrink-0"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
+                      />
+                    </svg>
+                    <span>Beta tester discord role</span>
+                  </li>
+                )}
+                <li className="flex items-center gap-2 font-medium">
                   <svg
-                    className="w-4 h-4 text-blue-400 shrink-0"
+                    className="w-4 h-4 text-green-500 shrink-0"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -1534,10 +1922,10 @@ export default function ProfilePage() {
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       strokeWidth={2}
-                      d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
+                      d="M5 13l4 4L19 7"
                     />
                   </svg>
-                  <span>Beta tester</span>
+                  <span>{profile?.tier === "admin" ? "Unlimited teams" : `Manage up to ${profile?.maxTeams ?? 3} teams`}</span>
                 </li>
                 <li className="flex items-center gap-2">
                   <svg
@@ -1553,7 +1941,7 @@ export default function ProfilePage() {
                       d="M5 13l4 4L19 7"
                     />
                   </svg>
-                  <span>Manage up to 3 teams</span>
+                  <span>{profile?.tier === "admin" ? "Unlimited enemy teams" : `Add up to ${profile?.maxEnemyTeams ?? 30} enemy teams`}</span>
                 </li>
                 <li className="flex items-center gap-2">
                   <svg
@@ -1569,7 +1957,7 @@ export default function ProfilePage() {
                       d="M5 13l4 4L19 7"
                     />
                   </svg>
-                  <span>Add up to 20 enemy teams</span>
+                  <span>{profile?.tier === "admin" ? "Unlimited drafts" : `Create up to ${profile?.maxDrafts ?? 300} planned drafts`}</span>
                 </li>
                 <li className="flex items-center gap-2">
                   <svg
@@ -1585,7 +1973,7 @@ export default function ProfilePage() {
                       d="M5 13l4 4L19 7"
                     />
                   </svg>
-                  <span>Create up to 100 planned drafts</span>
+                  <span>More profile customization</span>
                 </li>
                 <li className="flex items-center gap-2">
                   <svg
@@ -1604,26 +1992,6 @@ export default function ProfilePage() {
                   <span>Cloud sync</span>
                 </li>
               </>
-            )}
-            {(profile?.tier === "paid" ||
-              profile?.tier === "supporter" ||
-              profile?.tier === "admin") && (
-              <li className="flex items-center gap-2">
-                <svg
-                  className="w-4 h-4 text-green-500 shrink-0"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M5 13l4 4L19 7"
-                  />
-                </svg>
-                <span>Priority support</span>
-              </li>
             )}
             {(profile?.tier === "supporter" || profile?.tier === "admin") && (
               <>
@@ -1746,26 +2114,48 @@ export default function ProfilePage() {
               </>
             )}
           </ul>
+
+          {/* Manage Subscription (for active subscribers) */}
+          {activeSubscription && (profile?.tier === "paid" || profile?.tier === "supporter") && (
+            <div className="mt-4 pt-4 border-t border-lol-border/50">
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-gray-400">
+                  {activeSubscription.cancel_at_period_end
+                    ? `Cancels on ${new Date(activeSubscription.current_period_end!).toLocaleDateString()}`
+                    : `Renews on ${new Date(activeSubscription.current_period_end!).toLocaleDateString()}`
+                  }
+                </div>
+                <button
+                  onClick={handleManageSubscription}
+                  className="text-sm text-lol-gold hover:text-lol-gold-light transition-colors font-medium"
+                >
+                  Manage Subscription
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Upgrade Options */}
-        {(profile?.tier === "free" || profile?.tier === "paid") && (
-          <div className="relative rounded-xl border border-red-500/40 p-4 pt-8">
-            <div className="absolute -top-3 left-4 px-2.5 py-0.5 rounded-full bg-lol-card text-red-400 text-xs font-semibold border border-red-500/40">
-              Not available in beta
-            </div>
+        {(profile?.tier === "free" || profile?.tier === "beta" || profile?.tier === "paid") && (
+          <div className={`relative ${!isStripeConfigured ? "rounded-xl border border-red-500/40 p-4 pt-8" : ""}`}>
+            {!isStripeConfigured && (
+              <div className="absolute -top-3 left-4 px-2.5 py-0.5 rounded-full bg-lol-card text-red-400 text-xs font-semibold border border-red-500/40">
+                Not available in beta
+              </div>
+            )}
             <div className="text-gray-400 text-sm uppercase tracking-wide mb-4">
               Upgrade Options
             </div>
-            <div className="grid grid-cols-2 gap-4 opacity-60 pointer-events-none">
-              {/* Pro Tier */}
+            <div className={`grid grid-cols-2 gap-4 ${!isStripeConfigured ? "opacity-60 pointer-events-none" : ""}`}>
+              {/* Pro Tier - hidden for beta users who already have similar limits */}
               {profile?.tier === "free" && (
                 <div className="p-5 rounded-xl border border-lol-border bg-lol-surface/30 hover:border-lol-gold/30 transition-colors flex flex-col">
                   <div className="flex items-center justify-between mb-3">
                     <h4 className="text-lol-gold font-semibold text-sm px-2.5 py-0.5 rounded-full bg-lol-gold/20">
                       Pro
                     </h4>
-                    <span className="text-lol-gold font-medium">€4/month</span>
+                    <span className="text-lol-gold font-medium">€3/month</span>
                   </div>
                   <ul className="space-y-2 text-sm text-gray-300 flex-1">
                     <li className="flex items-center gap-2">
@@ -1802,7 +2192,7 @@ export default function ProfilePage() {
                         />
                       </svg>
                       <span className="text-white font-medium">
-                        Up to 1000 drafts
+                        Up to 300 drafts
                       </span>
                     </li>
 
@@ -1820,7 +2210,7 @@ export default function ProfilePage() {
                           d="M5 13l4 4L19 7"
                         />
                       </svg>
-                      <span className="text-white">Manage up to 10 teams</span>
+                      <span className="text-white">Manage up to 3 teams</span>
                     </li>
                     <li className="flex items-center gap-2">
                       <svg
@@ -1837,19 +2227,41 @@ export default function ProfilePage() {
                         />
                       </svg>
                       <span className="text-white">
-                        Add up to 50 enemy teams
+                        Add up to 30 enemy teams
+                      </span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <svg
+                        className="w-4 h-4 text-green-500 shrink-0"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M5 13l4 4L19 7"
+                        />
+                      </svg>
+                      <span className="text-white">
+                        More profile customization
                       </span>
                     </li>
                   </ul>
-                  <button className="w-full py-2 mt-10 bg-lol-gold text-lol-dark font-medium rounded-lg hover:bg-lol-gold-light transition-colors">
-                    Upgrade to Pro
+                  <button
+                    onClick={() => handleCheckout("pro")}
+                    disabled={checkingOutPlan !== null}
+                    className="w-full py-2 mt-10 bg-lol-gold text-lol-dark font-medium rounded-lg hover:bg-lol-gold-light transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {checkingOutPlan === "pro" ? "Redirecting..." : "Upgrade to Pro"}
                   </button>
                 </div>
               )}
 
               {/* Supporter Tier */}
               <div
-                className={`p-5 rounded-xl border relative overflow-hidden border-purple-500/30 bg-lol-surface/30 hover:border-purple-500/50 transition-colors ${profile?.tier === "free" ? "" : "col-span-2"}`}
+                className={`p-5 rounded-xl border relative overflow-hidden border-purple-500/30 bg-lol-surface/30 hover:border-purple-500/50 transition-colors flex flex-col ${profile?.tier === "free" ? "" : "col-span-2"}`}
               >
                 <div className="absolute top-0 right-0 px-3 py-1 bg-purple-500/20 text-purple-400 text-xs font-medium rounded-bl-lg">
                   Support us
@@ -1860,7 +2272,7 @@ export default function ProfilePage() {
                   </h4>
                   <span className="text-purple-400 font-medium">€10/month</span>
                 </div>
-                <ul className="space-y-2 text-sm text-gray-300 mb-10">
+                <ul className="space-y-2 text-sm text-gray-300 flex-1">
                   <li className="flex items-center gap-2">
                     <svg
                       className="w-4 h-4 text-green-500 shrink-0"
@@ -1878,7 +2290,7 @@ export default function ProfilePage() {
                     <span>
                       {profile?.tier === "free"
                         ? "Everything in Pro"
-                        : "Unlimited teams"}
+                        : "Everything in your current plan, plus:"}
                     </span>
                   </li>
                   <li className="flex items-center gap-2">
@@ -1932,8 +2344,12 @@ export default function ProfilePage() {
                     <span>A really cool badge on Discord!</span>
                   </li>
                 </ul>
-                <button className="w-full py-2 bg-purple-500 text-white font-medium rounded-lg hover:bg-purple-400 transition-colors">
-                  Become a Supporter
+                <button
+                  onClick={() => handleCheckout("supporter")}
+                  disabled={checkingOutPlan !== null}
+                  className="w-full py-2 mt-10 bg-purple-500 text-white font-medium rounded-lg hover:bg-purple-400 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {checkingOutPlan === "supporter" ? "Redirecting..." : "Become a Supporter"}
                 </button>
               </div>
             </div>
@@ -1957,48 +2373,60 @@ export default function ProfilePage() {
 
       </div>
 
-      {/* Buy Me a Coffee */}
+      {/* Support / Donate */}
       <div className="bg-lol-card border border-lol-border rounded-2xl p-6 mb-6">
         <div className="flex items-center gap-2 mb-4">
-         
+          <svg
+            className="w-5 h-5 text-amber-400"
+            fill="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path d="M2 21V19H20V21H2ZM20 8V5H18V8H20ZM20 3C20.5523 3 21 3.44772 21 4V9C21 9.55228 20.5523 10 20 10H18V11C18 13.7614 15.7614 16 13 16H9C6.23858 16 4 13.7614 4 11V4C4 3.44772 4.44772 3 5 3H20ZM16 5H6V11C6 12.6569 7.34315 14 9 14H13C14.6569 14 16 12.6569 16 11V5Z" />
+          </svg>
           <h3 className="text-lg font-semibold text-white">Support the development!</h3>
         </div>
 
-        <a
-          href="https://buymeacoffee.com/draftsheet"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-4 p-4 rounded-xl hover:bg-lol-surface/50 transition-colors -mx-4 group"
-        >
-          <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0 group-hover:bg-amber-500/20 transition-colors">
-            <svg
-              className="w-5 h-5 text-amber-400"
-              fill="currentColor"
-              viewBox="0 0 24 24"
+        <p className="text-sm text-gray-400 mb-4">
+          If you like teamcomp.lol, consider making a one-time donation to support its development!
+        </p>
+
+        <div className="flex flex-wrap gap-2 mb-4">
+          {[3, 5, 10, 25].map((amt) => (
+            <button
+              key={amt}
+              onClick={() => setDonationAmount(String(amt))}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                Number(donationAmount) === amt
+                  ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                  : "bg-lol-surface text-gray-400 border border-lol-border hover:border-amber-500/30 hover:text-amber-400"
+              }`}
             >
-              <path d="M2 21V19H20V21H2ZM20 8V5H18V8H20ZM20 3C20.5523 3 21 3.44772 21 4V9C21 9.55228 20.5523 10 20 10H18V11C18 13.7614 15.7614 16 13 16H9C6.23858 16 4 13.7614 4 11V4C4 3.44772 4.44772 3 5 3H20ZM16 5H6V11C6 12.6569 7.34315 14 9 14H13C14.6569 14 16 12.6569 16 11V5Z" />
-            </svg>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-white font-medium group-hover:text-amber-300 transition-colors">
-              Buy me a coffee
-            </div>
-            <div className="text-xs text-gray-500">If you like teamcomp.lol, consider supporting its development!</div>
-          </div>
-          <svg
-            className="w-4 h-4 text-gray-600 group-hover:text-gray-400 transition-colors shrink-0"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+              €{amt}
+            </button>
+          ))}
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="Custom"
+              value={donationAmount}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (/^\d*$/.test(v)) setDonationAmount(v);
+              }}
+              className="w-24 pl-7 pr-3 py-2 rounded-lg text-sm bg-lol-surface border border-lol-border text-white focus:border-amber-500/50 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
             />
-          </svg>
-        </a>
+          </div>
+        </div>
+
+        <button
+          onClick={handleDonate}
+          disabled={isDonating || !donationAmount || Number(donationAmount) < 1}
+          className="w-full py-2.5 bg-amber-500/20 text-amber-300 font-medium rounded-lg border border-amber-500/40 hover:bg-amber-500/30 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {isDonating ? "Redirecting..." : donationAmount ? `Donate €${donationAmount}` : "Donate"}
+        </button>
       </div>
 
       {/* Account Actions */}

@@ -1,25 +1,57 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { teamMembershipService, TeamMember, MemberRole } from '../../lib/teamMembershipService';
+import { useFriendsStore } from '../../stores/useFriendsStore';
 import InviteModal from './InviteModal';
 import { ConfirmationModal } from '../ui';
 import type { Player } from '../../types';
+
+const ROLE_RANK: Record<MemberRole, number> = {
+  owner: 4,
+  admin: 3,
+  player: 2,
+  viewer: 1,
+};
 
 interface TeamMembersPanelProps {
   teamId: string;
   teamName: string;
   players: Player[];
   isOwner: boolean;
+  currentUserId?: string;
+  currentUserRole?: MemberRole;
+  isInviteModalOpen?: boolean;
+  onInviteModalClose?: () => void;
+  onLeaveTeam?: () => void;
 }
 
-export default function TeamMembersPanel({ teamId, teamName, players, isOwner }: TeamMembersPanelProps) {
+export default function TeamMembersPanel({ teamId, teamName, players, isOwner, currentUserId, currentUserRole = 'viewer', isInviteModalOpen: externalInviteOpen, onInviteModalClose, onLeaveTeam }: TeamMembersPanelProps) {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const [internalInviteOpen, setInternalInviteOpen] = useState(false);
   const [memberToRemove, setMemberToRemove] = useState<string | null>(null);
+
+  // Friends state for "Add Friend" button
+  const friends = useFriendsStore(s => s.friends);
+  const pendingSent = useFriendsStore(s => s.pendingSent);
+  const sendRequest = useFriendsStore(s => s.sendRequest);
+  const loadFriends = useFriendsStore(s => s.loadFriends);
+  const [sendingFriendTo, setSendingFriendTo] = useState<string | null>(null);
+
+  // Build sets for quick lookup
+  const friendUserIds = new Set(friends.map(f => f.friendId));
+  const pendingSentUserIds = new Set(pendingSent.map(p => p.toUserId));
+
+  // Support both internal and external control of invite modal
+  const isInviteModalOpen = externalInviteOpen || internalInviteOpen;
+  const closeInviteModal = () => {
+    setInternalInviteOpen(false);
+    onInviteModalClose?.();
+  };
 
   useEffect(() => {
     loadMembers();
+    loadFriends();
   }, [teamId]);
 
   const loadMembers = async () => {
@@ -43,8 +75,13 @@ export default function TeamMembersPanel({ teamId, teamName, players, isOwner }:
   const confirmRemoveMember = async () => {
     if (!memberToRemove) return;
     try {
-      await teamMembershipService.removeMember(memberToRemove);
-      setMembers(members.filter(m => m.id !== memberToRemove));
+      const removed = await teamMembershipService.removeMember(memberToRemove);
+      setMemberToRemove(null);
+      if (!removed) {
+        setError('Failed to remove member — you may not have permission');
+        return;
+      }
+      await loadMembers();
     } catch (err) {
       setError('Failed to remove member');
       console.error(err);
@@ -53,8 +90,12 @@ export default function TeamMembersPanel({ teamId, teamName, players, isOwner }:
 
   const handleUpdateRole = async (memberId: string, newRole: MemberRole) => {
     try {
-      await teamMembershipService.updateMember(memberId, { role: newRole });
-      setMembers(members.map(m => m.id === memberId ? { ...m, role: newRole } : m));
+      const updated = await teamMembershipService.updateMember(memberId, { role: newRole });
+      if (!updated) {
+        setError('Failed to update role — you may not have permission');
+        return;
+      }
+      await loadMembers();
     } catch (err) {
       setError('Failed to update role');
       console.error(err);
@@ -63,12 +104,42 @@ export default function TeamMembersPanel({ teamId, teamName, players, isOwner }:
 
   const handleUpdateSlot = async (memberId: string, playerSlotId: string | null) => {
     try {
-      await teamMembershipService.updateMember(memberId, { playerSlotId });
-      setMembers(members.map(m => m.id === memberId ? { ...m, playerSlotId } : m));
+      // Owner has a synthetic id (owner-<teamId>), update my_teams instead of team_members
+      if (memberId.startsWith('owner-')) {
+        await teamMembershipService.updateOwnerSlot(teamId, playerSlotId);
+      } else {
+        const updated = await teamMembershipService.updateMember(memberId, { playerSlotId });
+        if (!updated) {
+          setError('Failed to update player slot — you may not have permission');
+          return;
+        }
+      }
+      await loadMembers();
     } catch (err) {
       setError('Failed to update player slot');
       console.error(err);
     }
+  };
+
+  const handleAddFriend = async (userId: string) => {
+    setSendingFriendTo(userId);
+    try {
+      // sendRequest expects a display name or email, but we can look up the member
+      const member = members.find(m => m.userId === userId);
+      if (member?.user?.displayName) {
+        await sendRequest(member.user.displayName);
+      }
+    } catch (err) {
+      console.error('Failed to send friend request:', err);
+    } finally {
+      setSendingFriendTo(null);
+    }
+  };
+
+  const getFriendStatus = (userId: string): 'friend' | 'pending' | 'none' => {
+    if (friendUserIds.has(userId)) return 'friend';
+    if (pendingSentUserIds.has(userId)) return 'pending';
+    return 'none';
   };
 
   const getRoleBadgeClass = (role: MemberRole): string => {
@@ -86,8 +157,26 @@ export default function TeamMembersPanel({ teamId, teamName, players, isOwner }:
     }
   };
 
-  // Get main players (not subs) for assignment
-  const mainPlayers = players.filter(p => !p.isSub && p.summonerName);
+  // Get all players with a name for assignment (including subs)
+  const assignablePlayers = players.filter(p => p.summonerName);
+
+  // Can the current user manage members?
+  const canManage = isOwner || currentUserRole === 'admin';
+
+  // Can the current user change this member's role? (admins can change anyone except themselves becoming owner)
+  const canChangeRole = (memberRole: MemberRole): boolean => {
+    if (isOwner) return memberRole !== 'owner';
+    if (currentUserRole === 'admin') return true;
+    return false;
+  };
+
+  // Can the current user remove this member? (admins can only remove strictly lower ranks)
+  const canRemoveMember = (memberRole: MemberRole): boolean => {
+    if (memberRole === 'owner') return false;
+    if (isOwner) return true;
+    if (currentUserRole === 'admin') return ROLE_RANK[currentUserRole] > ROLE_RANK[memberRole];
+    return false;
+  };
 
   // Separate owner from other members
   const owner = members.find(m => m.role === 'owner');
@@ -102,10 +191,11 @@ export default function TeamMembersPanel({ teamId, teamName, players, isOwner }:
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
           </svg>
           Team Members
+          <span className="text-sm font-normal text-gray-500">({members.length})</span>
         </h3>
-        {isOwner && (
+        {canManage && (
           <button
-            onClick={() => setIsInviteModalOpen(true)}
+            onClick={() => setInternalInviteOpen(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-lol-gold/10 hover:bg-lol-gold/20 border border-lol-gold/30 text-lol-gold rounded-lg text-sm font-medium transition-colors"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -133,39 +223,55 @@ export default function TeamMembersPanel({ teamId, teamName, players, isOwner }:
         </div>
       )}
 
-      {/* Members list */}
+      {/* Members grid */}
       {!loading && (
-        <div className="space-y-2">
-          {/* Owner (always first) */}
-          {owner && (
-            <MemberItem
-              member={owner}
-              players={players}
-              mainPlayers={mainPlayers}
-              isOwner={isOwner}
-              canEdit={false}
-              getRoleBadgeClass={getRoleBadgeClass}
-              onRemove={handleRemoveMember}
-              onUpdateRole={handleUpdateRole}
-              onUpdateSlot={handleUpdateSlot}
-            />
-          )}
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {/* Owner (always first) */}
+            {owner && (
+              <MemberCard
+                member={owner}
+                players={players}
+                assignablePlayers={assignablePlayers}
+                canEdit={canChangeRole('owner')}
+                canRemove={false}
+                canAssignSlot={isOwner || currentUserRole === 'admin'}
+                isSelf={owner.userId === currentUserId}
+                isCurrentUserOwner={isOwner}
+                friendStatus={getFriendStatus(owner.userId)}
+                sendingFriend={sendingFriendTo === owner.userId}
+                getRoleBadgeClass={getRoleBadgeClass}
+                onRemove={handleRemoveMember}
+                onLeave={() => onLeaveTeam?.()}
+                onUpdateRole={handleUpdateRole}
+                onUpdateSlot={handleUpdateSlot}
+                onAddFriend={handleAddFriend}
+              />
+            )}
 
-          {/* Other members */}
-          {otherMembers.map(member => (
-            <MemberItem
-              key={member.id}
-              member={member}
-              players={players}
-              mainPlayers={mainPlayers}
-              isOwner={isOwner}
-              canEdit={isOwner}
-              getRoleBadgeClass={getRoleBadgeClass}
-              onRemove={handleRemoveMember}
-              onUpdateRole={handleUpdateRole}
-              onUpdateSlot={handleUpdateSlot}
-            />
-          ))}
+            {/* Other members */}
+            {otherMembers.map(member => (
+              <MemberCard
+                key={member.id}
+                member={member}
+                players={players}
+                assignablePlayers={assignablePlayers}
+                canEdit={canChangeRole(member.role)}
+                canRemove={canRemoveMember(member.role)}
+                canAssignSlot={canChangeRole(member.role)}
+                isSelf={member.userId === currentUserId}
+                isCurrentUserOwner={isOwner}
+                friendStatus={getFriendStatus(member.userId)}
+                sendingFriend={sendingFriendTo === member.userId}
+                getRoleBadgeClass={getRoleBadgeClass}
+                onRemove={handleRemoveMember}
+                onLeave={() => onLeaveTeam?.()}
+                onUpdateRole={handleUpdateRole}
+                onUpdateSlot={handleUpdateSlot}
+                onAddFriend={handleAddFriend}
+              />
+            ))}
+          </div>
 
           {/* Empty state */}
           {members.length === 0 && (
@@ -174,7 +280,7 @@ export default function TeamMembersPanel({ teamId, teamName, players, isOwner }:
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
               </svg>
               <p>No team members yet</p>
-              {isOwner && (
+              {canManage && (
                 <p className="text-sm mt-1">Invite teammates to collaborate on this team</p>
               )}
             </div>
@@ -186,13 +292,13 @@ export default function TeamMembersPanel({ teamId, teamName, players, isOwner }:
               {isOwner ? "You're the only member. Invite teammates to collaborate!" : "No other members yet."}
             </div>
           )}
-        </div>
+        </>
       )}
 
       {/* Invite Modal */}
       <InviteModal
         isOpen={isInviteModalOpen}
-        onClose={() => setIsInviteModalOpen(false)}
+        onClose={closeInviteModal}
         teamId={teamId}
         teamName={teamName}
         players={players}
@@ -211,129 +317,222 @@ export default function TeamMembersPanel({ teamId, teamName, players, isOwner }:
   );
 }
 
-interface MemberItemProps {
+interface MemberCardProps {
   member: TeamMember;
   players: Player[];
-  mainPlayers: Player[];
-  isOwner: boolean;
+  assignablePlayers: Player[];
   canEdit: boolean;
+  canRemove: boolean;
+  canAssignSlot: boolean;
+  isSelf: boolean;
+  isCurrentUserOwner: boolean;
+  friendStatus: 'friend' | 'pending' | 'none';
+  sendingFriend: boolean;
   getRoleBadgeClass: (role: MemberRole) => string;
   onRemove: (memberId: string) => void;
+  onLeave: () => void;
   onUpdateRole: (memberId: string, role: MemberRole) => void;
   onUpdateSlot: (memberId: string, playerSlotId: string | null) => void;
+  onAddFriend: (userId: string) => void;
 }
 
-function MemberItem({
+const selectClass = "w-full px-2 py-1.5 bg-lol-dark/80 border border-lol-border rounded-md text-xs text-gray-200 appearance-none cursor-pointer hover:border-gray-500 focus:outline-none focus:border-lol-gold/60 focus:ring-1 focus:ring-lol-gold/20 transition-colors";
+
+function MemberCard({
   member,
   players,
-  mainPlayers,
-  isOwner,
+  assignablePlayers,
   canEdit,
+  canRemove,
+  canAssignSlot,
+  isSelf,
+  isCurrentUserOwner,
+  friendStatus,
+  sendingFriend,
   getRoleBadgeClass,
   onRemove,
+  onLeave,
   onUpdateRole,
-  onUpdateSlot
-}: MemberItemProps) {
-  const [isEditing, setIsEditing] = useState(false);
+  onUpdateSlot,
+  onAddFriend,
+}: MemberCardProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const assignedPlayer = member.playerSlotId ? players.find(p => p.id === member.playerSlotId) : null;
-
   const displayName = member.user?.displayName || member.user?.email || 'Unknown User';
 
-  return (
-    <div className="flex items-center gap-3 p-3 bg-lol-surface rounded-lg border border-lol-border">
-      {/* Avatar */}
-      <div className="w-10 h-10 rounded-full bg-lol-card flex items-center justify-center overflow-hidden">
-        {member.user?.avatarUrl ? (
-          <img src={member.user.avatarUrl} alt="" className="w-full h-full object-cover" />
-        ) : (
-          <svg className="w-5 h-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-          </svg>
-        )}
-      </div>
+  // Group assignable players: mains first, then subs
+  const mains = assignablePlayers.filter(p => !p.isSub);
+  const subs = assignablePlayers.filter(p => p.isSub);
 
-      {/* Info */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-white font-medium truncate">{displayName}</span>
-          <span className={`px-2 py-0.5 rounded text-xs font-medium border ${getRoleBadgeClass(member.role)}`}>
-            {member.role}
-          </span>
+  // Close menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    if (menuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [menuOpen]);
+
+  // Show kebab menu if user can remove this member, or it's their own card (leave)
+  const showMenu = canRemove || (isSelf && !isCurrentUserOwner);
+
+  return (
+    <div className="p-3 bg-lol-surface rounded-lg border border-lol-border flex flex-col gap-2.5">
+      {/* Top row: avatar + name + role badge + kebab menu */}
+      <div className="flex items-center gap-2.5">
+        <div className="w-8 h-8 shrink-0 rounded-full bg-lol-card flex items-center justify-center overflow-hidden">
+          {member.user?.avatarUrl ? (
+            <img src={member.user.avatarUrl} alt="" className="w-full h-full object-cover" />
+          ) : (
+            <svg className="w-4 h-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+          )}
         </div>
-        {assignedPlayer && (
-          <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
-            <span>Assigned to:</span>
-            <span className="text-gray-400">{assignedPlayer.summonerName} ({assignedPlayer.role.toUpperCase()})</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm text-white font-medium truncate">{displayName}</span>
+            {isSelf && <span className="text-[10px] text-gray-500">(you)</span>}
+            <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase border shrink-0 ${getRoleBadgeClass(member.role)}`}>
+              {member.role}
+            </span>
+          </div>
+          {member.user?.email && member.user.displayName && (
+            <div className="text-[11px] text-gray-600 truncate">{member.user.email}</div>
+          )}
+          {/* Add Friend button - show for non-self members who aren't already friends */}
+          {!isSelf && friendStatus === 'none' && (
+            <button
+              onClick={() => onAddFriend(member.userId)}
+              disabled={sendingFriend}
+              className="flex items-center gap-1 text-[11px] text-lol-gold/70 hover:text-lol-gold transition-colors mt-0.5 disabled:opacity-50"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+              </svg>
+              {sendingFriend ? 'Sending...' : 'Add Friend'}
+            </button>
+          )}
+          {!isSelf && friendStatus === 'pending' && (
+            <span className="text-[11px] text-yellow-500/70 mt-0.5">Request sent</span>
+          )}
+          {!isSelf && friendStatus === 'friend' && (
+            <span className="text-[11px] text-green-500/70 mt-0.5">Friends</span>
+          )}
+        </div>
+        {/* Kebab menu */}
+        {showMenu && (
+          <div className="relative shrink-0" ref={menuRef}>
+            <button
+              onClick={() => setMenuOpen(!menuOpen)}
+              className="p-1 text-gray-500 hover:text-gray-300 rounded transition-colors"
+            >
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+              </svg>
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 mt-1 w-40 bg-lol-card border border-lol-border rounded-lg shadow-xl z-50 overflow-hidden">
+                {isSelf && !isCurrentUserOwner && (
+                  <button
+                    onClick={() => { setMenuOpen(false); onLeave(); }}
+                    className="w-full px-3 py-2 text-left text-sm text-red-400 hover:bg-red-500/10 flex items-center gap-2 transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                    </svg>
+                    Leave Team
+                  </button>
+                )}
+                {canRemove && !isSelf && (
+                  <button
+                    onClick={() => { setMenuOpen(false); onRemove(member.id); }}
+                    className="w-full px-3 py-2 text-left text-sm text-red-400 hover:bg-red-500/10 flex items-center gap-2 transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Remove Member
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
-        {member.user?.email && member.user.displayName && (
-          <div className="text-xs text-gray-600 truncate">{member.user.email}</div>
-        )}
       </div>
 
-      {/* Actions */}
-      {canEdit && member.role !== 'owner' && (
-        <div className="flex items-center gap-1">
-          {isEditing ? (
-            <>
+      {/* Player slot assignment */}
+      {(member.role === 'player' || member.role === 'admin' || member.role === 'owner') && (
+        <div className="space-y-1">
+          <label className="text-[11px] text-gray-500 uppercase tracking-wider font-medium">Assigned Player</label>
+          {canAssignSlot ? (
+            <div className="relative">
               <select
-                value={member.role}
-                onChange={(e) => {
-                  onUpdateRole(member.id, e.target.value as MemberRole);
-                  if (e.target.value === 'viewer') {
-                    onUpdateSlot(member.id, null);
-                  }
-                }}
-                className="px-2 py-1 bg-lol-card border border-lol-border rounded text-xs text-gray-300 focus:outline-none"
+                value={member.playerSlotId || ''}
+                onChange={(e) => onUpdateSlot(member.id, e.target.value || null)}
+                className={selectClass}
               >
-                <option value="player">Player</option>
-                <option value="viewer">Viewer</option>
+                <option value="">-- Unassigned --</option>
+                {mains.length > 0 && (
+                  <optgroup label="Main Roster">
+                    {mains.map(player => (
+                      <option key={player.id} value={player.id}>
+                        {player.summonerName} ({player.role.toUpperCase()})
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {subs.length > 0 && (
+                  <optgroup label="Substitutes">
+                    {subs.map(player => (
+                      <option key={player.id} value={player.id}>
+                        {player.summonerName} ({player.role.toUpperCase()})
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
-              {member.role === 'player' && (
-                <select
-                  value={member.playerSlotId || ''}
-                  onChange={(e) => onUpdateSlot(member.id, e.target.value || null)}
-                  className="px-2 py-1 bg-lol-card border border-lol-border rounded text-xs text-gray-300 focus:outline-none"
-                >
-                  <option value="">No slot</option>
-                  {mainPlayers.map(player => (
-                    <option key={player.id} value={player.id}>
-                      {player.summonerName}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <button
-                onClick={() => setIsEditing(false)}
-                className="p-1 text-green-400 hover:bg-green-500/10 rounded transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-              </button>
-            </>
+              <svg className="w-3 h-3 text-gray-500 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
           ) : (
-            <>
-              <button
-                onClick={() => setIsEditing(true)}
-                className="p-1.5 text-gray-500 hover:text-gray-300 hover:bg-lol-border rounded transition-colors"
-                title="Edit member"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                </svg>
-              </button>
-              <button
-                onClick={() => onRemove(member.id)}
-                className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
-                title="Remove member"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              </button>
-            </>
+            <div className={`px-2 py-1.5 rounded-md text-xs ${assignedPlayer ? 'text-gray-300 bg-lol-dark/40' : 'text-gray-600 bg-lol-dark/20'}`}>
+              {assignedPlayer ? `${assignedPlayer.summonerName} (${assignedPlayer.role.toUpperCase()})${assignedPlayer.isSub ? ' · Sub' : ''}` : 'Unassigned'}
+            </div>
           )}
+        </div>
+      )}
+
+      {/* Role change */}
+      {canEdit && (
+        <div className="pt-1.5 border-t border-lol-border/50">
+          <div className="relative">
+            <select
+              value={member.role}
+              onChange={(e) => {
+                const newRole = e.target.value as MemberRole;
+                onUpdateRole(member.id, newRole);
+                if (newRole === 'viewer') {
+                  onUpdateSlot(member.id, null);
+                }
+              }}
+              className={selectClass}
+            >
+              {isCurrentUserOwner && <option value="owner">Owner</option>}
+              <option value="admin">Admin</option>
+              <option value="player">Player</option>
+              <option value="viewer">Viewer</option>
+            </select>
+            <svg className="w-3 h-3 text-gray-500 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
         </div>
       )}
     </div>

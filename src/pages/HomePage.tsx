@@ -55,16 +55,18 @@ export default function HomePage() {
   );
   const pastLiveSessions = liveSessions
     .filter((s) => s.status === "completed" || s.status === "cancelled")
-    .slice(0, 5);
+    .slice(0, 3);
 
   return (
-    <div className="space-y-10 py-4">
+    <div className="flex flex-col h-[calc(100vh-3rem)] gap-6">
       {/* Hero Section */}
-      <div className="text-center py-8 flex flex-col gap-6">
-        <div className="flex flex-row-reverse justify-center gap-5">
-          <h1 className="text-5xl font-bold text-white mb-4">
+      <div className="text-center flex flex-col gap-2 shrink-0 py-10">
+        <div className="flex flex-row-reverse justify-center items-center gap-5">
+          <h1 className="text-5xl font-bold text-white">
             teamcomp.<span className="text-lol-gold">lol</span>
-            <span className="ml-2 text-xs font-semibold uppercase tracking-wide bg-lol-gold/20 text-lol-gold px-2 py-1 rounded-full align-middle">beta</span>
+            <span className="ml-2 text-xs font-semibold uppercase tracking-wide bg-lol-gold/20 text-lol-gold px-2 py-1 rounded-full align-middle">
+              beta
+            </span>
           </h1>
           <div>
             <img
@@ -74,29 +76,23 @@ export default function HomePage() {
             />
           </div>
         </div>
-        <p className="text-xl text-gray-400 max-w-2xl mx-auto">
-          An all-in-one platform for League of Legends draft planning and team
+        <p className="text-base text-gray-400 text-xl max-w-2xl mx-auto">
+          An all-in-one platform for League of Legends draft planning, draft tools and team
           management.
         </p>
       </div>
 
       {/* Tools */}
-      <div>
-        <div className="mb-4">
-          <h2 className="text-xl font-semibold text-white">Tools</h2>
-          <p className="text-sm text-gray-400 mt-1">
-            Utilities for draft planning and collaboration
-          </p>
-        </div>
+      <div className="shrink-0">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Link
             to="/live-draft"
-            className="group p-6 rounded-xl border-2 border-lol-border bg-lol-dark hover:border-lol-gold hover:bg-lol-card-hover transition-all duration-200"
+            className="group p-10 rounded-xl border-2 border-lol-border bg-lol-dark hover:border-lol-gold hover:bg-lol-card-hover transition-all duration-200"
           >
-            <div className="flex items-start gap-4">
+            <div className="flex items-center gap-4">
               <div className="p-3 rounded-lg bg-lol-gold/10 text-lol-gold group-hover:bg-lol-gold/20 transition-colors">
                 <svg
-                  className="w-6 h-6"
+                  className="w-7 h-7"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -113,8 +109,8 @@ export default function HomePage() {
                 <h3 className="text-lg font-semibold text-white group-hover:text-lol-gold transition-colors">
                   Live Draft
                 </h3>
-                <p className="text-sm text-gray-400 mt-1">
-                  Live drafting tool for scrims and matches. Integrated with your team and drafts data for more informed drafting
+                <p className="text-sm text-gray-400 mt-0.5">
+                  Live drafting tool for scrims and matches. Use your planned draft data for better mid-draft decisions
                 </p>
               </div>
             </div>
@@ -122,12 +118,12 @@ export default function HomePage() {
 
           <Link
             to="/tools"
-            className="group p-6 rounded-xl border-2 border-lol-border bg-lol-dark hover:border-lol-gold hover:bg-lol-card-hover transition-all duration-200"
+            className="group p-10 rounded-xl border-2 border-lol-border bg-lol-dark hover:border-lol-gold hover:bg-lol-card-hover transition-all duration-200"
           >
-            <div className="flex items-start gap-4">
+            <div className="flex items-center gap-4">
               <div className="p-3 rounded-lg bg-lol-gold/10 text-lol-gold group-hover:bg-lol-gold/20 transition-colors">
                 <svg
-                  className="w-6 h-6"
+                  className="w-7 h-7"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -144,8 +140,8 @@ export default function HomePage() {
                 <h3 className="text-lg font-semibold text-white group-hover:text-lol-gold transition-colors">
                   Draft Theorycrafting
                 </h3>
-                <p className="text-sm text-gray-400 mt-1">
-                  Simulate and plan drafts with your team's champion pools
+                <p className="text-sm text-gray-400 mt-0.5">
+                  Simulate and plan drafts with your team's champion pools vs added enemy teams. Or just mess around
                 </p>
               </div>
             </div>
@@ -154,17 +150,21 @@ export default function HomePage() {
       </div>
 
       {/* Getting Started & Sessions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card variant="elevated" padding="lg">
-          <h2 className="text-xl font-semibold text-white mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 flex-1 min-h-0">
+        <Card
+          variant="elevated"
+          padding="lg"
+          className="flex flex-col justify-center gap-5 overflow-hidden"
+        >
+          <h2 className="text-2xl font-semibold text-white ml-4">
             Getting Started
           </h2>
-          <div className="space-y-3">
+          <div className="flex flex-col">
             <Link
               to="/my-teams"
               className="flex items-center gap-4 p-3 rounded-lg hover:bg-lol-dark transition-colors group"
             >
-              <div className="shrink-0 w-8 h-8 rounded-full bg-lol-gold/20 text-lol-gold flex items-center justify-center font-bold">
+              <div className="shrink-0 w-9 h-9 rounded-full bg-lol-gold/20 text-lol-gold flex items-center justify-center font-bold">
                 1
               </div>
               <div>
@@ -180,7 +180,7 @@ export default function HomePage() {
               to="/enemy-teams"
               className="flex items-center gap-4 p-3 rounded-lg hover:bg-lol-dark transition-colors group"
             >
-              <div className="shrink-0 w-8 h-8 rounded-full bg-lol-gold/20 text-lol-gold flex items-center justify-center font-bold">
+              <div className="shrink-0 w-9 h-9 rounded-full bg-lol-gold/20 text-lol-gold flex items-center justify-center font-bold">
                 2
               </div>
               <div>
@@ -196,7 +196,7 @@ export default function HomePage() {
               to="/champion-pool"
               className="flex items-center gap-4 p-3 rounded-lg hover:bg-lol-dark transition-colors group"
             >
-              <div className="shrink-0 w-8 h-8 rounded-full bg-lol-gold/20 text-lol-gold flex items-center justify-center font-bold">
+              <div className="shrink-0 w-9 h-9 rounded-full bg-lol-gold/20 text-lol-gold flex items-center justify-center font-bold">
                 3
               </div>
               <div>
@@ -212,7 +212,7 @@ export default function HomePage() {
               to="/draft"
               className="flex items-center gap-4 p-3 rounded-lg hover:bg-lol-dark transition-colors group"
             >
-              <div className="shrink-0 w-8 h-8 rounded-full bg-lol-gold/20 text-lol-gold flex items-center justify-center font-bold">
+              <div className="shrink-0 w-9 h-9 rounded-full bg-lol-gold/20 text-lol-gold flex items-center justify-center font-bold">
                 4
               </div>
               <div>
@@ -224,95 +224,132 @@ export default function HomePage() {
                 </p>
               </div>
             </Link>
+            <Link
+              to="/live-draft"
+              className="flex items-center gap-4 p-3 rounded-lg hover:bg-lol-dark transition-colors group"
+            >
+              <div className="shrink-0 w-9 h-9 rounded-full bg-lol-gold/20 text-lol-gold flex items-center justify-center font-bold">
+                5
+              </div>
+              <div>
+                <h3 className="font-semibold text-white group-hover:text-lol-gold transition-colors">
+                  Use your plans in live drafts
+                </h3>
+                <p className="text-sm text-gray-400 mt-0.5">
+                  Your plans are available in our live drafting tool. Easy
+                  access during scrims and matches.
+                </p>
+              </div>
+            </Link>
           </div>
         </Card>
 
-        <Card variant="elevated" padding="lg">
-          <h2 className="text-xl font-semibold text-white mb-6">
-            Your Sessions
-          </h2>
+        <Card
+          variant="elevated"
+          padding="lg"
+          className="flex flex-col overflow-hidden"
+        >
+          <div className="flex items-center justify-between mb-4 shrink-0">
+            <h2 className="text-lg font-semibold text-white">Your Sessions</h2>
+            <Link
+              to="/live-draft"
+              className="text-xs text-gray-400 hover:text-lol-gold transition-colors"
+            >
+              View all
+            </Link>
+          </div>
 
-          {/* Active Live Drafts */}
-          {activeLiveSessions.length > 0 && (
-            <div className="mb-6">
-              <h3 className="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                Active Live Drafts
-              </h3>
-              <div className="space-y-2">
-                {activeLiveSessions.map((session) => (
-                  <LiveSessionCard
-                    key={session.id}
-                    session={session}
-                    onHide={handleHideSession}
-                  />
-                ))}
+          <div className="overflow-y-auto min-h-0 flex-1 pr-1 space-y-4">
+            {/* Active Live Drafts */}
+            {activeLiveSessions.length > 0 && (
+              <div>
+                <h3 className="text-sm font-medium text-gray-400 mb-2 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                  Active Live Drafts
+                </h3>
+                <div className="space-y-1.5">
+                  {activeLiveSessions.slice(0, 3).map((session) => (
+                    <LiveSessionCard
+                      key={session.id}
+                      session={session}
+                      onHide={handleHideSession}
+                    />
+                  ))}
+                  {activeLiveSessions.length > 3 && (
+                    <Link
+                      to="/live-draft"
+                      className="block text-center text-xs text-gray-500 hover:text-lol-gold py-1 transition-colors"
+                    >
+                      +{activeLiveSessions.length - 3} more
+                    </Link>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Past Live Drafts */}
-          {pastLiveSessions.length > 0 && (
-            <div className="mb-6">
-              <h3 className="text-sm font-medium text-gray-400 mb-3">
-                Recent Live Drafts
-              </h3>
-              <div className="space-y-2">
-                {pastLiveSessions.map((session) => (
-                  <LiveSessionCard
-                    key={session.id}
-                    session={session}
-                    isPast
-                    onHide={handleHideSession}
-                  />
-                ))}
+            {/* Past Live Drafts */}
+            {pastLiveSessions.length > 0 && (
+              <div>
+                <h3 className="text-sm font-medium text-gray-400 mb-2">
+                  Recent Live Drafts
+                </h3>
+                <div className="space-y-1.5">
+                  {pastLiveSessions.map((session) => (
+                    <LiveSessionCard
+                      key={session.id}
+                      session={session}
+                      isPast
+                      onHide={handleHideSession}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Local Draft Sessions */}
-          {recentSessions.length > 0 && (
-            <div>
-              <h3 className="text-sm font-medium text-gray-400 mb-3">
-                Local Drafts
-              </h3>
-              <div className="space-y-2">
-                {recentSessions.map((session) => (
-                  <Link
-                    key={session.id}
-                    to={`/draft/${session.id}`}
-                    className="block p-3 bg-lol-dark rounded-lg border border-lol-border hover:bg-lol-card-hover hover:border-lol-border-light transition-all duration-200"
-                  >
-                    <div className="text-white font-medium text-sm">
-                      {session.name}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-1 flex items-center gap-2">
-                      <span>
-                        {new Date(session.updatedAt).toLocaleDateString(
-                          "en-GB",
-                        )}
-                      </span>
-                      <span className="text-gray-600">·</span>
-                      <span className="text-yellow-500">
-                        {(session.priorityGroups || []).reduce(
-                          (sum, g) => sum + g.championIds.length,
-                          0,
-                        )}{" "}
-                        priorities
-                      </span>
-                    </div>
-                  </Link>
-                ))}
+            {/* Local Draft Sessions */}
+            {recentSessions.length > 0 && (
+              <div>
+                <h3 className="text-sm font-medium text-gray-400 mb-2">
+                  Local Drafts
+                </h3>
+                <div className="space-y-1.5">
+                  {recentSessions.map((session) => (
+                    <Link
+                      key={session.id}
+                      to={`/draft/${session.id}`}
+                      className="block p-2.5 bg-lol-dark rounded-lg border border-lol-border hover:bg-lol-card-hover hover:border-lol-border-light transition-all duration-200"
+                    >
+                      <div className="text-white font-medium text-sm">
+                        {session.name}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1 flex items-center gap-2">
+                        <span>
+                          {new Date(session.updatedAt).toLocaleDateString(
+                            "en-GB",
+                          )}
+                        </span>
+                        <span className="text-gray-600">·</span>
+                        <span className="text-yellow-500">
+                          {(session.priorityGroups || []).reduce(
+                            (sum, g) => sum + g.championIds.length,
+                            0,
+                          )}{" "}
+                          priorities
+                        </span>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Empty State */}
           {activeLiveSessions.length === 0 &&
             pastLiveSessions.length === 0 &&
             recentSessions.length === 0 &&
             !isLoadingLive && (
-              <div className="text-center py-8">
+              <div className="text-center py-6">
                 <div className="text-gray-500 mb-3">
                   <svg
                     className="w-10 h-10 mx-auto"
@@ -329,7 +366,7 @@ export default function HomePage() {
                   </svg>
                 </div>
                 <p className="text-gray-500">No sessions yet</p>
-                <Link to="/live-draft" className="inline-block mt-4">
+                <Link to="/live-draft" className="inline-block mt-3">
                   <Button variant="outline" size="sm">
                     Start a Live Draft
                   </Button>

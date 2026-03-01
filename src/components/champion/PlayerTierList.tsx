@@ -83,6 +83,17 @@ const getTemplates = (role: Role): GroupTemplate[] => [
     groups: ["Blind Pickable", "Flex", "Counter Pick", "Banned Often"],
     allowDuplicates: true,
   },
+  ...(role === "flex"
+    ? [
+        {
+          id: "by-lane",
+          name: "By Lane",
+          description: "Organize by lane",
+          groups: ["Top", "Jungle", "Mid", "ADC", "Support"],
+          allowDuplicates: true,
+        },
+      ]
+    : []),
 ];
 
 export interface PlayerTierListData {

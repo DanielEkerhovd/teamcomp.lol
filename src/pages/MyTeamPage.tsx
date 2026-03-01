@@ -11,7 +11,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
 import { useMyTeamStore, MAX_SUBS, getMaxTeams, TeamPermissions } from '../stores/useMyTeamStore';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useRankStore } from '../stores/useRankStore';
 import { useMasteryStore } from '../stores/useMasteryStore';
 import { useAuthStore, useTierLimits } from '../stores/useAuthStore';
@@ -23,6 +23,7 @@ import { useDroppable } from '@dnd-kit/core';
 import { teamMembershipService } from '../lib/teamMembershipService';
 import { notificationService } from '../lib/notificationService';
 import { syncManager } from '../lib/syncManager';
+import { checkModerationAndRecord, getViolationWarning } from '../lib/moderation';
 
 function SubsDropZone({ children }: { children: React.ReactNode }) {
   const { isOver, setNodeRef } = useDroppable({
@@ -48,6 +49,8 @@ export default function MyTeamPage() {
     selectedTeamId,
     memberships,
     membershipsLoading,
+    membershipTeamData,
+    membershipTeamLoading,
     addTeam,
     deleteTeam,
     selectTeam,
@@ -69,7 +72,10 @@ export default function MyTeamPage() {
     checkTeamNameGloballyAvailable,
   } = useMyTeamStore();
 
-  const team = teams.find((t) => t.id === selectedTeamId) || teams[0];
+  // Check if a membership team is selected
+  const isMembershipTeam = memberships.some((m) => m.teamId === selectedTeamId);
+  const ownedTeam = teams.find((t) => t.id === selectedTeamId) || teams[0];
+  const team = isMembershipTeam ? (membershipTeamData || ownedTeam) : ownedTeam;
 
   const { openMultiSearch } = useOpgg();
   const {
@@ -107,12 +113,16 @@ export default function MyTeamPage() {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importUrl, setImportUrl] = useState('');
   const [importError, setImportError] = useState('');
+  const [importSuccess, setImportSuccess] = useState('');
   const [activePlayer, setActivePlayer] = useState<Player | null>(null);
   const [isOwner, setIsOwner] = useState(false);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false);
+  const [isLeaving, setIsLeaving] = useState(false);
+  const [leaveError, setLeaveError] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -123,9 +133,11 @@ export default function MyTeamPage() {
   const [renameValue, setRenameValue] = useState('');
   const [renameError, setRenameError] = useState<string | null>(null);
   const [isRenamingTeam, setIsRenamingTeam] = useState(false);
+  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
 
   const { user } = useAuthStore();
   const { isFreeTier, maxTeams } = useTierLimits();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // Load memberships when authenticated
   useEffect(() => {
@@ -133,6 +145,37 @@ export default function MyTeamPage() {
       loadMemberships();
     }
   }, [user, loadMemberships]);
+
+  // Deep-link: select team from ?team=<teamId> URL param
+  // Wait until memberships have loaded so selectTeam can find membership teams
+  useEffect(() => {
+    if (membershipsLoading) return;
+    const teamParam = searchParams.get('team');
+    if (teamParam && teamParam !== selectedTeamId) {
+      selectTeam(teamParam);
+      // Clean up the URL param after selecting
+      searchParams.delete('team');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, selectedTeamId, selectTeam, setSearchParams, membershipsLoading]);
+
+  // Auto-select first available team if current selection is invalid
+  // (e.g. user only has membership teams, or selectedTeamId is stale)
+  useEffect(() => {
+    if (membershipsLoading) return;
+    // Skip if a deep-link param is pending (will be handled by the effect above)
+    if (searchParams.get('team')) return;
+    const hasValidSelection =
+      teams.some((t) => t.id === selectedTeamId) ||
+      memberships.some((m) => m.teamId === selectedTeamId);
+    if (!hasValidSelection) {
+      if (teams.length > 0) {
+        selectTeam(teams[0].id);
+      } else if (memberships.length > 0) {
+        selectTeam(memberships[0].teamId);
+      }
+    }
+  }, [teams, memberships, selectedTeamId, selectTeam, membershipsLoading, searchParams]);
 
   // Get permissions for current team
   const permissions: TeamPermissions = team ? getMyPermissions(team.id) : {
@@ -193,6 +236,14 @@ export default function MyTeamPage() {
     // If name is exactly the same, just close
     if (trimmedName === team?.name) {
       setIsRenameModalOpen(false);
+      return;
+    }
+
+    // Moderate team name content
+    const modResult = await checkModerationAndRecord(trimmedName, 'team_name');
+    if (modResult.flagged) {
+      setRenameError(getViolationWarning(modResult));
+      if (modResult.autoBanned) useAuthStore.getState().refreshProfile();
       return;
     }
 
@@ -311,6 +362,36 @@ export default function MyTeamPage() {
     }
   };
 
+  const handleLeaveTeamClick = () => {
+    setIsSettingsOpen(false);
+    setLeaveError(null);
+    setIsLeaveModalOpen(true);
+  };
+
+  const confirmLeaveTeam = async () => {
+    if (!team) return;
+    setIsLeaving(true);
+    setLeaveError(null);
+    try {
+      const result = await teamMembershipService.leaveTeam(team.id);
+      if (!result.success) {
+        setLeaveError(result.error || "Couldn't leave team. Please try again.");
+        return;
+      }
+      setIsLeaveModalOpen(false);
+      await loadMemberships();
+      // Select the first owned team after leaving
+      if (teams.length > 0) {
+        selectTeam(teams[0].id);
+      }
+    } catch (error) {
+      console.error('Error leaving team:', error);
+      setLeaveError("Couldn't leave team. Please try again.");
+    } finally {
+      setIsLeaving(false);
+    }
+  };
+
   const handleRefreshRanks = async () => {
     if (!team || !needsUpdate) return;
     const playersWithNames = team.players.filter(p => p.summonerName && p.tagLine);
@@ -341,6 +422,14 @@ export default function MyTeamPage() {
 
     if (!trimmedName) {
       setCreateTeamError('Please enter a team name');
+      return;
+    }
+
+    // Moderate team name content
+    const modResult = await checkModerationAndRecord(trimmedName, 'team_name');
+    if (modResult.flagged) {
+      setCreateTeamError(getViolationWarning(modResult));
+      if (modResult.autoBanned) useAuthStore.getState().refreshProfile();
       return;
     }
 
@@ -398,9 +487,22 @@ export default function MyTeamPage() {
       return;
     }
 
-    importFromOpgg(parsed.region, parsed.players);
+    const result = importFromOpgg(parsed.region, parsed.players);
     setImportUrl('');
-    setIsImportModalOpen(false);
+
+    const messages: string[] = [];
+    if (result.added > 0) messages.push(`Added ${result.added} player${result.added !== 1 ? 's' : ''}`);
+    if (result.duplicates > 0) messages.push(`${result.duplicates} already on roster`);
+    if (result.overflow > 0) messages.push(`${result.overflow} couldn't be added — roster full (5 players + 5 subs max)`);
+
+    if (result.overflow > 0 || result.duplicates > 0) {
+      setImportSuccess(result.added > 0 ? messages.join('. ') + '.' : '');
+      setImportError(result.added === 0 ? messages.join('. ') + '.' : (result.overflow > 0 ? `${result.overflow} player${result.overflow !== 1 ? 's' : ''} couldn't be added — roster full.` : ''));
+    } else {
+      setImportSuccess(messages.join('. ') + '.');
+      setImportError('');
+      setIsImportModalOpen(false);
+    }
   };
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -446,7 +548,16 @@ export default function MyTeamPage() {
 
   const getPlayerForRole = (role: Role) => mainRoster.find((p) => p.role === role);
 
-  // Empty state when no teams exist
+  // Show loading spinner while memberships are loading and we have no team yet
+  if (!team && membershipsLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-lol-gold" />
+      </div>
+    );
+  }
+
+  // Empty state when no teams exist (owned or membership)
   if (!team) {
     return (
       <>
@@ -590,7 +701,7 @@ export default function MyTeamPage() {
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
               </svg>
-              <span className="text-sm font-medium">Need more teams? Upgrade to Pro</span>
+              <span className="text-sm font-medium">Are you managing more teams? Pro is made for coaches!</span>
             </Link>
           ) : teams.length < maxTeams ? (
             <button
@@ -606,29 +717,35 @@ export default function MyTeamPage() {
           ) : null}
         </div>
 
+        {/* Loading state for membership teams */}
+        {isMembershipTeam && membershipTeamLoading && (
+          <div className="flex items-center justify-center py-20">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-lol-gold" />
+          </div>
+        )}
+
         {/* Header */}
+        {!(isMembershipTeam && membershipTeamLoading) && (<>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div>
               <h1 className="text-3xl font-bold text-white">
                 {team.name || 'My Team'}
               </h1>
-              <p className="text-gray-400 mt-1">Manage your roster</p>
+              <p className="text-gray-400 mt-1">
+                {isMembershipTeam
+                  ? `Member \u00B7 ${memberships.find(m => m.teamId === selectedTeamId)?.role || 'viewer'} \u00B7 Owned by ${memberships.find(m => m.teamId === selectedTeamId)?.ownerName || 'unknown'}`
+                  : 'Manage your roster'}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {isRankApiConfigured() && teamPlayers.length > 0 && (
-              <Button
-                variant="ghost"
-                onClick={handleRefreshRanks}
-                disabled={isLoadingRanks || !needsUpdate}
-                title={
-                  isUpdated
-                    ? 'All players have been updated within the last 24 hours'
-                    : 'Fetch player ranks from Riot API'
-                }
-              >
-                {isLoadingRanks ? 'Fetching Ranks...' : isUpdated ? 'Ranks Updated' : 'Update Ranks'}
+            {user && isOwner && (
+              <Button variant="secondary" onClick={() => setIsInviteModalOpen(true)}>
+                <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                </svg>
+                Invite Members
               </Button>
             )}
             <Button variant="secondary" onClick={() => setIsImportModalOpen(true)}>
@@ -669,15 +786,27 @@ export default function MyTeamPage() {
                     </svg>
                     Reset Team
                   </button>
-                  <button
-                    onClick={handleDeleteTeamClick}
-                    className="w-full px-4 py-3 text-left text-sm text-red-400 hover:bg-red-500/10 flex items-center gap-3 transition-colors border-t border-lol-border"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                    Delete Team
-                  </button>
+                  {isOwner ? (
+                    <button
+                      onClick={handleDeleteTeamClick}
+                      className="w-full px-4 py-3 text-left text-sm text-red-400 hover:bg-red-500/10 flex items-center gap-3 transition-colors border-t border-lol-border"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                      Delete Team
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleLeaveTeamClick}
+                      className="w-full px-4 py-3 text-left text-sm text-red-400 hover:bg-red-500/10 flex items-center gap-3 transition-colors border-t border-lol-border"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                      </svg>
+                      Leave Team
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -689,14 +818,29 @@ export default function MyTeamPage() {
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">Main Roster</h2>
             <div className="flex items-center gap-4">
-              <p className="text-xs text-gray-500">Drag players to assign roles</p>
+              {isRankApiConfigured() && teamPlayers.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleRefreshRanks}
+                  disabled={isLoadingRanks || !needsUpdate}
+                  title={
+                    isUpdated
+                      ? 'All players have been updated within the last 24 hours'
+                      : 'Fetch player ranks from Riot API'
+                  }
+                >
+                  {isLoadingRanks ? 'Fetching Ranks...' : isUpdated ? 'Ranks Updated' : 'Update Ranks'}
+                </Button>
+              )}
               {mainRoster.filter((p) => p.summonerName).length > 0 && (
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => openMultiSearch(mainRoster, mainRoster[0]?.region || 'euw')}
-                  className="text-xs text-lol-gold hover:text-lol-gold-light transition-colors font-medium"
                 >
                   OP.GG Multi-Search
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -715,6 +859,9 @@ export default function MyTeamPage() {
               ))}
             </div>
           </SortableContext>
+          <div className="flex items-center gap-4 mt-3">
+            <p className="text-xs text-gray-500">Drag players to assign roles</p>
+          </div>
         </Card>
 
         {/* Subs */}
@@ -791,9 +938,15 @@ export default function MyTeamPage() {
               teamName={team.name}
               players={team.players}
               isOwner={isOwner}
+              currentUserId={user?.id}
+              currentUserRole={permissions.role}
+              isInviteModalOpen={isInviteModalOpen}
+              onInviteModalClose={() => setIsInviteModalOpen(false)}
+              onLeaveTeam={() => handleLeaveTeamClick()}
             />
           </Card>
         )}
+        </>)}
 
         {/* Import Modal */}
         <Modal
@@ -801,6 +954,7 @@ export default function MyTeamPage() {
           onClose={() => {
             setIsImportModalOpen(false);
             setImportError('');
+            setImportSuccess('');
             setImportUrl('');
           }}
           title="Import from OP.GG"
@@ -815,10 +969,14 @@ export default function MyTeamPage() {
               onChange={(e) => {
                 setImportUrl(e.target.value);
                 setImportError('');
+                setImportSuccess('');
               }}
               placeholder="https://www.op.gg/multisearch/euw?summoners=..."
               autoFocus
             />
+            {importSuccess && (
+              <p className="text-sm text-green-400 bg-green-500/10 rounded-lg p-3 border border-green-500/20">{importSuccess}</p>
+            )}
             {importError && (
               <p className="text-sm text-red-400 bg-red-500/10 rounded-lg p-3 border border-red-500/20">{importError}</p>
             )}
@@ -860,6 +1018,24 @@ export default function MyTeamPage() {
           variant="danger"
           isLoading={isDeleting}
           error={deleteError}
+        />
+
+        {/* Leave team confirmation modal */}
+        <ConfirmationModal
+          isOpen={isLeaveModalOpen}
+          onClose={() => {
+            if (!isLeaving) {
+              setIsLeaveModalOpen(false);
+              setLeaveError(null);
+            }
+          }}
+          onConfirm={confirmLeaveTeam}
+          title="Leave Team"
+          message={`Are you sure you want to leave "${team?.name}"? You will lose access to this team unless re-invited.`}
+          confirmText="Leave Team"
+          variant="danger"
+          isLoading={isLeaving}
+          error={leaveError}
         />
 
         {/* Create team modal */}

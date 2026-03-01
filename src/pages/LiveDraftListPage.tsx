@@ -85,9 +85,6 @@ export default function LiveDraftListPage() {
     <div className="space-y-8">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Button onClick={() => setIsCreateModalOpen(true)} size="lg">
-          + New Live Draft
-        </Button>
         <div>
           <h1 className="text-3xl font-bold text-white">Live Draft</h1>
           <p className="text-gray-400 mt-1">
@@ -261,6 +258,10 @@ export default function LiveDraftListPage() {
         </div>
       </Card>
 
+      <Button onClick={() => setIsCreateModalOpen(true)} size="lg">
+        + New Live Draft
+      </Button>
+
       {/* Active Drafts Section */}
       {user && activeSessions.length > 0 && (
         <div className="space-y-4">
@@ -355,36 +356,6 @@ export default function LiveDraftListPage() {
         </div>
       )}
 
-      {/* Empty State / Getting Started */}
-      {(!user || sessions.length === 0) && (
-        <Card className="text-center py-16">
-          <div className="text-gray-500 mb-4">
-            <svg
-              className="w-16 h-16 mx-auto"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.5}
-                d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-              />
-            </svg>
-          </div>
-          <h2 className="text-xl font-semibold text-white mb-2">
-            Start a Live Draft
-          </h2>
-          <p className="text-gray-400 mb-6 max-w-md mx-auto">
-            Create a new session to draft against your opponent in real-time. No
-            account required - just share the invite link.
-          </p>
-          <Button onClick={() => setIsCreateModalOpen(true)} size="lg">
-            Create Live Draft Session
-          </Button>
-        </Card>
-      )}
 
       {/* Loading State */}
       {isLoading && user && (

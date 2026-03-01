@@ -184,7 +184,7 @@ export default function LiveDraftBoard({
       </div>
 
       {/* === BANS ROW === */}
-      <div className="relative flex items-center justify-between gap-8 pt-2 pb-1 max-w-[2000px] w-full mx-auto">
+      <div className="relative flex items-center justify-between gap-8 pt-2 pb-1 max-w-[1900px] w-full mx-auto">
         {/* Blue Bans */}
         <div className="flex items-center gap-1.5">
           {[0, 1, 2].map((index) => (

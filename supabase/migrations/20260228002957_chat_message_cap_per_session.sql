@@ -9,7 +9,7 @@ CREATE POLICY "Captains can send messages" ON public.live_draft_messages
     EXISTS (
       SELECT 1 FROM public.live_draft_sessions s
       WHERE s.id = session_id
-      AND (auth.uid() = s.blue_captain_id OR auth.uid() = s.red_captain_id)
+      AND (auth.uid() = s.team1_captain_id OR auth.uid() = s.team2_captain_id)
     )
     -- Session must have fewer than 50 messages
     AND (

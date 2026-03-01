@@ -175,9 +175,11 @@ export const syncManager = {
       debounceMs?: number;
       transformItem?: (item: T, userId: string, index: number) => unknown;
       deleteOrphans?: boolean;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      onAfterSync?: (data: any, storeKey: string, debounceMs: number) => void;
     } = {}
   ): Promise<void> {
-    const { debounceMs = 3000, transformItem, deleteOrphans = true } = options;
+    const { debounceMs = 3000, transformItem, deleteOrphans = true, onAfterSync } = options;
 
     // Store pending sync data for potential flush on page unload
     pendingSyncs.set(storeKey, {
@@ -194,7 +196,7 @@ export const syncManager = {
     }
 
     const timer = setTimeout(async () => {
-      await this._executeArraySync(storeKey, tableName, items, { transformItem, deleteOrphans });
+      await this._executeArraySync(storeKey, tableName, items, { transformItem, deleteOrphans, onAfterSync, debounceMs });
     }, debounceMs);
 
     debounceTimers.set(storeKey, timer);
@@ -210,9 +212,12 @@ export const syncManager = {
     options: {
       transformItem?: (item: T, userId: string, index: number) => unknown;
       deleteOrphans?: boolean;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      onAfterSync?: (data: any, storeKey: string, debounceMs: number) => void;
+      debounceMs?: number;
     }
   ): Promise<void> {
-    const { transformItem, deleteOrphans = true } = options;
+    const { transformItem, deleteOrphans = true, onAfterSync, debounceMs = 3000 } = options;
 
     if (!this.isAvailable() || !supabase) {
       return;
@@ -265,6 +270,11 @@ export const syncManager = {
             console.warn(`Delete all warning for ${storeKey}:`, deleteError);
           }
         }
+      }
+
+      // Sync dependent data after parent sync succeeds (e.g., players after teams)
+      if (onAfterSync) {
+        onAfterSync(items, storeKey, debounceMs);
       }
 
       // Clear from pending syncs on success
@@ -699,7 +709,7 @@ export const syncManager = {
   ): Promise<void> {
     if (!this.isAvailable() || !supabase) return;
 
-    const validRoles = ['top', 'jungle', 'mid', 'adc', 'support'];
+    const validRoles = ['top', 'jungle', 'mid', 'adc', 'support', 'flex'];
 
     try {
       const cloudPlayers = players.map((player, index) => {
@@ -1381,7 +1391,7 @@ export const syncManager = {
     }
 
     // Valid roles that match database constraint
-    const validRoles = ['top', 'jungle', 'mid', 'adc', 'support'];
+    const validRoles = ['top', 'jungle', 'mid', 'adc', 'support', 'flex'];
 
     try {
       // Filter out empty players (no summoner name) - they shouldn't be synced to cloud

@@ -227,6 +227,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             } else if (event === 'TOKEN_REFRESHED') {
               await setSession(session);
             }
+          } else if (event === 'USER_UPDATED') {
+            // Fires after email change confirmation — refresh session and profile
+            if (session) {
+              await setSession(session);
+            }
           } else if (event === 'SIGNED_OUT') {
             hasHandledSignIn = false;
             setSession(null);

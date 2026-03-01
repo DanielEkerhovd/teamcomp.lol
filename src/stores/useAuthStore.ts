@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { User, Session, AuthError } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured, clearCachedSession } from '../lib/supabase';
+import { checkModerationAndRecord, getViolationWarning } from '../lib/moderation';
 import type { Profile, UserTier, ProfileRole } from '../types/database';
 
 // Guard against multiple initialization calls (React Strict Mode)
@@ -19,6 +20,10 @@ export interface UserProfile {
   roleTeamId: string | null;
   roleTeamName: string | null;
   isPrivate: boolean;
+  stripeCustomerId: string | null;
+  avatarModeratedUntil: string | null;
+  bannedAt: string | null;
+  banReason: string | null;
 }
 
 interface AuthState {
@@ -49,7 +54,9 @@ interface AuthState {
   updateDisplayName: (displayName: string) => Promise<{ error: string | null }>;
   updateAvatar: (file: File) => Promise<{ error: string | null }>;
   removeAvatar: () => Promise<{ error: string | null }>;
+  generateRandomAvatar: () => Promise<{ error: string | null }>;
   updateRole: (role: ProfileRole | null, teamId: string | null) => Promise<{ error: string | null }>;
+  updateEmail: (newEmail: string) => Promise<{ error: string | null }>;
   updatePrivacy: (isPrivate: boolean) => Promise<{ error: string | null }>;
   deleteAccount: () => Promise<{ error: string | null }>;
 }
@@ -67,6 +74,10 @@ const transformProfile = (dbProfile: Profile, roleTeamName?: string | null): Use
   roleTeamId: dbProfile.role_team_id,
   roleTeamName: roleTeamName ?? null,
   isPrivate: dbProfile.is_private,
+  stripeCustomerId: dbProfile.stripe_customer_id ?? null,
+  avatarModeratedUntil: dbProfile.avatar_moderated_until ?? null,
+  bannedAt: dbProfile.banned_at ?? null,
+  banReason: dbProfile.ban_reason ?? null,
 });
 
 export const useAuthStore = create<AuthState>()((set, get) => ({
@@ -297,9 +308,12 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
         if (supabase) {
           try {
-            await supabase.auth.signOut();
+            await Promise.race([
+              supabase.auth.signOut(),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Sign out timeout')), 5000)),
+            ]);
           } catch (error) {
-            // Continue with sign out even if the API call fails
+            // Continue with sign out even if the API call fails or times out
             console.error('Sign out error:', error);
           }
         }
@@ -413,6 +427,12 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
           return { error: 'Display name must be 30 characters or less' };
         }
 
+        // Moderate display name content
+        const modResult = await checkModerationAndRecord(trimmedName, 'display_name');
+        if (modResult.flagged) {
+          return { error: getViolationWarning(modResult) };
+        }
+
         const client = supabase;
 
         // Check if display name is taken by another user (case-insensitive)
@@ -421,7 +441,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
           .select('id')
           .ilike('display_name', trimmedName)
           .neq('id', user.id)
-          .single();
+          .maybeSingle();
 
         if (existing) {
           return { error: 'This username is already taken' };
@@ -450,9 +470,20 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       },
 
       updateAvatar: async (file: File) => {
-        const { user } = get();
+        const { user, profile } = get();
         if (!user || !supabase) {
           return { error: 'Please sign in to continue' };
+        }
+
+        // Tier gate: only paid tiers can upload custom avatars
+        if (profile?.tier === 'free') {
+          return { error: 'Custom avatar uploads require a paid plan. Use the random avatar generator instead.' };
+        }
+
+        // Moderation cooldown check
+        if (profile?.avatarModeratedUntil && new Date(profile.avatarModeratedUntil) > new Date()) {
+          const until = new Date(profile.avatarModeratedUntil).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+          return { error: `Your avatar was removed by a moderator. You can upload a new avatar after ${until}.` };
         }
 
         // Validate file type
@@ -536,6 +567,35 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         return { error: null };
       },
 
+      generateRandomAvatar: async () => {
+        const { user, profile } = get();
+        if (!user || !supabase) {
+          return { error: 'Please sign in to continue' };
+        }
+
+        // Moderation cooldown check
+        if (profile?.avatarModeratedUntil && new Date(profile.avatarModeratedUntil) > new Date()) {
+          const until = new Date(profile.avatarModeratedUntil).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+          return { error: `Your avatar was removed by a moderator. You can upload a new avatar after ${until}.` };
+        }
+
+        const seed = crypto.randomUUID();
+        const avatarUrl = `https://api.dicebear.com/9.x/pixel-art/svg?seed=${seed}`;
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error: updateError } = await (supabase as any)
+          .from('profiles')
+          .update({ avatar_url: avatarUrl })
+          .eq('id', user.id);
+
+        if (updateError) {
+          return { error: updateError.message };
+        }
+
+        await get().refreshProfile();
+        return { error: null };
+      },
+
       updateRole: async (role: ProfileRole | null, teamId: string | null) => {
         const { user, profile } = get();
         if (!user || !supabase) {
@@ -592,6 +652,33 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         return { error: null };
       },
 
+      updateEmail: async (newEmail: string) => {
+        const { user } = get();
+        if (!user || !supabase) {
+          return { error: 'Please sign in to continue' };
+        }
+
+        const trimmed = newEmail.trim().toLowerCase();
+        if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+          return { error: 'Please enter a valid email address' };
+        }
+
+        if (trimmed === user.email) {
+          return { error: 'This is already your current email' };
+        }
+
+        const { error } = await supabase.auth.updateUser({ email: trimmed });
+
+        if (error) {
+          if (error.message?.includes('already registered') || error.message?.includes('already exists')) {
+            return { error: 'An account with this email already exists' };
+          }
+          return { error: error.message || 'Failed to update email. Please try again.' };
+        }
+
+        return { error: null };
+      },
+
       deleteAccount: async () => {
         const { user } = get();
         if (!user || !supabase) {
@@ -635,7 +722,7 @@ export const useTeamLimit = () => {
   // Compute isAuthenticated directly from user (getter doesn't work with destructuring)
   if (!user) {
     // Guest mode - use localStorage limit
-    return { maxTeams: 3, tier: 'guest' as const };
+    return { maxTeams: 1, tier: 'guest' as const };
   }
 
   return {

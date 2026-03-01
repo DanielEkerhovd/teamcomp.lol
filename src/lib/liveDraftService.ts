@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { checkModerationAndRecord, getViolationWarning } from './moderation';
 import {
   DRAFT_ORDER,
   type DbLiveDraftSession,
@@ -57,6 +58,15 @@ export const liveDraftService = {
     if (config.name && config.name.length > 30) throw new Error('Session name must be 30 characters or less');
     if (config.team1Name && config.team1Name.length > 30) throw new Error('Team name must be 30 characters or less');
     if (config.team2Name && config.team2Name.length > 30) throw new Error('Team name must be 30 characters or less');
+
+    // Moderate user-provided text fields (batch check)
+    const textsToCheck = [config.name, config.team1Name, config.team2Name].filter(
+      (t): t is string => !!t && t.trim().length > 0
+    );
+    if (textsToCheck.length > 0) {
+      const modResult = await checkModerationAndRecord(textsToCheck, 'live_draft_session');
+      if (modResult.flagged) throw new Error(getViolationWarning(modResult));
+    }
 
     const { data: { session: authSession } } = await supabase.auth.getSession();
 
@@ -620,6 +630,10 @@ export const liveDraftService = {
     if (!supabase) throw new Error('Supabase not initialized');
     if (!displayName?.trim()) throw new Error('Display name is required');
     if (displayName.trim().length > 30) throw new Error('Display name must be 30 characters or less');
+
+    // Moderate captain display name
+    const modResult = await checkModerationAndRecord(displayName.trim(), 'display_name');
+    if (modResult.flagged) throw new Error(getViolationWarning(modResult));
 
     const { data: { session: authSession } } = await supabase.auth.getSession();
     const userId = authSession?.user?.id ?? null;
@@ -1274,6 +1288,10 @@ export const liveDraftService = {
     if (!supabase) throw new Error('Supabase not initialized');
     if (!content?.trim()) throw new Error('Message cannot be empty');
     if (content.trim().length > 500) throw new Error('Message must be 500 characters or less');
+
+    // Moderate chat message content
+    const modResult = await checkModerationAndRecord(content.trim(), 'live_draft_chat');
+    if (modResult.flagged) throw new Error(getViolationWarning(modResult));
 
     // Check message cap before sending
     const { count } = await supabase

@@ -14,7 +14,7 @@ RETURNS TABLE (
   id              UUID,
   display_name    TEXT,
   email           TEXT,
-  tier            public.user_tier,
+  tier            TEXT,
   tier_expires_at TIMESTAMPTZ,
   banned_at       TIMESTAMPTZ,
   ban_reason      TEXT,
@@ -25,7 +25,7 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  caller_tier public.user_tier;
+  caller_tier TEXT;
 BEGIN
   -- Only developers may call this
   SELECT p.tier INTO caller_tier FROM profiles p WHERE p.id = auth.uid();
@@ -51,7 +51,7 @@ GRANT EXECUTE ON FUNCTION public.admin_search_users(TEXT) TO authenticated;
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION public.admin_set_user_tier(
   target_user_id UUID,
-  new_tier       public.user_tier,
+  new_tier       TEXT,
   expires_in_hours INT DEFAULT NULL
 )
 RETURNS JSONB
@@ -60,14 +60,19 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  caller_tier  public.user_tier;
-  target_tier  public.user_tier;
+  caller_tier  TEXT;
+  target_tier  TEXT;
   v_expires_at TIMESTAMPTZ;
 BEGIN
   -- Only developers
   SELECT p.tier INTO caller_tier FROM profiles p WHERE p.id = auth.uid();
   IF caller_tier IS DISTINCT FROM 'developer' THEN
     RETURN jsonb_build_object('success', false, 'message', 'Forbidden');
+  END IF;
+
+  -- Validate tier value
+  IF new_tier NOT IN ('free', 'beta', 'paid', 'supporter', 'admin', 'developer') THEN
+    RETURN jsonb_build_object('success', false, 'message', 'Invalid tier value');
   END IF;
 
   -- Cannot modify other developers
@@ -96,7 +101,7 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.admin_set_user_tier(UUID, public.user_tier, INT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_set_user_tier(UUID, TEXT, INT) TO authenticated;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 4) admin_delete_user – hard-delete profile (cascade) + storage avatars
@@ -108,8 +113,8 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  caller_tier public.user_tier;
-  target_tier public.user_tier;
+  caller_tier TEXT;
+  target_tier TEXT;
 BEGIN
   SELECT p.tier INTO caller_tier FROM profiles p WHERE p.id = auth.uid();
   IF caller_tier IS DISTINCT FROM 'developer' THEN

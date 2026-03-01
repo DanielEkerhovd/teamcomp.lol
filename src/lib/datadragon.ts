@@ -72,7 +72,7 @@ const CDRAGON_BASE = 'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-
 let splashMap: Map<string, string> | null = null;
 let splashMapPromise: Promise<void> | null = null;
 
-function loadSplashMap(): Promise<void> {
+export function loadSplashMap(): Promise<void> {
   if (splashMap) return Promise.resolve();
   if (splashMapPromise) return splashMapPromise;
 

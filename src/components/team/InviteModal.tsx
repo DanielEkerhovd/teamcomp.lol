@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import Modal from '../ui/Modal';
 import { teamMembershipService, SentTeamInvite } from '../../lib/teamMembershipService';
+import { useFriendsStore } from '../../stores/useFriendsStore';
+import type { Friend } from '../../types/database';
 import type { Player } from '../../types';
 
 interface InviteModalProps {
@@ -24,12 +26,22 @@ export default function InviteModal({ isOpen, onClose, teamId, teamName, players
   // Direct invite state
   const [identifier, setIdentifier] = useState('');
   const [sending, setSending] = useState(false);
+  const [sendingFriendId, setSendingFriendId] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Load existing invites when modal opens
+  // Friends state
+  const friends = useFriendsStore(s => s.friends);
+  const loadFriends = useFriendsStore(s => s.loadFriends);
+  const [teamMemberUserIds, setTeamMemberUserIds] = useState<Set<string>>(new Set());
+
+  // Load existing invites, friends, and team members when modal opens
   useEffect(() => {
     if (isOpen) {
       loadInvites();
+      loadFriends();
+      teamMembershipService.getTeamMembers(teamId).then(members => {
+        setTeamMemberUserIds(new Set(members.map(m => m.userId)));
+      });
     }
   }, [isOpen, teamId]);
 
@@ -91,6 +103,36 @@ export default function InviteModal({ isOpen, onClose, teamId, teamName, players
     }
   };
 
+  const handleInviteFriend = async (friend: Friend) => {
+    if (sending || sendingFriendId) return;
+    setSendingFriendId(friend.friendId);
+    setError(null);
+    setSuccess(null);
+
+    const result = await teamMembershipService.sendTeamInvite(
+      teamId,
+      friend.displayName,
+      newRole,
+      {
+        playerSlotId: newPlayerSlotId || undefined,
+        canEditGroups: newCanEditGroups,
+      }
+    );
+
+    if (result.success) {
+      setSuccess(`Invite sent to ${result.targetUser?.displayName || friend.displayName}`);
+      loadInvites();
+      setTimeout(() => setSuccess(null), 3000);
+    } else {
+      setError(result.error || 'Couldn\'t send invite. Please try again.');
+    }
+
+    setSendingFriendId(null);
+  };
+
+  // Derive which friends are already invited
+  const invitedUserIds = new Set(invites.map(i => i.invitedUser?.id).filter(Boolean));
+
   // Get main players (not subs) for assignment
   const mainPlayers = players.filter(p => !p.isSub && p.summonerName);
 
@@ -114,6 +156,61 @@ export default function InviteModal({ isOpen, onClose, teamId, teamName, players
         {success && (
           <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg text-green-400 text-sm">
             {success}
+          </div>
+        )}
+
+        {/* Friends quick-invite section */}
+        {friends.length > 0 && (
+          <div className="space-y-2 p-4 bg-lol-surface rounded-xl border border-lol-border">
+            <h3 className="text-sm font-medium text-gray-300">Invite Friends</h3>
+            <div className="max-h-48 overflow-y-auto space-y-1.5 scrollbar-thin">
+              {friends.map(friend => {
+                const isMember = teamMemberUserIds.has(friend.friendId);
+                const isInvited = invitedUserIds.has(friend.friendId);
+                const isSending = sendingFriendId === friend.friendId;
+                const disabled = isMember || isInvited || isSending || sending;
+
+                return (
+                  <div key={friend.friendId} className="flex items-center gap-3 p-2 rounded-lg hover:bg-lol-card/50 transition-colors">
+                    {/* Avatar */}
+                    {friend.avatarUrl ? (
+                      <img
+                        src={friend.avatarUrl}
+                        alt={friend.displayName}
+                        className="w-8 h-8 rounded-full shrink-0"
+                      />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-linear-to-br from-lol-gold/20 to-lol-gold/5 flex items-center justify-center shrink-0">
+                        <span className="text-lol-gold text-sm font-medium">
+                          {friend.displayName.charAt(0).toUpperCase()}
+                        </span>
+                      </div>
+                    )}
+
+                    <span className="text-sm text-gray-300 truncate flex-1">{friend.displayName}</span>
+
+                    {isMember ? (
+                      <span className="px-2 py-1 text-xs text-gray-500 bg-lol-card rounded border border-lol-border">Member</span>
+                    ) : isInvited ? (
+                      <span className="px-2 py-1 text-xs text-yellow-500/70 bg-yellow-500/10 rounded border border-yellow-500/20">Invited</span>
+                    ) : (
+                      <button
+                        onClick={() => handleInviteFriend(friend)}
+                        disabled={disabled}
+                        className="px-3 py-1 text-xs font-medium text-lol-gold bg-lol-gold/10 hover:bg-lol-gold/20 border border-lol-gold/30 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isSending ? (
+                          <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                        ) : 'Invite'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 

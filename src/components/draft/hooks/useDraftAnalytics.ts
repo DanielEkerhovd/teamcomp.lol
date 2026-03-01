@@ -201,7 +201,8 @@ export function useDraftAnalytics({
 
       // Also process tiered champion pool from the player object (for backwards compatibility)
       // This catches any champions in championPool that aren't in any group
-      player.championPool?.forEach((champ) => {
+      // Only use legacy data when there's no pool in the dedicated store (avoids stale data)
+      if (!playerPool) player.championPool?.forEach((champ) => {
         // Skip if already added from groups
         if (addedChampions.has(champ.championId)) return;
         addedChampions.add(champ.championId);

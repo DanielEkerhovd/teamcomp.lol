@@ -37,7 +37,7 @@ export default function FriendsNavItem({ collapsed }: FriendsNavItemProps) {
 
   return (
     <NavLink
-      to="/friends"
+      to="/social"
       className={({ isActive }) =>
         `relative flex items-center py-3 px-3 rounded-xl font-medium transition-all duration-300 group ${
           isActive
@@ -78,13 +78,13 @@ export default function FriendsNavItem({ collapsed }: FriendsNavItemProps) {
           </span>
 
           <span className={`whitespace-nowrap transition-all duration-300 overflow-hidden ${collapsed ? 'max-w-0 opacity-0 ml-0' : 'max-w-[200px] opacity-100 ml-3'}`}>
-            Friends
+            Social
           </span>
 
           {/* Tooltip when collapsed */}
           {collapsed && (
             <div className="absolute left-full ml-3 px-3 py-2 bg-lol-card border border-lol-border rounded-lg text-sm text-white whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 shadow-xl z-50">
-              Friends
+              Social
               {totalUnread > 0 && (
                 <span className="ml-2 px-1.5 py-0.5 text-xs font-bold text-white bg-red-500 rounded-full">
                   {totalUnread}
