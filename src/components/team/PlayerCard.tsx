@@ -17,6 +17,7 @@ interface PlayerCardProps extends Omit<
   compact?: boolean;
   isDragging?: boolean;
   showRole?: boolean;
+  readOnly?: boolean;
 }
 
 const PlayerCard = forwardRef<HTMLDivElement, PlayerCardProps>(
@@ -28,6 +29,7 @@ const PlayerCard = forwardRef<HTMLDivElement, PlayerCardProps>(
       compact = false,
       isDragging = false,
       showRole = true,
+      readOnly = false,
       className = "",
       ...props
     },
@@ -103,7 +105,8 @@ const PlayerCard = forwardRef<HTMLDivElement, PlayerCardProps>(
             value={player.summonerName}
             onChange={(e) => onChange({ summonerName: e.target.value })}
             placeholder="Name"
-            className="w-full bg-transparent text-white text-sm placeholder-gray-600 focus:outline-none border-b border-transparent focus:border-lol-gold/30 transition-colors "
+            readOnly={readOnly}
+            className={`w-full bg-transparent text-white text-sm placeholder-gray-600 focus:outline-none border-b border-transparent transition-colors ${readOnly ? 'cursor-default' : 'focus:border-lol-gold/30'}`}
           />
           <div className="flex items-center gap-1 mt-0.5">
             <span className="text-gray-500 text-xs">#</span>
@@ -111,16 +114,18 @@ const PlayerCard = forwardRef<HTMLDivElement, PlayerCardProps>(
               value={player.tagLine}
               onChange={(e) => onChange({ tagLine: e.target.value })}
               placeholder="Tag"
-              className="flex-1 bg-transparent text-gray-400 text-xs placeholder-gray-600 focus:outline-none focus:text-white transition-colors "
+              readOnly={readOnly}
+              className={`flex-1 bg-transparent text-gray-400 text-xs placeholder-gray-600 focus:outline-none transition-colors ${readOnly ? 'cursor-default' : 'focus:text-white'}`}
             />
             <select
               value={player.region}
               onChange={(e) =>
                 onChange({ region: e.target.value as Player["region"] })
               }
-              className={`bg-lol-surface text-gray-500 focus:outline-none cursor-pointer hover:text-gray-300 transition-colors rounded  ${
-                compact ? 'text-[10px] px-1 py-0.5' : 'text-xs bg-transparent'
-              }`}
+              disabled={readOnly}
+              className={`bg-lol-surface text-gray-500 focus:outline-none transition-colors rounded ${
+                readOnly ? 'cursor-default pointer-events-none' : 'cursor-pointer hover:text-gray-300'
+              } ${compact ? 'text-[10px] px-1 py-0.5' : 'text-xs bg-transparent'}`}
             >
               {REGIONS.map((r) => (
                 <option key={r.value} value={r.value}>

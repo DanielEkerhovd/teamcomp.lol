@@ -981,9 +981,7 @@ function TeamCard({
         <div className="space-y-2">
           {/* Captain Info */}
           <div className="flex items-center gap-2 px-4 min-h-20 rounded-lg bg-black/20 border border-white/10">
-            {captainAvatarUrl ? (
-              <img src={captainAvatarUrl} alt="" className="w-8 h-8 rounded-full object-cover" referrerPolicy="no-referrer" />
-            ) : (
+            <div className="relative shrink-0 w-8 h-8">
               <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
                 side === 'blue' ? 'bg-blue-500/20' : side === 'red' ? 'bg-red-500/20' : 'bg-lol-gold/20'
               }`}>
@@ -993,7 +991,10 @@ function TeamCard({
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                 </svg>
               </div>
-            )}
+              {captainAvatarUrl && (
+                <img src={captainAvatarUrl} alt="" className="absolute inset-0 w-8 h-8 rounded-full object-cover" referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+              )}
+            </div>
             <div className="flex-1 min-w-0">
               <div className="font-medium text-white truncate">
                 {captainDisplayName}

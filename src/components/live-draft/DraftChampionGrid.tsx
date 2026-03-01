@@ -97,6 +97,7 @@ export default function DraftChampionGrid({
     [],
   );
   const [showPoolDropdown, setShowPoolDropdown] = useState(false);
+  const [poolSearch, setPoolSearch] = useState("");
 
   const hasPoolFilter =
     selectedMyTeamIds.length > 0 || selectedEnemyTeamIds.length > 0;
@@ -444,7 +445,7 @@ export default function DraftChampionGrid({
         {(myTeams.length > 0 || enemyTeams.length > 0) && (
           <div className="relative shrink-0">
             <button
-              onClick={() => setShowPoolDropdown(!showPoolDropdown)}
+              onClick={() => { setShowPoolDropdown(!showPoolDropdown); setPoolSearch(""); }}
               className={`
                 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all
                 ${
@@ -551,7 +552,16 @@ export default function DraftChampionGrid({
                       <div className="text-[10px] text-gray-500 uppercase tracking-wide px-2 mb-1">
                         Enemy Teams
                       </div>
-                      {enemyTeams.map((team) => {
+                      <div className="px-1 mb-1">
+                        <input
+                          type="text"
+                          value={poolSearch}
+                          onChange={(e) => setPoolSearch(e.target.value)}
+                          placeholder="Search teams..."
+                          className="w-full px-2.5 py-1.5 bg-lol-dark border border-lol-border rounded-lg text-white text-xs placeholder-gray-500 focus:outline-none focus:border-lol-gold/50"
+                        />
+                      </div>
+                      {enemyTeams.filter(t => !poolSearch || t.name.toLowerCase().includes(poolSearch.toLowerCase())).map((team) => {
                         const isSelected = selectedEnemyTeamIds.includes(
                           team.id,
                         );

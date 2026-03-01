@@ -28,6 +28,8 @@ interface TeamMembersPanelProps {
   isInviteModalOpen?: boolean;
   onInviteModalClose?: () => void;
   onLeaveTeam?: () => void;
+  showGetTeamPlan?: boolean;
+  onGetTeamPlan?: () => void;
 }
 
 export default function TeamMembersPanel({
@@ -40,6 +42,8 @@ export default function TeamMembersPanel({
   isInviteModalOpen: externalInviteOpen,
   onInviteModalClose,
   onLeaveTeam,
+  showGetTeamPlan,
+  onGetTeamPlan,
 }: TeamMembersPanelProps) {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -362,6 +366,17 @@ export default function TeamMembersPanel({
           </span>
         </h3>
         <div className="flex items-center gap-2">
+          {showGetTeamPlan && onGetTeamPlan && (
+            <button
+              onClick={onGetTeamPlan}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-lg text-sm font-medium transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              Get Team Plan
+            </button>
+          )}
           {canManage && (
             <button
               onClick={() => setInternalInviteOpen(true)}

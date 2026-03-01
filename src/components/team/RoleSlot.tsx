@@ -8,9 +8,11 @@ interface RoleSlotProps {
   role: Role;
   player: Player | undefined;
   onPlayerChange: (playerId: string, updates: Partial<Omit<Player, 'id'>>) => void;
+  onAddPlayer?: (role: Role) => void;
+  readOnly?: boolean;
 }
 
-export default function RoleSlot({ role, player, onPlayerChange }: RoleSlotProps) {
+export default function RoleSlot({ role, player, onPlayerChange, onAddPlayer, readOnly = false }: RoleSlotProps) {
   const roleLabel = ROLES.find((r) => r.value === role)?.label || role;
 
   const {
@@ -22,7 +24,7 @@ export default function RoleSlot({ role, player, onPlayerChange }: RoleSlotProps
   } = useSortable({
     id: player?.id || `empty-${role}`,
     data: { type: 'player', role, player },
-    disabled: !player,
+    disabled: !player || readOnly,
   });
 
   const { isOver: isOverDroppable, setNodeRef: setDropRef } = useDroppable({
@@ -56,12 +58,18 @@ export default function RoleSlot({ role, player, onPlayerChange }: RoleSlotProps
             onChange={(updates) => onPlayerChange(player.id, updates)}
             isDragging={isDragging}
             showRole={false}
+            readOnly={readOnly}
             compact
           />
         </div>
       ) : (
-        <div className="bg-lol-card/50 rounded-xl px-4 py-6 text-center text-gray-600 text-sm border border-dashed border-lol-border/50 h-38 flex items-center justify-center">
-          Empty
+        <div
+          onClick={() => onAddPlayer?.(role)}
+          className={`bg-lol-card/50 rounded-xl px-4 py-6 text-center text-gray-600 text-sm border border-dashed border-lol-border/50 h-38 flex items-center justify-center ${
+            onAddPlayer ? 'cursor-pointer hover:bg-lol-card/70 hover:border-lol-gold/30 hover:text-gray-400 transition-colors' : ''
+          }`}
+        >
+          {onAddPlayer ? '+ Add Player' : 'Empty'}
         </div>
       )}
     </div>

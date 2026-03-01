@@ -55,6 +55,9 @@ export interface CloudSyncOptions<T, D = any> {
   /** Skip certain actions from triggering sync */
   skipActions?: string[];
 
+  /** Extra filters applied to orphan deletion query (e.g. { my_team_id: null } to only delete personal rows) */
+  deleteFilter?: Record<string, unknown>;
+
   /** Callback to sync related data after main sync (e.g., players for teams) */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onAfterSync?: (data: any, storeKey: string, debounceMs: number) => void;
@@ -83,6 +86,7 @@ const cloudSyncImpl: CloudSyncImpl = (f, options) => (set, get, store) => {
     transformForCloud,
     isArraySync = false,
     transformItem,
+    deleteFilter,
     onAfterSync,
   } = options;
 
@@ -91,6 +95,13 @@ const cloudSyncImpl: CloudSyncImpl = (f, options) => (set, get, store) => {
   const syncingSet: typeof set = (...args: any[]) => {
     // Apply the state change
     (set as (...args: unknown[]) => void)(...args);
+
+    // Skip sync-back when we're loading data from cloud into local stores.
+    // Without this guard, loadAllFromCloud → setState → cloudSync would
+    // immediately push incomplete data back, potentially destroying cloud records.
+    if (syncManager.isSyncingFromCloud()) {
+      return;
+    }
 
     // Check if sync is available (user authenticated + Supabase configured)
     if (!syncManager.isAvailable()) {
@@ -106,6 +117,7 @@ const cloudSyncImpl: CloudSyncImpl = (f, options) => (set, get, store) => {
       syncManager.syncArrayToCloud(storeKey, tableName, dataToSync as { id: string }[], {
         debounceMs,
         transformItem: transformItem as (item: { id: string }, userId: string, index: number) => unknown,
+        deleteFilter,
         onAfterSync: onAfterSync as ((data: { id: string }[], storeKey: string, debounceMs: number) => void) | undefined,
       });
     } else {

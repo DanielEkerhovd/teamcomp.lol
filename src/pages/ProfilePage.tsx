@@ -9,6 +9,8 @@ import LoginModal from "../components/auth/LoginModal";
 import ConfirmationModal from "../components/ui/ConfirmationModal";
 import DefaultAvatar from "../components/ui/DefaultAvatar";
 import ChampionAvatarModal from "../components/profile/ChampionAvatarModal";
+import ProfilePreviewCard from "../components/profile/ProfilePreviewCard";
+import { PRESET_CARD_COLORS, GRADIENT_ANGLES, type ProfileCardColors } from "../lib/profileCardUtils";
 import { createCheckoutSession, createPortalSession, STRIPE_PRICES, isStripeConfigured } from "../lib/stripeService";
 import { supabase } from "../lib/supabase";
 import type { DbSubscription } from "../types/database";
@@ -34,29 +36,100 @@ const ROLE_OPTIONS: {
   { value: "developer", label: "Developer", requiresTier: "developer" },
 ];
 
-// Combined avatar + username row component
-function AvatarUsernameRow({
-  avatarUrl,
-  displayName,
-  isUploading,
-  error,
-  onAvatarClick,
-  onRemoveAvatar,
-  onSaveUsername,
-  fileInputRef,
-  onFileChange,
-  avatarCooldownUntil,
+// Color picker dropdown - a circle swatch that opens a popover with all color options
+function ColorPickerDropdown({
+  selectedColor,
+  onSelect,
+  disabled,
 }: {
-  avatarUrl?: string | null;
+  selectedColor: string | null;
+  onSelect: (hex: string | null) => void;
+  disabled?: boolean;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    if (isOpen) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isOpen]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setIsOpen(!isOpen)}
+          disabled={disabled}
+          className={`size-7 rounded-full border-2 transition-all hover:scale-110 flex items-center justify-center shrink-0 ${
+            selectedColor
+              ? 'border-lol-gold ring-1 ring-lol-gold/50'
+              : 'border-lol-border hover:border-white/30 bg-lol-surface'
+          }`}
+          style={selectedColor ? { backgroundColor: selectedColor } : undefined}
+          title={selectedColor ?? "None"}
+        >
+          {!selectedColor && (
+            <svg className="w-3 h-3 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          )}
+        </button>
+      </div>
+
+      {isOpen && (
+        <div className="absolute z-50 mt-2 left-0 bg-lol-card border border-lol-border rounded-xl shadow-2xl shadow-black/50 p-3 animate-in fade-in zoom-in-95 duration-150">
+          <div className="flex items-center gap-1.5 flex-wrap w-[232px]">
+            {/* None / reset */}
+            <button
+              type="button"
+              onClick={() => { onSelect(null); setIsOpen(false); }}
+              disabled={disabled}
+              className={`size-7 rounded-full border-2 transition-all hover:scale-110 flex items-center justify-center ${
+                !selectedColor
+                  ? 'border-lol-gold ring-1 ring-lol-gold/50 bg-lol-surface'
+                  : 'border-lol-border hover:border-white/20 bg-lol-surface'
+              }`}
+              title="None"
+            >
+              <svg className="w-3 h-3 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            {PRESET_CARD_COLORS.map((color) => (
+              <button
+                key={color.hex}
+                type="button"
+                onClick={() => { onSelect(color.hex); setIsOpen(false); }}
+                disabled={disabled}
+                className={`size-7 rounded-full border-2 transition-all hover:scale-110 ${
+                  selectedColor === color.hex
+                    ? 'border-lol-gold ring-1 ring-lol-gold/50'
+                    : 'border-transparent hover:border-white/20'
+                }`}
+                style={{ backgroundColor: color.hex }}
+                title={color.name}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Standalone username row component
+function UsernameRow({
+  displayName,
+  onSave,
+}: {
   displayName: string;
-  isUploading: boolean;
-  error: string | null;
-  onAvatarClick: () => void;
-  onRemoveAvatar?: () => void;
-  onSaveUsername: (value: string) => Promise<{ error: string | null }>;
-  fileInputRef: React.RefObject<HTMLInputElement | null>;
-  onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  avatarCooldownUntil?: string | null;
+  onSave: (value: string) => Promise<{ error: string | null }>;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(displayName);
@@ -81,7 +154,7 @@ function AvatarUsernameRow({
     setIsSaving(true);
     setLocalError(null);
     setShowSuccess(false);
-    const result = await onSaveUsername(trimmed);
+    const result = await onSave(trimmed);
     if (result.error) {
       setLocalError(result.error);
     } else {
@@ -101,120 +174,18 @@ function AvatarUsernameRow({
     setIsEditing(false);
   };
 
-  const avatarSize = "size-20";
-
-  const isAvatarCooldown = avatarCooldownUntil && new Date(avatarCooldownUntil) > new Date();
-  const cooldownDateStr = avatarCooldownUntil
-    ? new Date(avatarCooldownUntil).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
-    : null;
-
-  const displayError = localError || error;
-
   return (
     <div className="group">
       <div className="flex items-center gap-4 p-4 rounded-xl hover:bg-lol-surface/50 transition-colors -mx-4">
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          onChange={onFileChange}
-          className="hidden"
-        />
-        {/* Avatar */}
-        <div className="relative shrink-0">
-          <button
-            onClick={isAvatarCooldown ? undefined : onAvatarClick}
-            disabled={isUploading || !!isAvatarCooldown}
-            className={`relative group/avatar ${isAvatarCooldown ? 'cursor-not-allowed opacity-60' : ''}`}
-          >
-            {avatarUrl ? (
-              <div className={`${avatarSize} rounded-xl overflow-hidden`}>
-                <img
-                  src={avatarUrl}
-                  alt={displayName || "User"}
-                  className="w-full h-full object-cover scale-110"
-                  referrerPolicy="no-referrer"
-                />
-              </div>
-            ) : (
-              <DefaultAvatar size={avatarSize} className="rounded-xl" />
-            )}
-            {/* Hover overlay */}
-            <div className="absolute inset-0 rounded-xl bg-black/60 opacity-0 group-hover/avatar:opacity-100 transition-opacity flex items-center justify-center">
-              {isUploading ? (
-                <svg
-                  className="w-5 h-5 text-white animate-spin"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  />
-                </svg>
-              ) : (
-                <svg
-                  className="w-5 h-5 text-white"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
-                  />
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"
-                  />
-                </svg>
-              )}
-            </div>
-          </button>
-          {/* Remove avatar button */}
-          {onRemoveAvatar && !isUploading && (
-            <button
-              onClick={onRemoveAvatar}
-              className="absolute -bottom-1 -right-1 p-1 bg-lol-card border border-lol-border rounded-md text-gray-400 hover:text-red-400 hover:border-red-400/50 transition-colors opacity-0 group-hover:opacity-100"
-              title="Remove avatar"
-            >
-              <svg
-                className="w-2.5 h-2.5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          )}
+        <div className="w-10 h-10 rounded-xl bg-lol-surface flex items-center justify-center text-gray-400 shrink-0">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+          </svg>
         </div>
-        {/* User */}
         <div className="flex-1 min-w-0">
-          <div className="text-sm text-gray-500 uppercase tracking-wide mb-0.5">
-            User
-          </div>
+          <div className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Username</div>
           {isEditing ? (
             <div className="space-y-2">
-              {/* Input with inline buttons */}
               <div className="flex items-center gap-2">
                 <div className="relative flex-1">
                   <input
@@ -226,13 +197,12 @@ function AvatarUsernameRow({
                       setLocalError(null);
                     }}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && !isSaving && !showSuccess)
-                        handleSave();
+                      if (e.key === "Enter" && !isSaving && !showSuccess) handleSave();
                       if (e.key === "Escape" && !isSaving) handleCancel();
                     }}
                     disabled={isSaving || showSuccess}
                     className={`w-full pl-3 pr-3 py-1.5 bg-lol-dark/80 border-2 rounded-lg text-white text-base focus:outline-none transition-all ${
-                      displayError
+                      localError
                         ? "border-red-500/70 bg-red-500/5"
                         : showSuccess
                           ? "border-green-500/70 bg-green-500/5"
@@ -242,22 +212,10 @@ function AvatarUsernameRow({
                     autoFocus
                   />
                 </div>
-
-                {/* Inline action buttons */}
                 {showSuccess ? (
                   <div className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500/20 text-green-400 rounded-lg">
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M5 13l4 4L19 7"
-                      />
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
                     <span className="text-sm font-medium">Saved</span>
                   </div>
@@ -270,38 +228,13 @@ function AvatarUsernameRow({
                       title="Save"
                     >
                       {isSaving ? (
-                        <svg
-                          className="w-4 h-4 animate-spin"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                        >
-                          <circle
-                            className="opacity-25"
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            strokeWidth="3"
-                          />
-                          <path
-                            className="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                          />
+                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                         </svg>
                       ) : (
-                        <svg
-                          className="w-4 h-4"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M5 13l4 4L19 7"
-                          />
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                         </svg>
                       )}
                     </button>
@@ -311,101 +244,40 @@ function AvatarUsernameRow({
                       className="p-2 bg-lol-surface hover:bg-lol-border text-gray-400 hover:text-white rounded-lg transition-colors disabled:opacity-50"
                       title="Cancel"
                     >
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M6 18L18 6M6 6l12 12"
-                        />
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                       </svg>
                     </button>
                   </div>
                 )}
               </div>
-
-              {/* Error message */}
-              {displayError && (
+              {localError && (
                 <div className="flex items-center gap-2 px-1 text-red-400 text-sm">
-                  <svg
-                    className="w-3.5 h-3.5 shrink-0"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
+                  <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  <span>{displayError}</span>
+                  <span>{localError}</span>
                 </div>
               )}
             </div>
           ) : (
-            <>
-              <div className="text-white font-medium truncate text-xl">
-                {displayName || (
-                  <span className="text-gray-500 italic">Not set</span>
-                )}
-              </div>
-              <div className="text-xs text-gray-500 mt-0.5">
-                This is how others will see you
-              </div>
-            </>
+            <div className="text-white font-medium truncate">
+              {displayName || <span className="text-gray-500 italic">Not set</span>}
+            </div>
           )}
         </div>
-        {/* Edit button */}
         {!isEditing && (
           <button
             onClick={() => setIsEditing(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 text-gray-400 hover:text-white text-sm font-medium bg-lol-surface hover:bg-lol-border rounded-lg transition-colors opacity-0 group-hover:opacity-100"
           >
-            <svg
-              className="w-3.5 h-3.5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-              />
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
             </svg>
-            Edit username
+            Edit
           </button>
         )}
       </div>
-      {/* Avatar upload error (shown outside of username editing) */}
-      {!isEditing && error && (
-        <div className="flex items-center gap-2 mx-0 mt-1 mb-2 px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400">
-          <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <span>{error}</span>
-        </div>
-      )}
-      {/* Avatar moderation cooldown warning */}
-      {isAvatarCooldown && (
-        <div className="flex items-center gap-2 mx-0 mt-1 mb-2 px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400">
-          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
-          </svg>
-          <span>
-            Your avatar was removed by a moderator. You can set a new avatar after{' '}
-            <span className="font-medium text-red-300">{cooldownDateStr}</span>.
-          </span>
-        </div>
-      )}
     </div>
   );
 }
@@ -1238,16 +1110,35 @@ export default function ProfilePage() {
     updateEmail,
     updatePrivacy,
     deleteAccount,
+    updateProfileCard,
   } = useAuthStore();
   const { isFreeTier } = useTierLimits();
   const { defaultRegion, setDefaultRegion } = useSettingsStore();
-  const { teams } = useMyTeamStore();
+  const { teams, memberships } = useMyTeamStore();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showAvatarModal, setShowAvatarModal] = useState(false);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
+
+  // Profile card appearance state (local preview)
+  const [previewCardBg, setPreviewCardBg] = useState<string | null>(null);
+  const [previewGradient, setPreviewGradient] = useState<string | null>(null);
+  const [previewGradientAngle, setPreviewGradientAngle] = useState<number | null>(null);
+  const [cardSaving, setCardSaving] = useState(false);
+  const [cardError, setCardError] = useState<string | null>(null);
+  const [cardInitialized, setCardInitialized] = useState(false);
+
+  // Sync local preview state with profile data on load
+  useEffect(() => {
+    if (profile && !cardInitialized) {
+      setPreviewCardBg(profile.profileCardBg);
+      setPreviewGradient(profile.profileCardGradient);
+      setPreviewGradientAngle(profile.profileCardGradientAngle);
+      setCardInitialized(true);
+    }
+  }, [profile, cardInitialized]);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -1435,6 +1326,53 @@ export default function ProfilePage() {
     setIsUploadingAvatar(false);
   };
 
+  // Appearance: save card color
+  const handleSaveCardColor = async (color: string | null) => {
+    setPreviewCardBg(color);
+    // If clearing color, also clear gradient
+    if (!color) {
+      setPreviewGradient(null);
+      setPreviewGradientAngle(null);
+    }
+    setCardSaving(true);
+    setCardError(null);
+    const result = await updateProfileCard(
+      color,
+      color ? previewGradient : null,
+      color ? previewGradientAngle : null
+    );
+    if (result.error) {
+      setCardError(result.error);
+      // Revert preview
+      setPreviewCardBg(profile?.profileCardBg ?? null);
+    }
+    setCardSaving(false);
+  };
+
+  // Appearance: save gradient
+  const handleSaveGradient = async (gradientColor: string | null, angle: number) => {
+    setPreviewGradient(gradientColor);
+    setPreviewGradientAngle(angle);
+    setCardSaving(true);
+    setCardError(null);
+    const result = await updateProfileCard(previewCardBg, gradientColor, angle);
+    if (result.error) {
+      setCardError(result.error);
+      setPreviewGradient(profile?.profileCardGradient ?? null);
+      setPreviewGradientAngle(profile?.profileCardGradientAngle ?? null);
+    }
+    setCardSaving(false);
+  };
+
+  const isSupporterPlus = profile?.tier === 'supporter' || profile?.tier === 'admin' || profile?.tier === 'developer';
+  const isPaidPlus = profile?.tier === 'paid' || isSupporterPlus;
+
+  const previewCardColors: ProfileCardColors = {
+    bg: previewCardBg,
+    gradient: previewGradient,
+    gradientAngle: previewGradientAngle,
+  };
+
   // Guest view
   if (!isAuthenticated) {
     return (
@@ -1591,18 +1529,10 @@ export default function ProfilePage() {
         </div>
 
         <div className="divide-y divide-lol-border/50">
-          {/* Avatar + Username Row */}
-          <AvatarUsernameRow
-            avatarUrl={profile?.avatarUrl}
+          {/* Username Row */}
+          <UsernameRow
             displayName={profile?.displayName || ""}
-            isUploading={isUploadingAvatar}
-            error={avatarError}
-            onAvatarClick={handleAvatarClick}
-            onRemoveAvatar={profile?.avatarUrl ? handleRemoveAvatar : undefined}
-            onSaveUsername={updateDisplayName}
-            fileInputRef={fileInputRef}
-            onFileChange={handleFileChange}
-            avatarCooldownUntil={profile?.avatarModeratedUntil}
+            onSave={updateDisplayName}
           />
 
           {/* Role Row */}
@@ -1641,6 +1571,79 @@ export default function ProfilePage() {
               }
               infoTooltip="Contact support@teamcomp.lol or Discord to change your email"
             />
+          )}
+        </div>
+
+        {/* Preview Card */}
+        <div className="mt-4">
+          <ProfilePreviewCard
+            avatarUrl={profile?.avatarUrl ?? null}
+            displayName={profile?.displayName || ""}
+            tier={profile?.tier || "free"}
+            role={profile?.role || null}
+            roleTeamName={profile?.roleTeamName || null}
+            cardColors={previewCardColors}
+            isUploading={isUploadingAvatar}
+            onAvatarClick={handleAvatarClick}
+            onRemoveAvatar={profile?.avatarUrl ? handleRemoveAvatar : undefined}
+            fileInputRef={fileInputRef}
+            onFileChange={handleFileChange}
+            avatarCooldownUntil={profile?.avatarModeratedUntil}
+            avatarError={avatarError}
+            acceptGif={isSupporterPlus}
+          />
+        </div>
+
+        {/* Card Customization */}
+        <div>
+          <span className="text-xs text-gray-500 uppercase tracking-wide mb-2 block">Customize Appearance</span>
+          {isPaidPlus ? (
+            <div>
+              <div className="flex items-center gap-4">
+                <ColorPickerDropdown
+                  selectedColor={previewCardBg}
+                  onSelect={(hex) => handleSaveCardColor(hex)}
+                  disabled={cardSaving}
+                />
+
+                {isSupporterPlus ? (
+                  previewCardBg ? (
+                    <>
+                      <ColorPickerDropdown
+                        selectedColor={previewGradient}
+                        onSelect={(hex) => handleSaveGradient(hex, previewGradientAngle ?? 135)}
+                        disabled={cardSaving}
+                      />
+                      {previewGradient && (
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={previewGradientAngle ?? 135}
+                            onChange={(e) => handleSaveGradient(previewGradient, Number(e.target.value))}
+                            disabled={cardSaving}
+                            className="bg-lol-dark border border-lol-border rounded-lg px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-lol-gold/50 cursor-pointer"
+                          >
+                            {GRADIENT_ANGLES.map((a) => (
+                              <option key={a.angle} value={a.angle}>{a.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </>
+                  ) : null
+                ) : null}
+              </div>
+
+              {cardError && (
+                <p className="text-xs text-red-400 mt-2">{cardError}</p>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 px-4 py-3 bg-lol-surface rounded-xl border border-lol-border">
+              <svg className="w-5 h-5 text-lol-gold shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+              <span className="text-xs text-gray-400">Upgrade to Pro</span>
+            </div>
           )}
         </div>
       </div>
@@ -2134,6 +2137,61 @@ export default function ProfilePage() {
               </div>
             </div>
           )}
+
+          {/* Team Subscriptions */}
+          {(() => {
+            const paidTeams = [
+              ...teams
+                .filter((t) => (t as any).has_team_plan || (t as any).hasTeamPlan)
+                .map((t) => ({
+                  id: t.id,
+                  name: t.name,
+                  status: ((t as any).team_plan_status || (t as any).teamPlanStatus || 'active') as string,
+                  isOwner: true,
+                })),
+              ...memberships
+                .filter((m) => m.hasTeamPlan)
+                .map((m) => ({
+                  id: m.teamId,
+                  name: m.teamName,
+                  status: (m.teamPlanStatus || 'active') as string,
+                  isOwner: false,
+                })),
+            ];
+            if (paidTeams.length === 0) return null;
+            return (
+              <div className="mt-4 pt-4 border-t border-lol-border/50">
+                <div className="text-xs text-gray-500 uppercase tracking-wide mb-3">Team Subscriptions</div>
+                <div className="space-y-2">
+                  {paidTeams.map((pt) => (
+                    <div key={pt.id} className="flex items-center justify-between text-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="text-white font-medium">{pt.name}</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                          pt.status === 'active' ? 'bg-blue-500/20 text-blue-400'
+                            : pt.status === 'canceling' ? 'bg-yellow-500/20 text-yellow-400'
+                            : 'bg-gray-500/20 text-gray-400'
+                        }`}>
+                          {pt.status === 'active' ? 'Active' : pt.status === 'canceling' ? 'Canceling' : 'Canceled'}
+                        </span>
+                        {!pt.isOwner && (
+                          <span className="text-[10px] text-gray-500">Member</span>
+                        )}
+                      </div>
+                      {pt.isOwner && (
+                        <button
+                          onClick={handleManageSubscription}
+                          className="text-xs text-lol-gold hover:text-lol-gold-light transition-colors"
+                        >
+                          Manage
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Upgrade Options */}

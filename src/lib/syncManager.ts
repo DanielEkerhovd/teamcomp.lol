@@ -28,6 +28,11 @@ const debounceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 // Pending syncs - keyed by storeKey, stores the data to sync
 const pendingSyncs: Map<string, PendingSync> = new Map();
 
+// Guard flag: true while loading data from cloud into local stores.
+// When true, the cloudSync middleware should skip triggering sync-back to cloud
+// to prevent a destructive cycle (cloud → local setState → cloudSync → overwrites cloud).
+let _isSyncingFromCloud = false;
+
 // Helper to add small delay between Supabase operations to prevent lock contention
 const throttleDelay = (ms: number = 100) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -69,6 +74,13 @@ export const syncManager = {
    */
   getState(storeKey: string): SyncState {
     return syncStates.get(storeKey) || { status: 'idle', lastSyncedAt: null, error: null };
+  },
+
+  /**
+   * Check if we're currently loading from cloud (guards against sync-back)
+   */
+  isSyncingFromCloud(): boolean {
+    return _isSyncingFromCloud;
   },
 
   /**
@@ -175,11 +187,13 @@ export const syncManager = {
       debounceMs?: number;
       transformItem?: (item: T, userId: string, index: number) => unknown;
       deleteOrphans?: boolean;
+      /** Extra filters applied to orphan deletion query (e.g. { my_team_id: null } to only delete personal rows) */
+      deleteFilter?: Record<string, unknown>;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       onAfterSync?: (data: any, storeKey: string, debounceMs: number) => void;
     } = {}
   ): Promise<void> {
-    const { debounceMs = 3000, transformItem, deleteOrphans = true, onAfterSync } = options;
+    const { debounceMs = 3000, transformItem, deleteOrphans = true, deleteFilter, onAfterSync } = options;
 
     // Store pending sync data for potential flush on page unload
     pendingSyncs.set(storeKey, {
@@ -187,7 +201,7 @@ export const syncManager = {
       storeKey,
       tableName,
       data: items,
-      options: { transformItem, deleteOrphans },
+      options: { transformItem, deleteOrphans, deleteFilter },
     });
 
     const existingTimer = debounceTimers.get(storeKey);
@@ -196,7 +210,7 @@ export const syncManager = {
     }
 
     const timer = setTimeout(async () => {
-      await this._executeArraySync(storeKey, tableName, items, { transformItem, deleteOrphans, onAfterSync, debounceMs });
+      await this._executeArraySync(storeKey, tableName, items, { transformItem, deleteOrphans, deleteFilter, onAfterSync, debounceMs });
     }, debounceMs);
 
     debounceTimers.set(storeKey, timer);
@@ -212,12 +226,13 @@ export const syncManager = {
     options: {
       transformItem?: (item: T, userId: string, index: number) => unknown;
       deleteOrphans?: boolean;
+      deleteFilter?: Record<string, unknown>;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       onAfterSync?: (data: any, storeKey: string, debounceMs: number) => void;
       debounceMs?: number;
     }
   ): Promise<void> {
-    const { transformItem, deleteOrphans = true, onAfterSync, debounceMs = 3000 } = options;
+    const { transformItem, deleteOrphans = true, deleteFilter, onAfterSync, debounceMs = 3000 } = options;
 
     if (!this.isAvailable() || !supabase) {
       return;
@@ -250,21 +265,35 @@ export const syncManager = {
         const localIds = items.map((item) => item.id);
         if (localIds.length > 0) {
           // Delete items that exist in cloud but not locally
-          const { error: deleteError } = await supabase
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          let query: any = supabase
             .from(tableName)
             .delete()
-            .eq('user_id', user.id)
-            .not('id', 'in', `(${localIds.join(',')})`);
+            .eq('user_id', user.id);
+          // Apply extra filters (e.g. only delete personal drafts, not team ones)
+          if (deleteFilter) {
+            for (const [key, value] of Object.entries(deleteFilter)) {
+              query = value === null ? query.is(key, null) : query.eq(key, value);
+            }
+          }
+          const { error: deleteError } = await query.not('id', 'in', `(${localIds.join(',')})`);
 
           if (deleteError && !deleteError.message.includes('no rows')) {
             console.warn(`Delete orphans warning for ${storeKey}:`, deleteError);
           }
         } else {
           // All items deleted locally - delete all items in cloud for this user
-          const { error: deleteError } = await supabase
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          let query: any = supabase
             .from(tableName)
             .delete()
             .eq('user_id', user.id);
+          if (deleteFilter) {
+            for (const [key, value] of Object.entries(deleteFilter)) {
+              query = value === null ? query.is(key, null) : query.eq(key, value);
+            }
+          }
+          const { error: deleteError } = await query;
 
           if (deleteError && !deleteError.message.includes('no rows')) {
             console.warn(`Delete all warning for ${storeKey}:`, deleteError);
@@ -346,7 +375,7 @@ export const syncManager = {
       const opts = pending.options as { transform?: (data: unknown, userId: string) => unknown; upsertKey?: string };
       await this._executeSingleSync(pending.storeKey, pending.tableName, pending.data, opts);
     } else if (pending.type === 'array') {
-      const opts = pending.options as { transformItem?: (item: { id: string }, userId: string, index: number) => unknown; deleteOrphans?: boolean };
+      const opts = pending.options as { transformItem?: (item: { id: string }, userId: string, index: number) => unknown; deleteOrphans?: boolean; deleteFilter?: Record<string, unknown> };
       await this._executeArraySync(pending.storeKey, pending.tableName, pending.data as { id: string }[], opts);
     } else if (pending.type === 'players') {
       const opts = pending.options as { teamId: string };
@@ -544,6 +573,8 @@ export const syncManager = {
           priority_groups: session.priorityGroups || [],
           notes: session.notes,
           notepad: session.notepad || [],
+          is_favorite: session.isFavorite || false,
+          is_planned: session.isPlanned || false,
           sort_order: index,
         }),
       });
@@ -776,6 +807,7 @@ export const syncManager = {
     const { user } = useAuthStore.getState();
     if (!user) return;
 
+    _isSyncingFromCloud = true;
     try {
       // Import stores dynamically
       const { useMyTeamStore } = await import('../stores/useMyTeamStore');
@@ -825,6 +857,14 @@ export const syncManager = {
               })),
               createdAt: new Date(team.created_at).getTime(),
               updatedAt: new Date(team.updated_at).getTime(),
+              hasTeamPlan: team.has_team_plan || false,
+              teamPlanStatus: team.team_plan_status || null,
+              permDrafts: team.perm_drafts || 'admins',
+              permEnemyTeams: team.perm_enemy_teams || 'admins',
+              permPlayers: team.perm_players || 'admins',
+              bannedAt: team.banned_at || null,
+              banReason: team.ban_reason || null,
+              banExpiresAt: team.ban_expires_at || null,
             };
           })
         );
@@ -888,23 +928,38 @@ export const syncManager = {
               .eq('team_id', team.id)
               .order('sort_order');
 
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const loadedPlayers = (players || []).map((p: any) => ({
+              id: p.id,
+              summonerName: p.summoner_name,
+              tagLine: p.tag_line || '',
+              role: p.role,
+              notes: p.notes || '',
+              region: p.region || 'euw',
+              isSub: p.is_sub || false,
+              championPool: p.champion_pool || [],
+              championGroups: p.champion_groups || [],
+            }));
+
+            // Fill in empty players for any missing roles so role slots always have input fields
+            const standardRoles = ['top', 'jungle', 'mid', 'adc', 'support'];
+            const mainPlayers = loadedPlayers.filter((p: { isSub?: boolean }) => !p.isSub);
+            const subs = loadedPlayers.filter((p: { isSub?: boolean }) => p.isSub);
+            const filledPlayers = standardRoles.map(role => {
+              const existing = mainPlayers.find((p: { role: string }) => p.role === role);
+              return existing || {
+                id: Math.random().toString(36).substring(2, 9),
+                summonerName: '', tagLine: '', role, notes: '', region: 'euw',
+                isSub: false, championPool: [], championGroups: [],
+              };
+            });
+
             return {
               id: team.id,
               name: team.name,
               notes: team.notes || '',
               isFavorite: team.is_favorite || false,
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              players: (players || []).map((p: any) => ({
-                id: p.id,
-                summonerName: p.summoner_name,
-                tagLine: p.tag_line || '',
-                role: p.role,
-                notes: p.notes || '',
-                region: p.region || 'euw',
-                isSub: p.is_sub || false,
-                championPool: p.champion_pool || [],
-                championGroups: p.champion_groups || [],
-              })),
+              players: [...filledPlayers, ...subs],
               createdAt: new Date(team.created_at).getTime(),
               updatedAt: new Date(team.updated_at).getTime(),
             };
@@ -957,6 +1012,8 @@ export const syncManager = {
           priorityGroups: s.priority_groups || [],
           notes: s.notes || '',
           notepad: s.notepad || [],
+          isFavorite: s.is_favorite || false,
+          isPlanned: s.is_planned || false,
           createdAt: new Date(s.created_at).getTime(),
           updatedAt: new Date(s.updated_at).getTime(),
         }));
@@ -984,6 +1041,8 @@ export const syncManager = {
               priority_groups: session.priorityGroups || [],
               notes: session.notes,
               notepad: session.notepad || [],
+              is_favorite: session.isFavorite || false,
+              is_planned: session.isPlanned || false,
               sort_order: index,
             }),
           });
@@ -1178,6 +1237,8 @@ export const syncManager = {
       console.log('All data loaded from cloud');
     } catch (error) {
       console.error('Error loading from cloud:', error);
+    } finally {
+      _isSyncingFromCloud = false;
     }
   },
 
@@ -1207,7 +1268,7 @@ export const syncManager = {
         customPoolsRes,
         templatesRes,
       ] = await Promise.all([
-        supabase.from('my_teams').select('id, name, notes').eq('user_id', userId),
+        supabase.from('my_teams').select('id, name, notes, has_team_plan, team_plan_status, perm_drafts, perm_enemy_teams, perm_players').eq('user_id', userId),
         supabase.from('enemy_teams').select('id, name, notes').eq('user_id', userId),
         supabase.from('draft_sessions').select('id, name, enemy_team_id, my_team_id, ban_groups, priority_groups').eq('user_id', userId),
         supabase.from('player_pools').select('id, summoner_name, role, champion_groups').eq('user_id', userId),
@@ -1263,6 +1324,11 @@ export const syncManager = {
           name: t.name,
           notes: t.notes || '',
           players: playersByTeam.get(t.id) || [],
+          hasTeamPlan: t.has_team_plan || false,
+          teamPlanStatus: t.team_plan_status || null,
+          permDrafts: t.perm_drafts || 'admins',
+          permEnemyTeams: t.perm_enemy_teams || 'admins',
+          permPlayers: t.perm_players || 'admins',
         });
       });
 
@@ -1447,8 +1513,10 @@ export const syncManager = {
         if (upsertError) throw upsertError;
       }
 
-      // Delete orphan players and empty players from cloud
-      // Only keep non-empty player IDs - this ensures empty players get deleted from cloud
+      // Delete orphan players (players in cloud that no longer exist locally)
+      // Only delete specific orphans — NEVER delete ALL players for a team.
+      // When nonEmptyPlayers is empty it likely means the store was reset from
+      // a cloud load with missing data; bulk-deleting would destroy the real data.
       const localIds = nonEmptyPlayers.map((p) => p.id);
       if (localIds.length > 0) {
         const { error: deleteError } = await supabase
@@ -1460,17 +1528,8 @@ export const syncManager = {
         if (deleteError && !deleteError.message.includes('no rows')) {
           console.warn(`Delete orphan players warning for ${fullKey}:`, deleteError);
         }
-      } else {
-        // If all players are empty, delete all players for this team from cloud
-        const { error: deleteError } = await supabase
-          .from(tableName)
-          .delete()
-          .eq('team_id', teamId);
-
-        if (deleteError && !deleteError.message.includes('no rows')) {
-          console.warn(`Delete all players warning for ${fullKey}:`, deleteError);
-        }
       }
+      // When nonEmptyPlayers is empty, skip deletion entirely to protect cloud data
 
       // Clear from pending syncs on success
       pendingSyncs.delete(fullKey);

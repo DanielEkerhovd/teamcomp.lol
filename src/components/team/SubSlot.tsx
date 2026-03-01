@@ -8,9 +8,10 @@ interface SubSlotProps {
   player: Player;
   onPlayerChange: (playerId: string, updates: Partial<Omit<Player, 'id'>>) => void;
   onRemove: () => void;
+  readOnly?: boolean;
 }
 
-export default function SubSlot({ player, onPlayerChange, onRemove }: SubSlotProps) {
+export default function SubSlot({ player, onPlayerChange, onRemove, readOnly = false }: SubSlotProps) {
   const [isRoleOpen, setIsRoleOpen] = useState(false);
   const roleRef = useRef<HTMLDivElement>(null);
 

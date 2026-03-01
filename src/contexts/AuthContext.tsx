@@ -60,6 +60,7 @@ const AuthContext = createContext<AuthContextValue>({ isConfigured: false });
 
 interface PendingDowngrade {
   downgradedAt: string;
+  downgradeReason: string | null;
   contentData: DowngradeContentData;
 }
 
@@ -82,13 +83,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       contentData.drafts.length > FREE_TIER_MAX_DRAFTS;
 
     if (isOverLimit) {
-      setPendingDowngrade({ downgradedAt: profile.downgradedAt, contentData });
+      setPendingDowngrade({ downgradedAt: profile.downgradedAt, downgradeReason: profile.downgradeReason, contentData });
     } else {
       // Within limits already — silently clear the flag
       await clearDowngradeFlag(user.id);
       // Update local profile state
       useAuthStore.setState({
-        profile: { ...profile, downgradedAt: null },
+        profile: { ...profile, downgradedAt: null, downgradeReason: null },
       });
     }
   }, []);
@@ -498,6 +499,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         <TierDowngradeModal
           isOpen={true}
           downgradedAt={pendingDowngrade.downgradedAt}
+          downgradeReason={pendingDowngrade.downgradeReason}
           contentData={pendingDowngrade.contentData}
           onConfirm={handleDowngradeConfirm}
           onResubscribed={handleDowngradeResubscribed}

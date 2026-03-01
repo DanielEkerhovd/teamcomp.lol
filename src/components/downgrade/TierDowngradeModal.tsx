@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import Button from '../ui/Button';
 import type { ContentItem } from '../../lib/downgradeService';
 import { FREE_TIER_MAX_TEAMS, FREE_TIER_MAX_ENEMY_TEAMS, FREE_TIER_MAX_DRAFTS } from '../../stores/useAuthStore';
-import { createCheckoutSession, STRIPE_PRICES, isStripeConfigured } from '../../lib/stripeService';
+import { createCheckoutSession, createPortalSession, STRIPE_PRICES, isStripeConfigured } from '../../lib/stripeService';
 
 function ToggleSwitch({ checked, onChange, disabled }: { checked: boolean; onChange: () => void; disabled?: boolean }) {
   return (
@@ -40,6 +40,8 @@ export interface TierDowngradeModalProps {
   };
   onConfirm: (kept: { teamIds: string[]; enemyTeamIds: string[]; draftIds: string[] }) => Promise<void>;
   onResubscribed: () => void;
+  /** Why the user was downgraded — changes modal wording. */
+  downgradeReason?: string | null;
   /** When true, shows a test banner, disables Stripe checkout, and adds a close button. No data changes. */
   testMode?: boolean;
 }
@@ -69,6 +71,7 @@ export default function TierDowngradeModal({
   contentData,
   onConfirm,
   onResubscribed,
+  downgradeReason,
   testMode = false,
 }: TierDowngradeModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -155,22 +158,25 @@ export default function TierDowngradeModal({
     }
   };
 
+  const isPaymentFailure = downgradeReason === 'payment_failed';
+
   const handleResubscribe = async () => {
     if (testMode) return; // No-op in test mode
     setCheckoutLoading(true);
     setError(null);
     try {
-      const result = await createCheckoutSession({
-        mode: 'subscription',
-        priceId: STRIPE_PRICES.pro,
-      });
+      // Payment failure → billing portal to update payment method
+      // Cancellation → new checkout session
+      const result = isPaymentFailure
+        ? await createPortalSession()
+        : await createCheckoutSession({ mode: 'subscription', priceId: STRIPE_PRICES.pro });
       if (result.error) {
         setError(result.error);
       } else {
         onResubscribed();
       }
     } catch {
-      setError('Failed to start checkout. Please try again.');
+      setError(isPaymentFailure ? 'Failed to open billing portal. Please try again.' : 'Failed to start checkout. Please try again.');
     } finally {
       setCheckoutLoading(false);
     }
@@ -315,21 +321,31 @@ export default function TierDowngradeModal({
           )}
 
           {/* Icon */}
-          <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-gradient-to-br from-amber-500/20 to-amber-500/5 flex items-center justify-center">
-            <svg className="w-7 h-7 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+          <div className={`w-14 h-14 mx-auto mb-4 rounded-full flex items-center justify-center ${
+            isPaymentFailure
+              ? 'bg-gradient-to-br from-red-500/20 to-red-500/5'
+              : 'bg-gradient-to-br from-amber-500/20 to-amber-500/5'
+          }`}>
+            <svg className={`w-7 h-7 ${isPaymentFailure ? 'text-red-400' : 'text-amber-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              {isPaymentFailure ? (
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              )}
             </svg>
           </div>
 
           {/* Title */}
           <h3 className="text-xl font-semibold text-white text-center mb-2">
-            Subscription Expired
+            {isPaymentFailure ? 'Payment Failed' : 'Subscription Expired'}
           </h3>
 
           {/* Description */}
           <p className="text-gray-400 text-sm text-center mb-4">
-            Your plan has been downgraded to Free. You have more content than the free plan allows.
-            Choose what to keep, or resubscribe to retain everything.
+            {isPaymentFailure
+              ? 'Your payment couldn\'t be processed. Update your payment method to keep all your content, or choose what to keep on the free plan.'
+              : 'Your plan has been downgraded to Free. You have more content than the free plan allows. Choose what to keep, or resubscribe to retain everything.'
+            }
           </p>
 
           {/* Grace period banner */}
@@ -404,7 +420,7 @@ export default function TierDowngradeModal({
                     <span>Loading...</span>
                   </>
                 ) : (
-                  <span>Resubscribe</span>
+                  <span>{isPaymentFailure ? 'Update Payment Method' : 'Resubscribe'}</span>
                 )}
               </Button>
             )}

@@ -155,7 +155,7 @@ export async function clearDowngradeFlag(userId: string): Promise<{ error: strin
 
   const { error } = await supabase
     .from('profiles')
-    .update({ downgraded_at: null } as never)
+    .update({ downgraded_at: null, downgrade_reason: null } as never)
     .eq('id', userId);
 
   if (error) {

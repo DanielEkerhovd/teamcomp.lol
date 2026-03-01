@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { Team, Player, createEmptyTeam, createSubPlayer, generateId, Region, Role, ROLES, ChampionTier, TieredChampion, Note } from '../types';
+import { Team, Player, createEmptyTeam, createSubPlayer, generateId, Region, Role, ROLES, ChampionTier, TieredChampion, ChampionGroup, Note } from '../types';
 import { useSettingsStore } from './useSettingsStore';
 import { cloudSync } from './middleware/cloudSync';
 import { syncManager } from '../lib/syncManager';
@@ -707,17 +707,51 @@ export const useEnemyTeamStore = create<EnemyTeamState>()(
 
           if (error) throw error;
 
-          const teams: Team[] = (data || []).map(row => ({
-            id: row.id,
-            name: row.name,
-            notes: row.notes || '',
-            isFavorite: row.is_favorite || false,
-            players: ROLES.map(role => ({
-              id: generateId(), summonerName: '', tagLine: '', role: role.value as Role,
-              notes: '', region: 'euw' as Region, isSub: false, championPool: [], championGroups: [],
-            })),
-            createdAt: new Date(row.created_at).getTime(),
-            updatedAt: new Date(row.updated_at).getTime(),
+          const teams: Team[] = await Promise.all((data || []).map(async row => {
+            // Load players for this enemy team
+            const { data: players } = await (supabase!
+              .from('enemy_players' as 'profiles')
+              .select('*')
+              .eq('team_id', row.id)
+              .order('sort_order' as 'id') as unknown as Promise<{ data: Array<{
+                id: string; summoner_name: string; tag_line: string; role: string;
+                notes: string; region: string; is_sub: boolean; sort_order: number;
+                champion_pool: TieredChampion[]; champion_groups: ChampionGroup[];
+              }> | null; error: Error | null }>);
+
+            const loadedPlayers: Player[] = (players || []).map(p => ({
+              id: p.id,
+              summonerName: p.summoner_name,
+              tagLine: p.tag_line || '',
+              role: p.role as Role,
+              notes: p.notes || '',
+              region: (p.region || 'euw') as Region,
+              isSub: p.is_sub || false,
+              championPool: p.champion_pool || [],
+              championGroups: p.champion_groups || [],
+            }));
+
+            // Fill in any missing roles with empty players
+            const filledPlayers = ROLES.map(role => {
+              const existing = loadedPlayers.find(p => p.role === role.value && !p.isSub);
+              return existing || {
+                id: generateId(), summonerName: '', tagLine: '', role: role.value as Role,
+                notes: '', region: 'euw' as Region, isSub: false, championPool: [], championGroups: [],
+              };
+            });
+
+            // Add subs
+            const subs = loadedPlayers.filter(p => p.isSub);
+
+            return {
+              id: row.id,
+              name: row.name,
+              notes: row.notes || '',
+              isFavorite: row.is_favorite || false,
+              players: [...filledPlayers, ...subs],
+              createdAt: new Date(row.created_at).getTime(),
+              updatedAt: new Date(row.updated_at).getTime(),
+            };
           }));
 
           set(state => ({

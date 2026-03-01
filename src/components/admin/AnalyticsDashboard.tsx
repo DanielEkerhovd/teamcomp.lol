@@ -17,7 +17,7 @@ interface AnalyticsData {
   devices: { device: string; count: number }[];
 }
 
-type DateRange = '7d' | '14d' | '30d' | '90d';
+type DateRange = '1d' | '7d' | '14d' | '30d' | '90d';
 
 const DEVICE_COLORS: Record<string, string> = {
   desktop: '#F0B232',
@@ -27,6 +27,7 @@ const DEVICE_COLORS: Record<string, string> = {
 };
 
 const DATE_RANGE_OPTIONS: { value: DateRange; label: string }[] = [
+  { value: '1d', label: 'Today' },
   { value: '7d', label: '7d' },
   { value: '14d', label: '14d' },
   { value: '30d', label: '30d' },

@@ -63,6 +63,8 @@ interface DraftState {
   deleteSession: (id: string) => void;
   setCurrentSession: (id: string | null) => void;
   getCurrentSession: () => DraftSession | undefined;
+  toggleFavorite: (id: string) => void;
+  togglePlanned: (id: string) => void;
 
   // Ban group actions
   addBanGroup: (name: string) => void;
@@ -147,6 +149,26 @@ export const useDraftStore = create<DraftState>()(
           const state = get();
           const session = state.sessions.find((s) => s.id === state.currentSessionId);
           return session ? migrateSession(session) : undefined;
+        },
+
+        toggleFavorite: (id: string) => {
+          set((state) => ({
+            sessions: state.sessions.map((session) =>
+              session.id === id
+                ? { ...session, isFavorite: !session.isFavorite }
+                : session
+            ),
+          }));
+        },
+
+        togglePlanned: (id: string) => {
+          set((state) => ({
+            sessions: state.sessions.map((session) =>
+              session.id === id
+                ? { ...session, isPlanned: !session.isPlanned }
+                : session
+            ),
+          }));
         },
 
         // Ban group actions
@@ -626,6 +648,8 @@ export const useDraftStore = create<DraftState>()(
         storeKey: 'draft-sessions',
         tableName: 'draft_sessions',
         isArraySync: true,
+        // Only delete orphan personal drafts — team drafts (my_team_id IS NOT NULL) are protected
+        deleteFilter: { my_team_id: null },
         selectSyncData: (state) => state.sessions,
         transformItem: (session: DraftSession, userId: string, index: number) => {
           const migrated = migrateSession(session);
@@ -641,6 +665,8 @@ export const useDraftStore = create<DraftState>()(
             priority_groups: migrated.priorityGroups,
             notes: session.notes,
             notepad: session.notepad || [],
+            is_favorite: session.isFavorite || false,
+            is_planned: session.isPlanned || false,
             sort_order: index,
           };
         },

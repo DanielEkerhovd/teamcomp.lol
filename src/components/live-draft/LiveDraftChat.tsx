@@ -105,18 +105,22 @@ export default function LiveDraftChat({
               ?? avatarMap[message.display_name]
               ?? null;
 
-            const avatar = avatarUrl ? (
-              <img
-                src={avatarUrl}
-                alt=""
-                className="w-7 h-7 min-w-7 min-h-7 rounded-full shrink-0 object-cover"
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <div className="w-7 h-7 rounded-full bg-lol-surface border border-lol-border flex items-center justify-center shrink-0">
-                <svg className="w-3.5 h-3.5 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
+            const avatar = (
+              <div className="relative w-7 h-7 min-w-7 min-h-7 shrink-0">
+                <div className="w-7 h-7 rounded-full bg-lol-surface border border-lol-border flex items-center justify-center">
+                  <svg className="w-3.5 h-3.5 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                </div>
+                {avatarUrl && (
+                  <img
+                    src={avatarUrl}
+                    alt=""
+                    className="absolute inset-0 w-7 h-7 rounded-full object-cover"
+                    referrerPolicy="no-referrer"
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                  />
+                )}
               </div>
             );
 

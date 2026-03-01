@@ -55,7 +55,12 @@
       "Bash(find /c/Coding/private/draft-sheet/supabase/migrations -name \"*.sql\" -exec grep -l \"live_draft_user_sessions\\\\|live_draft_chat\" {} ;)",
       "Bash(find \"c:\\\\Coding\\\\private\\\\draft-sheet\\\\supabase\\\\migrations\" -name \"*.sql\" -exec grep -l \"leave_team\\\\|respond_to_team_invite\" {} ;)",
       "Bash(find /c/Coding/private/draft-sheet -name \"*.sql\" -exec grep -l \"invite\" {} ;)",
-      "Bash(xargs cat)"
+      "Bash(xargs cat)",
+      "WebFetch(domain:oqbembibjssabskgfzme.supabase.co)",
+      "Bash(find /c/Coding/private/draft-sheet/supabase/migrations -name \"*.sql\" -exec grep -l \"CREATE TABLE.*my_teams\" {} ;)",
+      "Bash(find supabase/migrations -name \"*draft*\" -type f -exec basename {} ;)",
+      "Bash(find c:/Coding/private/draft-sheet/supabase/migrations -name \"*.sql\" -exec grep -l \"enemy_players\" {} ;)",
+      "Bash(find c:/Coding/private/draft-sheet/supabase/migrations -name \"*.sql\" -exec grep -H \"CREATE TABLE.*enemy_players\" {} ;)"
     ],
     "defaultMode": "acceptEdits"
   }

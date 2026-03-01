@@ -5,12 +5,14 @@ import { useAuthStore } from "../stores/useAuthStore";
 import { Card, Button } from "../components/ui";
 import { liveDraftService } from "../lib/liveDraftService";
 import type { LiveDraftSession } from "../types/liveDraft";
+import CreateSessionModal from "../components/live-draft/CreateSessionModal";
 
 export default function HomePage() {
   const { sessions } = useDraftStore();
   const { user } = useAuthStore();
   const [liveSessions, setLiveSessions] = useState<LiveDraftSession[]>([]);
   const [isLoadingLive, setIsLoadingLive] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   // Fetch live draft sessions
   const loadLiveSessions = useCallback(async () => {
@@ -349,28 +351,36 @@ export default function HomePage() {
             pastLiveSessions.length === 0 &&
             recentSessions.length === 0 &&
             !isLoadingLive && (
-              <div className="text-center py-6">
-                <div className="text-gray-500 mb-3">
-                  <svg
-                    className="w-10 h-10 mx-auto"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={1.5}
-                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                    />
-                  </svg>
+              <div className="h-full flex items-center justify-center py-6">
+                <div className="bg-lol-dark/50 border border-gray-700/50 rounded-xl px-8 py-6 flex flex-col items-center">
+                  <div className="w-12 h-12 rounded-full bg-gray-700/40 flex items-center justify-center mb-3">
+                    <svg
+                      className="w-6 h-6 text-gray-500"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={1.5}
+                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                      />
+                    </svg>
+                  </div>
+                  <p className="text-gray-400 font-medium mb-1">No sessions yet</p>
+                  <p className="text-gray-500 text-sm mb-4">Start drafting to see your sessions here</p>
+                  <div className="flex items-center gap-3">
+                    <Button size="sm" onClick={() => setIsCreateModalOpen(true)}>
+                      Start Live Draft
+                    </Button>
+                    <Link to="/draft">
+                      <Button variant="secondary" size="sm">
+                        Plan a Draft
+                      </Button>
+                    </Link>
+                  </div>
                 </div>
-                <p className="text-gray-500">No sessions yet</p>
-                <Link to="/live-draft" className="inline-block mt-3">
-                  <Button variant="outline" size="sm">
-                    Start a Live Draft
-                  </Button>
-                </Link>
               </div>
             )}
 
@@ -382,6 +392,12 @@ export default function HomePage() {
           )}
         </Card>
       </div>
+
+      {/* Create Live Draft Modal */}
+      <CreateSessionModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+      />
     </div>
   );
 }

@@ -40,6 +40,9 @@ export interface TeamPermissions {
   canEditAllPlayers: boolean;
   canEditOwnPlayer: boolean;
   canEditGroups: boolean;
+  canManageDrafts: boolean;
+  canManageEnemyTeams: boolean;
+  canManagePlayers: boolean;
   canLeave: boolean;
   role: TeamMemberRole;
   playerSlotId: string | null;
@@ -123,6 +126,9 @@ interface MyTeamState {
   addNote: () => void;
   updateNote: (noteId: string, content: string) => void;
   deleteNote: (noteId: string) => void;
+  // Membership team editing (for admins)
+  updateMembershipTeamData: (updater: (team: Team) => Team) => void;
+  syncMembershipPlayersToCloud: (teamId: string, players: Player[]) => void;
 }
 
 // Helper to get selected team and update it
@@ -202,6 +208,9 @@ export const useMyTeamStore = create<MyTeamState>()(
             canEditAllPlayers: true,
             canEditOwnPlayer: true,
             canEditGroups: true,
+            canManageDrafts: true,
+            canManageEnemyTeams: true,
+            canManagePlayers: true,
             canLeave: false, // Owner cannot leave, must transfer
             role: 'owner',
             playerSlotId: null,
@@ -214,6 +223,17 @@ export const useMyTeamStore = create<MyTeamState>()(
           const isAdmin = membership.role === 'admin';
           const isPlayer = membership.role === 'player';
 
+          const hasGranularPerm = (
+            permLevel: 'admins' | 'players' | 'all',
+            grant: boolean,
+          ): boolean => {
+            if (grant) return true; // explicit override
+            if (permLevel === 'all') return true;
+            if (permLevel === 'players' && (isAdmin || isPlayer)) return true;
+            if (permLevel === 'admins' && isAdmin) return true;
+            return false;
+          };
+
           return {
             canView: true,
             canEditTeamInfo: isAdmin,
@@ -221,6 +241,9 @@ export const useMyTeamStore = create<MyTeamState>()(
             canEditAllPlayers: isAdmin,
             canEditOwnPlayer: isPlayer && !!membership.playerSlotId,
             canEditGroups: membership.canEditGroups,
+            canManageDrafts: hasGranularPerm(membership.permDrafts, membership.grantDrafts),
+            canManageEnemyTeams: hasGranularPerm(membership.permEnemyTeams, membership.grantEnemyTeams),
+            canManagePlayers: hasGranularPerm(membership.permPlayers, membership.grantPlayers),
             canLeave: true,
             role: membership.role,
             playerSlotId: membership.playerSlotId,
@@ -235,6 +258,9 @@ export const useMyTeamStore = create<MyTeamState>()(
           canEditAllPlayers: false,
           canEditOwnPlayer: false,
           canEditGroups: false,
+          canManageDrafts: false,
+          canManageEnemyTeams: false,
+          canManagePlayers: false,
           canLeave: false,
           role: 'viewer',
           playerSlotId: null,
@@ -339,15 +365,28 @@ export const useMyTeamStore = create<MyTeamState>()(
       },
 
       updatePlayer: (playerId: string, updates: Partial<Omit<Player, 'id'>>) => {
-        set((state) =>
-          updateSelectedTeam(state, (team) => ({
-            ...team,
-            players: team.players.map((player) =>
-              player.id === playerId ? { ...player, ...updates } : player
-            ),
-            updatedAt: Date.now(),
-          }))
-        );
+        const state = get();
+        const isMembership = state.memberships.some(m => m.teamId === state.selectedTeamId);
+
+        if (isMembership && state.membershipTeamData) {
+          // Update membershipTeamData locally
+          const updatedPlayers = state.membershipTeamData.players.map(p =>
+            p.id === playerId ? { ...p, ...updates } : p
+          );
+          set({ membershipTeamData: { ...state.membershipTeamData, players: updatedPlayers } });
+          // Sync to Supabase
+          syncManager.syncPlayersToCloud('membership-team', 'players', state.selectedTeamId, updatedPlayers);
+        } else {
+          set((state) =>
+            updateSelectedTeam(state, (team) => ({
+              ...team,
+              players: team.players.map((player) =>
+                player.id === playerId ? { ...player, ...updates } : player
+              ),
+              updatedAt: Date.now(),
+            }))
+          );
+        }
       },
 
       importFromOpgg: (region: Region, players: { summonerName: string; tagLine: string }[]) => {
@@ -424,28 +463,49 @@ export const useMyTeamStore = create<MyTeamState>()(
       },
 
       addSub: () => {
-        set((state) => {
-          const selectedTeam = state.teams.find((t) => t.id === state.selectedTeamId);
-          const currentSubs = selectedTeam?.players.filter((p) => p.isSub).length || 0;
-          if (currentSubs >= MAX_SUBS) return state;
+        const state = get();
+        const isMembership = state.memberships.some(m => m.teamId === state.selectedTeamId);
+        const teamData = isMembership ? state.membershipTeamData : state.teams.find((t) => t.id === state.selectedTeamId);
+        const currentSubs = teamData?.players.filter((p) => p.isSub).length || 0;
+        if (currentSubs >= MAX_SUBS) return;
 
-          const defaultRegion = useSettingsStore.getState().defaultRegion;
-          return updateSelectedTeam(state, (t) => ({
+        const defaultRegion = useSettingsStore.getState().defaultRegion;
+        const newSub = createSubPlayer(defaultRegion);
+
+        if (isMembership && state.membershipTeamData) {
+          const updated = { ...state.membershipTeamData, players: [...state.membershipTeamData.players, newSub], updatedAt: Date.now() };
+          set({ membershipTeamData: updated });
+          syncManager.syncPlayersToCloud('membership-team', 'players', state.selectedTeamId, updated.players);
+        } else {
+          set((state) => updateSelectedTeam(state, (t) => ({
             ...t,
-            players: [...t.players, createSubPlayer(defaultRegion)],
+            players: [...t.players, newSub],
             updatedAt: Date.now(),
-          }));
-        });
+          })));
+        }
       },
 
       removeSub: (playerId: string) => {
-        set((state) =>
-          updateSelectedTeam(state, (team) => ({
-            ...team,
-            players: team.players.filter((p) => p.id !== playerId),
+        const state = get();
+        const isMembership = state.memberships.some(m => m.teamId === state.selectedTeamId);
+
+        if (isMembership && state.membershipTeamData) {
+          const updated = {
+            ...state.membershipTeamData,
+            players: state.membershipTeamData.players.filter((p) => p.id !== playerId),
             updatedAt: Date.now(),
-          }))
-        );
+          };
+          set({ membershipTeamData: updated });
+          syncManager.syncPlayersToCloud('membership-team', 'players', state.selectedTeamId, updated.players);
+        } else {
+          set((state) =>
+            updateSelectedTeam(state, (team) => ({
+              ...team,
+              players: team.players.filter((p) => p.id !== playerId),
+              updatedAt: Date.now(),
+            }))
+          );
+        }
       },
 
       resetTeam: () => {
@@ -459,58 +519,85 @@ export const useMyTeamStore = create<MyTeamState>()(
       },
 
       swapPlayerRoles: (playerId1: string, playerId2: string) => {
-        set((state) =>
-          updateSelectedTeam(state, (team) => {
-            const players = [...team.players];
-            const player1 = players.find((p) => p.id === playerId1);
-            const player2 = players.find((p) => p.id === playerId2);
+        const state = get();
+        const isMembership = state.memberships.some(m => m.teamId === state.selectedTeamId);
 
-            if (!player1 || !player2) return team;
+        const swapper = (team: Team): Team => {
+          const players = [...team.players];
+          const player1 = players.find((p) => p.id === playerId1);
+          const player2 = players.find((p) => p.id === playerId2);
 
-            const tempRole = player1.role;
-            const tempIsSub = player1.isSub;
-            player1.role = player2.role;
-            player1.isSub = player2.isSub;
-            player2.role = tempRole;
-            player2.isSub = tempIsSub;
+          if (!player1 || !player2) return team;
 
-            return { ...team, players, updatedAt: Date.now() };
-          })
-        );
+          const tempRole = player1.role;
+          const tempIsSub = player1.isSub;
+          player1.role = player2.role;
+          player1.isSub = player2.isSub;
+          player2.role = tempRole;
+          player2.isSub = tempIsSub;
+
+          return { ...team, players, updatedAt: Date.now() };
+        };
+
+        if (isMembership && state.membershipTeamData) {
+          const updated = swapper(state.membershipTeamData);
+          set({ membershipTeamData: updated });
+          syncManager.syncPlayersToCloud('membership-team', 'players', state.selectedTeamId, updated.players);
+        } else {
+          set((state) => updateSelectedTeam(state, swapper));
+        }
       },
 
       moveToRole: (playerId: string, role: Role) => {
-        set((state) =>
-          updateSelectedTeam(state, (team) => {
-            const players = [...team.players];
-            const player = players.find((p) => p.id === playerId);
-            const existingPlayer = players.find((p) => p.role === role && !p.isSub);
+        const state = get();
+        const isMembership = state.memberships.some(m => m.teamId === state.selectedTeamId);
 
-            if (!player) return team;
+        const mover = (team: Team): Team => {
+          const players = [...team.players];
+          const player = players.find((p) => p.id === playerId);
+          const existingPlayer = players.find((p) => p.role === role && !p.isSub);
 
-            if (existingPlayer && existingPlayer.id !== playerId) {
-              existingPlayer.role = player.role;
-              existingPlayer.isSub = player.isSub;
-            }
+          if (!player) return team;
 
-            player.role = role;
-            player.isSub = false;
+          if (existingPlayer && existingPlayer.id !== playerId) {
+            existingPlayer.role = player.role;
+            existingPlayer.isSub = player.isSub;
+          }
 
-            return { ...team, players, updatedAt: Date.now() };
-          })
-        );
+          player.role = role;
+          player.isSub = false;
+
+          return { ...team, players, updatedAt: Date.now() };
+        };
+
+        if (isMembership && state.membershipTeamData) {
+          const updated = mover(state.membershipTeamData);
+          set({ membershipTeamData: updated });
+          syncManager.syncPlayersToCloud('membership-team', 'players', state.selectedTeamId, updated.players);
+        } else {
+          set((state) => updateSelectedTeam(state, mover));
+        }
       },
 
       moveToSubs: (playerId: string) => {
-        set((state) =>
-          updateSelectedTeam(state, (team) => ({
-            ...team,
-            players: team.players.map((p) =>
-              p.id === playerId ? { ...p, isSub: true } : p
-            ),
-            updatedAt: Date.now(),
-          }))
-        );
+        const state = get();
+        const isMembership = state.memberships.some(m => m.teamId === state.selectedTeamId);
+
+        const mover = (team: Team): Team => ({
+          ...team,
+          players: team.players.map((p) =>
+            p.id === playerId ? { ...p, isSub: true } : p
+          ),
+          updatedAt: Date.now(),
+        });
+
+        if (isMembership && state.membershipTeamData) {
+          const updated = mover(state.membershipTeamData);
+          set({ membershipTeamData: updated });
+          syncManager.syncPlayersToCloud('membership-team', 'players', state.selectedTeamId, updated.players);
+        } else {
+          set((state) => updateSelectedTeam(state, mover));
+        }
       },
 
       setChampionTier: (playerId: string, championId: string, tier: ChampionTier) => {
@@ -735,6 +822,18 @@ export const useMyTeamStore = create<MyTeamState>()(
             updatedAt: Date.now(),
           }))
         );
+      },
+
+      // Membership team editing — update membershipTeamData locally
+      updateMembershipTeamData: (updater: (team: Team) => Team) => {
+        const state = get();
+        if (!state.membershipTeamData) return;
+        set({ membershipTeamData: updater(state.membershipTeamData) });
+      },
+
+      // Sync membership team players to Supabase (debounced via syncManager)
+      syncMembershipPlayersToCloud: (teamId: string, players: Player[]) => {
+        syncManager.syncPlayersToCloud('membership-team', 'players', teamId, players);
       },
     }),
       {

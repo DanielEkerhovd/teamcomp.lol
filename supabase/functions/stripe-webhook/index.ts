@@ -31,7 +31,7 @@ serve(async (req) => {
 
     const proPriceId = Deno.env.get('STRIPE_PRO_PRICE_ID')!;
     const supporterPriceId = Deno.env.get('STRIPE_SUPPORTER_PRICE_ID')!;
-    const teamPriceId = Deno.env.get('STRIPE_TEAM_PRICE_ID') || '';
+    const teamPriceId = Deno.env.get('STRIPE_TEAM_PRO_PRICE_ID') || '';
 
     function tierFromPriceId(priceId: string): 'paid' | 'supporter' | 'team' | null {
       if (priceId === proPriceId) return 'paid';
@@ -215,9 +215,15 @@ serve(async (req) => {
             // Restore any archived content from a previous downgrade
             await adminClient.rpc('unarchive_user_content', { p_user_id: userId });
           } else if (subscription.status === 'canceled' || subscription.status === 'unpaid') {
+            const cancelReason = (subscription as any).cancellation_details?.reason;
+            const downgradeReason = (cancelReason === 'payment_failed' || cancelReason === 'payment_disputed')
+              ? 'payment_failed'
+              : 'canceled';
+
             await adminClient.from('profiles').update({
               tier: 'free',
               tier_expires_at: null,
+              downgrade_reason: downgradeReason,
             }).eq('id', userId);
           }
         }
@@ -252,10 +258,16 @@ serve(async (req) => {
           }).eq('id', teamId);
         } else {
           // --- PERSONAL SUBSCRIPTION ---
+          const cancelReason = (subscription as any).cancellation_details?.reason;
+          const downgradeReason = (cancelReason === 'payment_failed' || cancelReason === 'payment_disputed')
+            ? 'payment_failed'
+            : 'canceled';
+
           // Revert to free tier (trigger handles limit columns)
           await adminClient.from('profiles').update({
             tier: 'free',
             tier_expires_at: null,
+            downgrade_reason: downgradeReason,
           }).eq('id', userId);
         }
         break;

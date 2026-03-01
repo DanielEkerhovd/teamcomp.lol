@@ -1,0 +1,2 @@
+ALTER TABLE public.draft_sessions
+  ADD COLUMN IF NOT EXISTS is_planned BOOLEAN DEFAULT FALSE;

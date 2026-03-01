@@ -93,6 +93,7 @@ function NotificationItem({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         );
+      case 'warning':
       case 'moderation':
         return (
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -122,6 +123,8 @@ function NotificationItem({
         return 'bg-yellow-500/20 text-yellow-400';
       case 'draft_invite':
         return 'bg-orange-500/20 text-orange-400';
+      case 'warning':
+        return 'bg-amber-500/20 text-amber-400';
       case 'moderation':
         return 'bg-red-500/20 text-red-400';
       default:
@@ -132,15 +135,15 @@ function NotificationItem({
   const getActionLink = () => {
     switch (notification.type) {
       case 'team_invite':
-        return '/friends?tab=team_invites';
+        return '/social?tab=team_invites';
       case 'friend_request':
-        return '/friends?tab=pending';
+        return '/social?tab=pending';
       case 'team_member_joined':
       case 'team_member_left':
       case 'team_role_changed':
         return notification.data?.teamId ? `/my-teams?team=${notification.data.teamId}` : '/my-teams';
       case 'ownership_transfer_request':
-        return '/friends?tab=team_invites';
+        return '/social?tab=team_invites';
       case 'ownership_transfer_accepted':
       case 'ownership_transfer_declined':
       case 'ownership_transfer_cancelled':
@@ -164,6 +167,16 @@ function NotificationItem({
       </p>
       {notification.body && (
         <p className="text-xs text-gray-500 truncate shrink-0 max-w-35">{notification.body}</p>
+      )}
+      {notification.type === 'warning' && notification.data?.next_consequence && (
+        <p className="text-xs text-amber-400/80 truncate shrink-0">
+          Next offense: {
+            notification.data.next_consequence === 'temporary_ban' ? 'Temporary Ban' :
+            notification.data.next_consequence === 'permanent_ban' ? 'Permanent Ban' :
+            notification.data.next_consequence === 'account_deletion' ? 'Account Deletion' :
+            String(notification.data.next_consequence)
+          }
+        </p>
       )}
       <span className="text-xs text-gray-600 shrink-0 ml-auto">
         {formatDistanceToNow(notification.createdAt)}
@@ -645,7 +658,7 @@ export default function NotificationsPage() {
                         Add friends to start messaging
                       </p>
                       <Link
-                        to="/friends"
+                        to="/social"
                         className="inline-flex items-center gap-2 px-4 py-2 bg-lol-gold/10 hover:bg-lol-gold/20 text-lol-gold text-sm font-medium rounded-lg transition-colors"
                       >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -778,7 +791,7 @@ export default function NotificationsPage() {
               Choose a conversation from the list or start a new one with a friend.
             </p>
             <Link
-              to="/friends"
+              to="/social"
               className="inline-flex items-center gap-2 px-4 py-2 bg-lol-gold hover:bg-lol-gold-light text-lol-dark font-medium rounded-lg transition-colors"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

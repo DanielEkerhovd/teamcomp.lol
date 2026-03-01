@@ -90,32 +90,32 @@ function TeamCard({
         className={`flex items-center justify-center gap-3 h-full ${side === "red" ? "flex-row-reverse text-right" : ""}`}
       >
         {/* Avatar with ready badge overlay */}
-        <div className="relative shrink-0">
-          {team.captainAvatarUrl ? (
+        <div className="relative shrink-0 w-8 h-8">
+          <div
+            className={`w-8 h-8 rounded-full flex items-center justify-center ${c.bg}`}
+          >
+            <svg
+              className={`w-5 h-5 ${c.icon}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+              />
+            </svg>
+          </div>
+          {team.captainAvatarUrl && (
             <img
               src={team.captainAvatarUrl}
               alt=""
-              className="w-8 h-8 rounded-full object-cover"
+              className="absolute inset-0 w-8 h-8 rounded-full object-cover"
               referrerPolicy="no-referrer"
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
             />
-          ) : (
-            <div
-              className={`w-8 h-8 rounded-full flex items-center justify-center ${c.bg}`}
-            >
-              <svg
-                className={`w-5 h-5 ${c.icon}`}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                />
-              </svg>
-            </div>
           )}
           {isReady && (
             <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-green-500 border-2 border-lol-card flex items-center justify-center">
@@ -236,31 +236,32 @@ function SidePickerCard({
           className={`flex items-center justify-center gap-3 h-full ${side === "red" ? "flex-row-reverse text-right" : ""}`}
         >
           {/* Avatar */}
-          <div className="relative shrink-0">
-            {team.captainAvatarUrl ? (
+          <div className="relative shrink-0 w-8 h-8">
+            <div
+              className={`w-8 h-8 rounded-full flex items-center justify-center ${isBlue ? "bg-blue-400/10" : "bg-red-400/10"}`}
+            >
+              <svg
+                className={`w-5 h-5 ${c.icon}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                />
+              </svg>
+            </div>
+            {team.captainAvatarUrl && (
               <img
                 src={team.captainAvatarUrl}
                 alt=""
-                className="w-8 h-8 rounded-full"
+                className="absolute inset-0 w-8 h-8 rounded-full object-cover"
+                referrerPolicy="no-referrer"
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
               />
-            ) : (
-              <div
-                className={`w-8 h-8 rounded-full flex items-center justify-center ${isBlue ? "bg-blue-400/10" : "bg-red-400/10"}`}
-              >
-                <svg
-                  className={`w-5 h-5 ${c.icon}`}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                  />
-                </svg>
-              </div>
             )}
             {isReady && (
               <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-green-500 border-2 border-lol-card flex items-center justify-center">
@@ -352,31 +353,32 @@ function SidePickerCard({
         <div
           className={`flex items-center justify-center gap-3 h-full ${side === "red" ? "flex-row-reverse text-right" : ""}`}
         >
-          <div className="relative shrink-0">
-            {team.captainAvatarUrl ? (
+          <div className="relative shrink-0 w-8 h-8">
+            <div
+              className={`w-8 h-8 rounded-full flex items-center justify-center ${isBlue ? "bg-blue-400/10" : "bg-red-400/10"}`}
+            >
+              <svg
+                className={`w-5 h-5 ${c.icon}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                />
+              </svg>
+            </div>
+            {team.captainAvatarUrl && (
               <img
                 src={team.captainAvatarUrl}
                 alt=""
-                className="w-8 h-8 rounded-full"
+                className="absolute inset-0 w-8 h-8 rounded-full object-cover"
+                referrerPolicy="no-referrer"
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
               />
-            ) : (
-              <div
-                className={`w-8 h-8 rounded-full flex items-center justify-center ${isBlue ? "bg-blue-400/10" : "bg-red-400/10"}`}
-              >
-                <svg
-                  className={`w-5 h-5 ${c.icon}`}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                  />
-                </svg>
-              </div>
             )}
             {isReady && (
               <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-green-500 border-2 border-lol-card flex items-center justify-center">

@@ -11,6 +11,9 @@ export interface TeamMember {
   role: MemberRole;
   playerSlotId: string | null;
   canEditGroups: boolean;
+  grantDrafts: boolean;
+  grantEnemyTeams: boolean;
+  grantPlayers: boolean;
   joinedAt: string;
   invitedBy: string | null;
   user?: {
@@ -90,6 +93,9 @@ function mapTeamMember(row: DbTeamMember & { profiles?: { display_name: string |
     role: row.role as MemberRole,
     playerSlotId: row.player_slot_id,
     canEditGroups: row.can_edit_groups,
+    grantDrafts: row.grant_drafts ?? false,
+    grantEnemyTeams: row.grant_enemy_teams ?? false,
+    grantPlayers: row.grant_players ?? false,
     joinedAt: row.joined_at,
     invitedBy: row.invited_by,
     user: row.profiles ? {
@@ -166,6 +172,9 @@ export const teamMembershipService = {
         role: 'owner',
         playerSlotId: ownerSlotId,
         canEditGroups: true,
+        grantDrafts: false,
+        grantEnemyTeams: false,
+        grantPlayers: false,
         joinedAt: '',
         invitedBy: null,
         user: ownerProfile.profiles ? {
@@ -446,7 +455,15 @@ export const teamMembershipService = {
     ownerAvatar: string | null;
     hasTeamPlan: boolean;
     teamPlanStatus: string | null;
-    teamContentPermission: 'admins' | 'players' | 'all';
+    permDrafts: 'admins' | 'players' | 'all';
+    permEnemyTeams: 'admins' | 'players' | 'all';
+    permPlayers: 'admins' | 'players' | 'all';
+    grantDrafts: boolean;
+    grantEnemyTeams: boolean;
+    grantPlayers: boolean;
+    bannedAt: string | null;
+    banReason: string | null;
+    banExpiresAt: string | null;
   }>> {
     if (!supabase) return [];
 

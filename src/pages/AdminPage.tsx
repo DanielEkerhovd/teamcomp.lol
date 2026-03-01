@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Navigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../stores/useAuthStore';
+import { useAdminSessionStore } from '../stores/useAdminSessionStore';
 import { supabase } from '../lib/supabase';
 import type { UserTier, ProfileRole } from '../types/database';
 import Button from '../components/ui/Button';
@@ -8,7 +9,11 @@ import Input from '../components/ui/Input';
 import Modal from '../components/ui/Modal';
 import { TeamOnboardingContent } from '../components/onboarding/TeamOnboardingModal';
 import AnalyticsDashboard from '../components/admin/AnalyticsDashboard';
+import PlatformStats from '../components/admin/PlatformStats';
+import TeamPlanDemo from '../components/admin/TeamPlanDemo';
 import TierDowngradeModal from '../components/downgrade/TierDowngradeModal';
+import AdminPinGate from '../components/admin/AdminPinGate';
+import AdminPinChange from '../components/admin/AdminPinChange';
 
 interface AdminUser {
   id: string;
@@ -21,6 +26,22 @@ interface AdminUser {
   tier_expires_at: string | null;
   banned_at: string | null;
   ban_reason: string | null;
+  created_at: string;
+}
+
+interface AdminTeam {
+  id: string;
+  name: string;
+  owner_id: string;
+  owner_display_name: string | null;
+  owner_avatar_url: string | null;
+  has_team_plan: boolean;
+  team_plan_status: string | null;
+  team_max_enemy_teams: number;
+  member_count: number;
+  banned_at: string | null;
+  ban_reason: string | null;
+  ban_expires_at: string | null;
   created_at: string;
 }
 
@@ -40,6 +61,8 @@ const formatRole = (role: string) =>
 
 export default function AdminPage() {
   const { profile } = useAuthStore();
+  const { expiresAt, lockSession } = useAdminSessionStore();
+  const [showPinChange, setShowPinChange] = useState(false);
 
   const [query, setQuery] = useState('');
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -73,35 +96,85 @@ export default function AdminPage() {
   const [banLoading, setBanLoading] = useState(false);
   const [unbanLoading, setUnbanLoading] = useState(false);
 
+  // Warning management
+  const [warnTarget, setWarnTarget] = useState<AdminUser | null>(null);
+  const [warnMessage, setWarnMessage] = useState('');
+  const [warnNextConsequence, setWarnNextConsequence] = useState('temporary_ban');
+  const [warnCategory, setWarnCategory] = useState('');
+  const [warnLoading, setWarnLoading] = useState(false);
+  const [warningCounts, setWarningCounts] = useState<Record<string, number>>({});
+
   // Test onboarding
   const [showTestOnboarding, setShowTestOnboarding] = useState(false);
 
   // Analytics
   const [analyticsOpen, setAnalyticsOpen] = useState(false);
 
+  // Platform Stats
+  const [platformStatsOpen, setPlatformStatsOpen] = useState(false);
+
+  // Team Plan Demo
+  const [teamPlanDemoOpen, setTeamPlanDemoOpen] = useState(false);
+
   // Test downgrade modal
   const [showTestDowngrade, setShowTestDowngrade] = useState(false);
+  const [testDowngradeReason, setTestDowngradeReason] = useState<'canceled' | 'payment_failed'>('canceled');
+
+  // Team management
+  const [teams, setTeams] = useState<AdminTeam[]>([]);
+  const [selectedTeam, setSelectedTeam] = useState<AdminTeam | null>(null);
+  const [teamMessage, setTeamMessage] = useState('');
+  const [revokeTarget, setRevokeTarget] = useState<AdminTeam | null>(null);
+  const [teamPlanLoading, setTeamPlanLoading] = useState(false);
+
+  // Team rename
+  const [renameTarget, setRenameTarget] = useState<AdminTeam | null>(null);
+  const [newTeamName, setNewTeamName] = useState('');
+  const [renameLoading, setRenameLoading] = useState(false);
+
+  // Team delete
+  const [deleteTeamTarget, setDeleteTeamTarget] = useState<AdminTeam | null>(null);
+  const [deleteTeamMessage, setDeleteTeamMessage] = useState('Your team has been removed by an administrator.');
+  const [deleteTeamLoading, setDeleteTeamLoading] = useState(false);
+
+  // Team ban
+  const [banTeamTarget, setBanTeamTarget] = useState<AdminTeam | null>(null);
+  const [banTeamReason, setBanTeamReason] = useState('');
+  const [banTeamDuration, setBanTeamDuration] = useState<'permanent' | 'timed'>('permanent');
+  const [banTeamExpiry, setBanTeamExpiry] = useState('');
+  const [banTeamLoading, setBanTeamLoading] = useState(false);
+  const [unbanTeamLoading, setUnbanTeamLoading] = useState(false);
 
   const handleSearch = useCallback(async (searchQuery: string) => {
     const trimmed = searchQuery.trim();
     if (!trimmed) {
       setUsers([]);
+      setTeams([]);
       return;
     }
 
     setSearching(true);
     setSearchError('');
 
-    const { data, error } = await supabase.rpc('admin_search_users', {
-      search_query: trimmed,
-    });
+    const [usersRes, teamsRes] = await Promise.all([
+      supabase.rpc('admin_search_users', { search_query: trimmed }),
+      supabase.rpc('admin_search_teams', { search_query: trimmed }),
+    ]);
 
-    if (error) {
-      setSearchError(error.message);
+    if (usersRes.error) {
+      setSearchError(usersRes.error.message);
       setUsers([]);
     } else {
-      setUsers((data as AdminUser[]) ?? []);
+      setUsers((usersRes.data as AdminUser[]) ?? []);
     }
+
+    if (teamsRes.error) {
+      setSearchError(e => e ? `${e}; ${teamsRes.error!.message}` : teamsRes.error!.message);
+      setTeams([]);
+    } else {
+      setTeams((teamsRes.data as AdminTeam[]) ?? []);
+    }
+
     setSearching(false);
   }, []);
 
@@ -111,6 +184,7 @@ export default function AdminPage() {
 
     if (!query.trim()) {
       setUsers([]);
+      setTeams([]);
       setSearchError('');
       return;
     }
@@ -129,12 +203,54 @@ export default function AdminPage() {
     return <Navigate to="/" replace />;
   }
 
+  const fetchWarningCount = async (userId: string) => {
+    if (warningCounts[userId] !== undefined) return;
+    const { data } = await supabase.rpc('admin_get_warning_count', {
+      target_user_id: userId,
+    });
+    if (typeof data === 'number') {
+      setWarningCounts(prev => ({ ...prev, [userId]: data }));
+    }
+  };
+
+  const handleWarn = async () => {
+    if (!warnTarget) return;
+    setWarnLoading(true);
+
+    const { data, error } = await supabase.rpc('admin_warn_user', {
+      target_user_id: warnTarget.id,
+      p_message: warnMessage.trim() || 'You have received a warning from a moderator.',
+      p_next_consequence: warnNextConsequence,
+      p_category: warnCategory || undefined,
+    });
+
+    if (error) {
+      setTierMessage(error.message);
+    } else {
+      const result = data as { success: boolean; message?: string; warning_count?: number };
+      if (result.success) {
+        setTierMessage('Warning sent successfully');
+        if (result.warning_count) {
+          setWarningCounts(prev => ({ ...prev, [warnTarget.id]: result.warning_count! }));
+        }
+      } else {
+        setTierMessage(result.message ?? 'Failed to send warning');
+      }
+    }
+    setWarnTarget(null);
+    setWarnLoading(false);
+    setWarnMessage('');
+    setWarnNextConsequence('temporary_ban');
+    setWarnCategory('');
+  };
+
   const selectUser = (user: AdminUser) => {
     if (selectedUser?.id === user.id) {
       setSelectedUser(null);
     } else {
       setSelectedUser(user);
       setTierMessage('');
+      fetchWarningCount(user.id);
     }
   };
 
@@ -318,6 +434,196 @@ export default function AdminPage() {
     setUnbanLoading(false);
   };
 
+  const selectTeam = (team: AdminTeam) => {
+    if (selectedTeam?.id === team.id) {
+      setSelectedTeam(null);
+    } else {
+      setSelectedTeam(team);
+      setTeamMessage('');
+    }
+  };
+
+  const handleSetTeamPlan = async (team: AdminTeam, enable: boolean) => {
+    setTeamPlanLoading(true);
+    setTeamMessage('');
+
+    const { data, error } = await supabase.rpc('admin_set_team_plan', {
+      target_team_id: team.id,
+      enable,
+    });
+
+    if (error) {
+      setTeamMessage(error.message);
+    } else {
+      const result = data as { success: boolean; message?: string };
+      if (result.success) {
+        setTeamMessage(enable ? 'Team plan granted successfully' : 'Team plan revoked successfully');
+        setTeams(prev =>
+          prev.map(t =>
+            t.id === team.id
+              ? {
+                  ...t,
+                  has_team_plan: enable,
+                  team_plan_status: enable ? 'active' : null,
+                  team_max_enemy_teams: enable ? 300 : 0,
+                }
+              : t
+          )
+        );
+        if (selectedTeam?.id === team.id) {
+          setSelectedTeam(prev =>
+            prev
+              ? {
+                  ...prev,
+                  has_team_plan: enable,
+                  team_plan_status: enable ? 'active' : null,
+                  team_max_enemy_teams: enable ? 300 : 0,
+                }
+              : null
+          );
+        }
+        setRevokeTarget(null);
+      } else {
+        setTeamMessage(result.message ?? 'Failed');
+      }
+    }
+    setTeamPlanLoading(false);
+  };
+
+  const handleRenameTeam = async () => {
+    if (!renameTarget) return;
+    setRenameLoading(true);
+    setTeamMessage('');
+
+    const { data, error } = await supabase.rpc('admin_rename_team', {
+      target_team_id: renameTarget.id,
+      new_name: newTeamName,
+    });
+
+    if (error) {
+      setTeamMessage(error.message);
+    } else {
+      const result = data as { success: boolean; message?: string };
+      if (result.success) {
+        const trimmed = newTeamName.trim();
+        setTeamMessage('Team renamed successfully');
+        setTeams(prev => prev.map(t => t.id === renameTarget.id ? { ...t, name: trimmed } : t));
+        if (selectedTeam?.id === renameTarget.id) {
+          setSelectedTeam(prev => prev ? { ...prev, name: trimmed } : null);
+        }
+        setRenameTarget(null);
+      } else {
+        setTeamMessage(result.message ?? 'Failed to rename');
+      }
+    }
+    setRenameLoading(false);
+  };
+
+  const handleDeleteTeam = async () => {
+    if (!deleteTeamTarget) return;
+    setDeleteTeamLoading(true);
+
+    const { data, error } = await supabase.rpc('admin_delete_team', {
+      target_team_id: deleteTeamTarget.id,
+      p_message: deleteTeamMessage.trim() || 'Your team has been removed by an administrator.',
+    });
+
+    if (error) {
+      setTeamMessage(error.message);
+    } else {
+      const result = data as { success: boolean; message?: string };
+      if (result.success) {
+        setTeams(prev => prev.filter(t => t.id !== deleteTeamTarget.id));
+        if (selectedTeam?.id === deleteTeamTarget.id) setSelectedTeam(null);
+        setTeamMessage(result.message ?? 'Team deleted');
+      } else {
+        setTeamMessage(result.message ?? 'Failed to delete team');
+      }
+    }
+    setDeleteTeamTarget(null);
+    setDeleteTeamLoading(false);
+  };
+
+  const handleBanTeam = async () => {
+    if (!banTeamTarget) return;
+    setBanTeamLoading(true);
+
+    let hours: number | null = null;
+    if (banTeamDuration === 'timed') {
+      if (!banTeamExpiry) {
+        setTeamMessage('Please select an expiry date');
+        setBanTeamLoading(false);
+        return;
+      }
+      const expiryDate = new Date(banTeamExpiry);
+      const now = new Date();
+      const diffMs = expiryDate.getTime() - now.getTime();
+      if (diffMs <= 0) {
+        setTeamMessage('Expiry date must be in the future');
+        setBanTeamLoading(false);
+        return;
+      }
+      hours = Math.ceil(diffMs / 3600000);
+    }
+
+    const { data, error } = await supabase.rpc('admin_ban_team', {
+      target_team_id: banTeamTarget.id,
+      p_reason: banTeamReason.trim() || 'Banned by administrator',
+      ban_hours: hours,
+    });
+
+    if (error) {
+      setTeamMessage(error.message);
+    } else {
+      const result = data as { success: boolean; message?: string };
+      if (result.success) {
+        setTeamMessage('Team banned successfully');
+        const now = new Date().toISOString();
+        const reason = banTeamReason.trim() || 'Banned by administrator';
+        const expiresAt = banTeamExpiry ? new Date(banTeamExpiry).toISOString() : null;
+        setTeams(prev => prev.map(t =>
+          t.id === banTeamTarget.id ? { ...t, banned_at: now, ban_reason: reason, ban_expires_at: expiresAt } : t
+        ));
+        if (selectedTeam?.id === banTeamTarget.id) {
+          setSelectedTeam(prev => prev ? { ...prev, banned_at: now, ban_reason: reason, ban_expires_at: expiresAt } : null);
+        }
+      } else {
+        setTeamMessage(result.message ?? 'Failed to ban team');
+      }
+    }
+    setBanTeamTarget(null);
+    setBanTeamLoading(false);
+    setBanTeamReason('');
+    setBanTeamDuration('permanent');
+    setBanTeamExpiry('');
+  };
+
+  const handleUnbanTeam = async (teamId: string) => {
+    setUnbanTeamLoading(true);
+
+    const { data, error } = await supabase.rpc('admin_unban_team', {
+      target_team_id: teamId,
+    });
+
+    if (error) {
+      setTeamMessage(error.message);
+    } else {
+      const result = data as { success: boolean; message?: string };
+      if (result.success) {
+        setTeamMessage('Team unbanned successfully');
+        setTeams(prev => prev.map(t =>
+          t.id === teamId ? { ...t, banned_at: null, ban_reason: null, ban_expires_at: null } : t
+        ));
+        if (selectedTeam?.id === teamId) {
+          setSelectedTeam(prev => prev ? { ...prev, banned_at: null, ban_reason: null, ban_expires_at: null } : null);
+        }
+      } else {
+        setTeamMessage(result.message ?? 'Failed to unban team');
+      }
+    }
+    setUnbanTeamLoading(false);
+  };
+
   const formatDate = (iso: string) => {
     const d = new Date(iso);
     return d.toLocaleDateString('en-US', {
@@ -339,13 +645,39 @@ export default function AdminPage() {
   };
 
   return (
+    <AdminPinGate>
     <div className="max-w-4xl mx-auto space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-white">Admin Panel</h1>
-        <p className="text-sm text-gray-400 mt-1">
-          Search and manage users. Developer access only.
-        </p>
+      {/* Header + Session Bar */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Admin Panel</h1>
+          <p className="text-sm text-gray-400 mt-1">
+            Search and manage users. Developer access only.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {expiresAt && (
+            <AdminSessionTimer expiresAt={expiresAt} />
+          )}
+          <button
+            onClick={() => setShowPinChange(true)}
+            className="p-2 rounded-lg bg-lol-surface/50 border border-lol-border text-gray-400 hover:text-white hover:bg-lol-card-hover transition-colors"
+            title="Change PIN"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z" />
+            </svg>
+          </button>
+          <button
+            onClick={lockSession}
+            className="p-2 rounded-lg bg-lol-surface/50 border border-lol-border text-gray-400 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/30 transition-colors"
+            title="Lock admin panel"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Quick links & tools */}
@@ -369,13 +701,22 @@ export default function AdminPage() {
           Test Onboarding
         </button>
         <button
-          onClick={() => setShowTestDowngrade(true)}
+          onClick={() => { setTestDowngradeReason('canceled'); setShowTestDowngrade(true); }}
           className="flex items-center gap-2 px-4 py-2 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 rounded-xl text-sm text-orange-400 hover:text-orange-300 transition-colors"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" />
           </svg>
           Test Downgrade
+        </button>
+        <button
+          onClick={() => { setTestDowngradeReason('payment_failed'); setShowTestDowngrade(true); }}
+          className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-xl text-sm text-red-400 hover:text-red-300 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+          </svg>
+          Test Payment Failed
         </button>
       </div>
 
@@ -411,14 +752,68 @@ export default function AdminPage() {
       </button>
       {analyticsOpen && <AnalyticsDashboard />}
 
+      {/* Platform Stats (collapsed by default) */}
+      <button
+        onClick={() => setPlatformStatsOpen(!platformStatsOpen)}
+        className="w-full flex items-center justify-between px-5 py-4 bg-lol-card border border-lol-border rounded-2xl hover:bg-lol-card-hover transition-colors group"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-cyan-500/10 flex items-center justify-center">
+            <svg className="w-5 h-5 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 13h2v8H3zm6-4h2v12H9zm6-6h2v18h-2zm6 10h2v8h-2z" />
+            </svg>
+          </div>
+          <div className="text-left">
+            <h2 className="text-sm font-semibold text-white">Platform Stats</h2>
+            <p className="text-xs text-gray-500">Users, drafts, games, and engagement metrics</p>
+          </div>
+        </div>
+        <svg
+          className={`w-5 h-5 text-gray-500 group-hover:text-gray-300 transition-transform ${platformStatsOpen ? 'rotate-180' : ''}`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {platformStatsOpen && <PlatformStats />}
+
+      {/* Team Plan Demo (collapsed by default) */}
+      <button
+        onClick={() => setTeamPlanDemoOpen(!teamPlanDemoOpen)}
+        className="w-full flex items-center justify-between px-5 py-4 bg-lol-card border border-lol-border rounded-2xl hover:bg-lol-card-hover transition-colors group"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-emerald-500/10 flex items-center justify-center">
+            <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </div>
+          <div className="text-left">
+            <h2 className="text-sm font-semibold text-white">Team Plan Demo</h2>
+            <p className="text-xs text-gray-500">Toggle team plan status for testing</p>
+          </div>
+        </div>
+        <svg
+          className={`w-5 h-5 text-gray-500 group-hover:text-gray-300 transition-transform ${teamPlanDemoOpen ? 'rotate-180' : ''}`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {teamPlanDemoOpen && <TeamPlanDemo />}
+
       {/* Moderating */}
       <div>
         <h2 className="text-lg font-semibold text-white">Moderating</h2>
-        <p className="text-sm text-gray-400 mt-0.5">Search and manage user accounts, tiers, and bans.</p>
+        <p className="text-sm text-gray-400 mt-0.5">Search and manage users, teams, tiers, and plans.</p>
       </div>
       <div className="relative">
         <Input
-          placeholder="Search by display name or user ID..."
+          placeholder="Search by name, user ID, or team ID..."
           value={query}
           onChange={e => setQuery(e.target.value)}
         />
@@ -562,6 +957,14 @@ export default function AdminPage() {
                         </span>
                       </div>
                     )}
+                    {(warningCounts[user.id] ?? 0) > 0 && (
+                      <div>
+                        <span className="text-gray-500">Warnings:</span>{' '}
+                        <span className="text-amber-400 font-semibold">
+                          {warningCounts[user.id]}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Actions */}
@@ -574,6 +977,15 @@ export default function AdminPage() {
                     </Button>
 
                     <div className="ml-auto flex gap-2">
+                      {!user.banned_at && user.tier !== 'developer' && (
+                        <Button
+                          size="sm"
+                          onClick={() => setWarnTarget(user)}
+                          className="!bg-amber-500 !text-black hover:!bg-amber-600 !border-amber-600"
+                        >
+                          Warn User
+                        </Button>
+                      )}
                       {user.banned_at ? (
                         <Button
                           size="sm"
@@ -633,13 +1045,442 @@ export default function AdminPage() {
       )}
 
       {/* Empty state */}
-      {!searching && users.length === 0 && query.trim() && !searchError && (
+      {!searching && users.length === 0 && teams.length === 0 && query.trim() && !searchError && (
         <div className="text-center py-12 text-gray-500">
-          No users found. Try a different search term.
+          No users or teams found. Try a different search term.
         </div>
       )}
 
-      {/* Delete confirmation modal */}
+      {/* Team results */}
+      {teams.length > 0 && (
+        <div className="border border-lol-border rounded-2xl overflow-hidden">
+          <div className="grid grid-cols-[1fr_120px_100px_40px] gap-4 px-5 py-3 bg-lol-surface/50 border-b border-lol-border text-xs uppercase tracking-wider text-gray-500 font-medium">
+            <span>Team</span>
+            <span>Plan</span>
+            <span>Created</span>
+            <span />
+          </div>
+
+          {teams.map(team => (
+            <div key={team.id}>
+              <button
+                onClick={() => selectTeam(team)}
+                className={`w-full grid grid-cols-[1fr_120px_100px_40px] gap-4 px-5 py-3 text-left transition-colors hover:bg-lol-surface/30 ${
+                  selectedTeam?.id === team.id
+                    ? 'bg-lol-surface/50 border-l-2 border-l-lol-gold'
+                    : 'border-l-2 border-l-transparent'
+                }`}
+              >
+                {/* Team info with owner */}
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-white truncate">
+                    {team.name}
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    {team.owner_avatar_url ? (
+                      <img
+                        src={team.owner_avatar_url}
+                        alt={team.owner_display_name || 'Owner'}
+                        className="w-4 h-4 rounded object-cover shrink-0"
+                      />
+                    ) : (
+                      <div className="w-4 h-4 rounded bg-gray-600 flex items-center justify-center text-white text-[8px] font-semibold shrink-0">
+                        {(team.owner_display_name || '?').charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <span className="text-xs text-gray-500 truncate">
+                      {team.owner_display_name || team.owner_id.slice(0, 8) + '...'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Plan badge + ban badge */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span
+                    className={`inline-flex px-2.5 py-1 rounded-lg text-xs font-semibold ${
+                      team.has_team_plan
+                        ? 'bg-emerald-500/20 text-emerald-400'
+                        : 'bg-gray-500/20 text-gray-400'
+                    }`}
+                  >
+                    {team.has_team_plan ? (team.team_plan_status ?? 'active') : 'none'}
+                  </span>
+                  {team.banned_at && (
+                    <span className="inline-flex px-2.5 py-1 rounded-lg text-xs font-semibold bg-red-500/20 text-red-400">
+                      banned
+                    </span>
+                  )}
+                </div>
+
+                {/* Created */}
+                <div className="flex items-center text-xs text-gray-400">
+                  {formatDate(team.created_at)}
+                </div>
+
+                {/* Expand indicator */}
+                <div className="flex items-center justify-end">
+                  <svg
+                    className={`w-4 h-4 text-gray-500 transition-transform ${
+                      selectedTeam?.id === team.id ? 'rotate-180' : ''
+                    }`}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+              </button>
+
+              {/* Expanded team detail */}
+              {selectedTeam?.id === team.id && (
+                <div className="px-5 py-4 bg-lol-dark/50 border-t border-lol-border space-y-4">
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-gray-500">Team ID:</span>{' '}
+                      <span className="text-gray-300 font-mono text-xs">{team.id}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Owner:</span>{' '}
+                      <span className="text-gray-300">{team.owner_display_name || 'N/A'}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Members:</span>{' '}
+                      <span className="text-gray-300">{team.member_count}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Enemy teams limit:</span>{' '}
+                      <span className="text-gray-300">{team.team_max_enemy_teams}</span>
+                    </div>
+                    {team.banned_at && (
+                      <>
+                        <div>
+                          <span className="text-gray-500">Banned:</span>{' '}
+                          <span className="text-red-400">{formatDate(team.banned_at)}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Ban reason:</span>{' '}
+                          <span className="text-red-400">{team.ban_reason || 'N/A'}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Ban expires:</span>{' '}
+                          <span className="text-yellow-400">
+                            {team.ban_expires_at ? formatExpiry(team.ban_expires_at) : 'Permanent'}
+                          </span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-3 flex-wrap">
+                    {team.has_team_plan ? (
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={() => setRevokeTarget(team)}
+                      >
+                        Revoke Team Plan
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        onClick={() => handleSetTeamPlan(team, true)}
+                        disabled={teamPlanLoading}
+                      >
+                        {teamPlanLoading ? 'Granting...' : 'Grant Team Plan'}
+                      </Button>
+                    )}
+
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setRenameTarget(team);
+                        setNewTeamName(team.name);
+                        setTeamMessage('');
+                      }}
+                    >
+                      Rename
+                    </Button>
+
+                    <div className="ml-auto flex gap-2">
+                      {team.banned_at ? (
+                        <Button
+                          size="sm"
+                          onClick={() => handleUnbanTeam(team.id)}
+                          disabled={unbanTeamLoading}
+                        >
+                          {unbanTeamLoading ? 'Unbanning...' : 'Unban Team'}
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={() => setBanTeamTarget(team)}
+                        >
+                          Ban Team
+                        </Button>
+                      )}
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={() => setDeleteTeamTarget(team)}
+                      >
+                        Delete Team
+                      </Button>
+                    </div>
+                  </div>
+
+                  {teamMessage && (
+                    <div
+                      className={`text-sm px-3 py-2 rounded-lg ${
+                        teamMessage.includes('success')
+                          ? 'bg-emerald-500/10 text-emerald-400'
+                          : 'bg-red-500/10 text-red-400'
+                      }`}
+                    >
+                      {teamMessage}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Revoke team plan confirmation modal */}
+      <Modal
+        isOpen={!!revokeTarget}
+        onClose={() => setRevokeTarget(null)}
+        title="Revoke Team Plan"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <p className="text-gray-300">
+            Are you sure you want to revoke the team plan for{' '}
+            <span className="font-semibold text-white">
+              {revokeTarget?.name}
+            </span>
+            ? Team content will become archived and read-only.
+          </p>
+          <div className="flex gap-3 justify-end">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setRevokeTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => revokeTarget && handleSetTeamPlan(revokeTarget, false)}
+              disabled={teamPlanLoading}
+            >
+              {teamPlanLoading ? 'Revoking...' : 'Revoke Plan'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Rename team modal */}
+      <Modal
+        isOpen={!!renameTarget}
+        onClose={() => setRenameTarget(null)}
+        title="Rename Team"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-400">Current name:</span>
+            <span className="text-sm font-medium text-white">{renameTarget?.name}</span>
+          </div>
+
+          <Input
+            label="New Name"
+            value={newTeamName}
+            onChange={e => setNewTeamName(e.target.value)}
+            placeholder="Enter new team name..."
+          />
+
+          <div className="flex gap-3 justify-end">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setRenameTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleRenameTeam}
+              disabled={renameLoading || !newTeamName.trim() || newTeamName.trim() === renameTarget?.name}
+            >
+              {renameLoading ? 'Renaming...' : 'Rename'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Delete team confirmation modal */}
+      <Modal
+        isOpen={!!deleteTeamTarget}
+        onClose={() => setDeleteTeamTarget(null)}
+        title="Delete Team"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <p className="text-gray-300">
+            Are you sure you want to permanently delete{' '}
+            <span className="font-semibold text-white">
+              {deleteTeamTarget?.name}
+            </span>
+            ? This will remove all team members, players, enemy teams, and associated data. This action cannot be undone.
+          </p>
+
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-medium text-gray-400">
+              Message to team owner (sent as notification)
+            </label>
+            <textarea
+              value={deleteTeamMessage}
+              onChange={e => setDeleteTeamMessage(e.target.value)}
+              rows={2}
+              className="bg-lol-dark border border-lol-border rounded-xl px-3 py-2 text-sm text-white resize-none focus:border-lol-gold/50 focus:outline-none focus:ring-2 focus:ring-lol-gold/20"
+              placeholder="Reason for deletion..."
+            />
+          </div>
+
+          <div className="flex gap-3 justify-end">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setDeleteTeamTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={handleDeleteTeam}
+              disabled={deleteTeamLoading}
+            >
+              {deleteTeamLoading ? 'Deleting...' : 'Delete Permanently'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Ban team modal */}
+      <Modal
+        isOpen={!!banTeamTarget}
+        onClose={() => setBanTeamTarget(null)}
+        title="Ban Team"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <p className="text-gray-300">
+            Ban{' '}
+            <span className="font-semibold text-white">
+              {banTeamTarget?.name}
+            </span>
+            ? The team will be flagged as banned.
+          </p>
+
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-medium text-gray-400">
+              Reason
+            </label>
+            <textarea
+              value={banTeamReason}
+              onChange={e => setBanTeamReason(e.target.value)}
+              rows={2}
+              className="bg-lol-dark border border-lol-border rounded-xl px-3 py-2 text-sm text-white resize-none focus:border-lol-gold/50 focus:outline-none focus:ring-2 focus:ring-lol-gold/20"
+              placeholder="Reason for ban..."
+            />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-medium text-gray-400">
+              Duration
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => { setBanTeamDuration('permanent'); setBanTeamExpiry(''); }}
+                className={`flex flex-col items-center gap-1 px-3 py-3 rounded-xl border text-sm font-medium transition-all ${
+                  banTeamDuration === 'permanent'
+                    ? 'border-red-500 bg-red-500/10 text-red-400'
+                    : 'border-lol-border bg-lol-dark text-gray-400 hover:border-gray-500'
+                }`}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18.178 8c5.096 0 5.096 8 0 8-5.095 0-7.133-8-12.739-8-4.585 0-4.585 8 0 8 5.606 0 7.644-8 12.739-8z"/></svg>
+                Permanent
+              </button>
+              <button
+                type="button"
+                onClick={() => setBanTeamDuration('timed')}
+                className={`flex flex-col items-center gap-1 px-3 py-3 rounded-xl border text-sm font-medium transition-all ${
+                  banTeamDuration === 'timed'
+                    ? 'border-red-500 bg-red-500/10 text-red-400'
+                    : 'border-lol-border bg-lol-dark text-gray-400 hover:border-gray-500'
+                }`}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                Timed
+              </button>
+            </div>
+            {banTeamDuration === 'timed' && (
+              <input
+                type="datetime-local"
+                value={banTeamExpiry}
+                onChange={e => setBanTeamExpiry(e.target.value)}
+                min={(() => {
+                  const now = new Date();
+                  now.setMinutes(0, 0, 0);
+                  const pad = (n: number) => String(n).padStart(2, '0');
+                  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:00`;
+                })()}
+                step="3600"
+                className="bg-lol-dark border border-lol-border rounded-xl px-3 py-2 text-sm text-white focus:border-lol-gold/50 focus:outline-none focus:ring-2 focus:ring-lol-gold/20 scheme-dark mt-1"
+              />
+            )}
+          </div>
+
+          {teamMessage && (
+            <div
+              className={`text-sm px-3 py-2 rounded-lg ${
+                teamMessage.includes('success')
+                  ? 'bg-emerald-500/10 text-emerald-400'
+                  : 'bg-red-500/10 text-red-400'
+              }`}
+            >
+              {teamMessage}
+            </div>
+          )}
+
+          <div className="flex gap-3 justify-end">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setBanTeamTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={handleBanTeam}
+              disabled={banTeamLoading}
+            >
+              {banTeamLoading ? 'Banning...' : 'Confirm Ban'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Delete user confirmation modal */}
       <Modal
         isOpen={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
@@ -886,10 +1727,104 @@ export default function AdminPage() {
         </div>
       </Modal>
 
+      {/* Warning modal */}
+      <Modal
+        isOpen={!!warnTarget}
+        onClose={() => setWarnTarget(null)}
+        title="Warn User"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <p className="text-gray-300">
+            Send a warning to{' '}
+            <span className="font-semibold text-white">
+              {warnTarget?.display_name || warnTarget?.id}
+            </span>
+          </p>
+
+          {warnTarget && (warningCounts[warnTarget.id] ?? 0) > 0 && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+              <svg className="w-4 h-4 text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              <span className="text-sm text-amber-400">
+                This user has {warningCounts[warnTarget.id]} previous warning{warningCounts[warnTarget.id] !== 1 ? 's' : ''}
+              </span>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-medium text-gray-400">
+              Warning Message
+            </label>
+            <textarea
+              value={warnMessage}
+              onChange={e => setWarnMessage(e.target.value)}
+              rows={3}
+              className="bg-lol-dark border border-lol-border rounded-xl px-3 py-2 text-sm text-white resize-none focus:border-lol-gold/50 focus:outline-none focus:ring-2 focus:ring-lol-gold/20"
+              placeholder="Describe what the user did wrong..."
+            />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-medium text-gray-400">
+              Category
+            </label>
+            <select
+              value={warnCategory}
+              onChange={e => setWarnCategory(e.target.value)}
+              className="bg-lol-dark border border-lol-border rounded-xl px-3 py-2 text-sm text-white focus:border-lol-gold/50 focus:outline-none"
+            >
+              <option value="">Select category...</option>
+              <option value="inappropriate_name">Inappropriate Name</option>
+              <option value="inappropriate_avatar">Inappropriate Avatar</option>
+              <option value="inappropriate_content">Inappropriate Content</option>
+              <option value="spam">Spam</option>
+              <option value="harassment">Harassment</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-medium text-gray-400">
+              Next Consequence (if repeated)
+            </label>
+            <select
+              value={warnNextConsequence}
+              onChange={e => setWarnNextConsequence(e.target.value)}
+              className="bg-lol-dark border border-lol-border rounded-xl px-3 py-2 text-sm text-white focus:border-lol-gold/50 focus:outline-none"
+            >
+              <option value="temporary_ban">Temporary Ban</option>
+              <option value="permanent_ban">Permanent Ban</option>
+              <option value="account_deletion">Account Deletion</option>
+            </select>
+          </div>
+
+          <div className="flex gap-3 justify-end">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setWarnTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleWarn}
+              disabled={warnLoading || !warnMessage.trim()}
+              className="!bg-amber-500 hover:!bg-amber-600 !text-black"
+            >
+              {warnLoading ? 'Sending...' : 'Send Warning'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
       {/* Test downgrade modal (no-op handlers, mock data) */}
       <TierDowngradeModal
         testMode
         isOpen={showTestDowngrade}
+        downgradeReason={testDowngradeReason}
         downgradedAt={new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()}
         contentData={{
           myTeams: [
@@ -913,6 +1848,41 @@ export default function AdminPage() {
         onConfirm={async () => { setShowTestDowngrade(false); }}
         onResubscribed={() => { setShowTestDowngrade(false); }}
       />
+
+      {/* Change PIN modal */}
+      {showPinChange && (
+        <Modal isOpen onClose={() => setShowPinChange(false)} title="Change Admin PIN">
+          <AdminPinChange
+            onComplete={() => setShowPinChange(false)}
+            onCancel={() => setShowPinChange(false)}
+          />
+        </Modal>
+      )}
+    </div>
+    </AdminPinGate>
+  );
+}
+
+// Inline session timer component
+function AdminSessionTimer({ expiresAt }: { expiresAt: Date }) {
+  const [remaining, setRemaining] = useState('');
+
+  useEffect(() => {
+    const update = () => {
+      const diff = Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
+      const m = Math.floor(diff / 60);
+      const s = diff % 60;
+      setRemaining(`${m}:${String(s).padStart(2, '0')}`);
+    };
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [expiresAt]);
+
+  return (
+    <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-lol-surface/50 border border-lol-border text-xs text-gray-400">
+      <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+      {remaining}
     </div>
   );
 }

@@ -38,6 +38,31 @@ function mapMessage(row: DbLiveDraftMessage): LiveDraftMessage {
 }
 
 // ============================================
+// HELPERS
+// ============================================
+
+/** Fetch latest profile avatars for a single session's captains. */
+async function enrichSessionAvatars(session: LiveDraftSession): Promise<void> {
+  if (!supabase) return;
+  const ids: string[] = [];
+  if (session.team1_captain_id) ids.push(session.team1_captain_id);
+  if (session.team2_captain_id) ids.push(session.team2_captain_id);
+  if (ids.length === 0) return;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: profiles } = await (supabase.from('profiles') as any)
+    .select('id, avatar_url')
+    .in('id', ids);
+
+  if (profiles) {
+    for (const p of profiles as { id: string; avatar_url: string | null }[]) {
+      if (p.id === session.team1_captain_id) session.team1_captain_avatar_url = p.avatar_url;
+      if (p.id === session.team2_captain_id) session.team2_captain_avatar_url = p.avatar_url;
+    }
+  }
+}
+
+// ============================================
 // SERVICE
 // ============================================
 
@@ -169,6 +194,35 @@ export const liveDraftService = {
       }
     }
 
+    // Always use the latest profile avatars for captains
+    const captainIds = new Set<string>();
+    for (const s of sessions) {
+      if (s.team1_captain_id) captainIds.add(s.team1_captain_id);
+      if (s.team2_captain_id) captainIds.add(s.team2_captain_id);
+    }
+    if (captainIds.size > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: profiles } = await (supabase
+        .from('profiles') as any)
+        .select('id, avatar_url')
+        .in('id', Array.from(captainIds));
+
+      if (profiles) {
+        const avatarMap = new Map<string, string | null>();
+        for (const p of profiles as { id: string; avatar_url: string | null }[]) {
+          avatarMap.set(p.id, p.avatar_url);
+        }
+        for (const s of sessions) {
+          if (s.team1_captain_id && avatarMap.has(s.team1_captain_id)) {
+            s.team1_captain_avatar_url = avatarMap.get(s.team1_captain_id) ?? null;
+          }
+          if (s.team2_captain_id && avatarMap.has(s.team2_captain_id)) {
+            s.team2_captain_avatar_url = avatarMap.get(s.team2_captain_id) ?? null;
+          }
+        }
+      }
+    }
+
     return sessions;
   },
 
@@ -210,7 +264,10 @@ export const liveDraftService = {
       throw error;
     }
 
-    return data ? mapSession(data as DbLiveDraftSession) : null;
+    if (!data) return null;
+    const session = mapSession(data as DbLiveDraftSession);
+    await enrichSessionAvatars(session);
+    return session;
   },
 
   /**
@@ -230,7 +287,10 @@ export const liveDraftService = {
       throw error;
     }
 
-    return data ? mapSession(data as DbLiveDraftSession) : null;
+    if (!data) return null;
+    const session = mapSession(data as DbLiveDraftSession);
+    await enrichSessionAvatars(session);
+    return session;
   },
 
   /**
@@ -1046,7 +1106,7 @@ export const liveDraftService = {
       .select(
         `
         *,
-        profile:profiles(display_name, avatar_url, role, role_team_id, role_team:my_teams!profiles_role_team_id_fkey(name))
+        profile:profiles(display_name, avatar_url, role, role_team_id, tier, profile_card_bg, profile_card_gradient, profile_card_gradient_angle, role_team:my_teams!profiles_role_team_id_fkey(name))
       `
       )
       .eq('session_id', sessionId);

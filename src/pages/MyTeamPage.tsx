@@ -15,9 +15,10 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useRankStore } from '../stores/useRankStore';
 import { useMasteryStore } from '../stores/useMasteryStore';
 import { useAuthStore, useTierLimits } from '../stores/useAuthStore';
-import { parseOpggMultiSearchUrl, Player, Role, ROLES } from '../types';
+import { parseOpggMultiSearchUrl, Player, Role, ROLES, createEmptyPlayer } from '../types';
 import { Card, ConfirmationModal, Input, Button, Modal } from '../components/ui';
 import { RoleSlot, SubSlot, TeamMembersPanel } from '../components/team';
+import TeamSettingsModal from '../components/team/TeamSettingsModal';
 import { useOpgg } from '../hooks/useOpgg';
 import { useDroppable } from '@dnd-kit/core';
 import { teamMembershipService } from '../lib/teamMembershipService';
@@ -72,6 +73,7 @@ export default function MyTeamPage() {
     getMyPermissions,
     isTeamNameAvailable,
     checkTeamNameGloballyAvailable,
+    updateMembershipTeamData,
   } = useMyTeamStore();
 
   // Check if a membership team is selected
@@ -138,7 +140,7 @@ export default function MyTeamPage() {
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [isTeamPlanLoading, setIsTeamPlanLoading] = useState(false);
   const [teamPlanError, setTeamPlanError] = useState<string | null>(null);
-  const [isContentPermUpdating, setIsContentPermUpdating] = useState(false);
+  const [showTeamPlanModal, setShowTeamPlanModal] = useState(false);
   const [isBillingLoading, setIsBillingLoading] = useState(false);
 
   const { user } = useAuthStore();
@@ -164,7 +166,9 @@ export default function MyTeamPage() {
         (payload) => {
           const oldUserId = (payload.old as { user_id?: string })?.user_id;
           const newUserId = (payload.new as { user_id?: string })?.user_id;
-          if (oldUserId === newUserId) return; // Not an ownership change
+          // payload.old only includes PK columns by default (not user_id).
+          // If oldUserId is undefined we can't tell if ownership changed — skip.
+          if (!oldUserId || oldUserId === newUserId) return;
 
           // Ownership changed — refresh the teams/memberships lists
           const teamId = (payload.new as { id?: string })?.id;
@@ -378,13 +382,23 @@ export default function MyTeamPage() {
   type TeamWithPlan = typeof team & {
     hasTeamPlan?: boolean;
     teamPlanStatus?: string | null;
-    teamContentPermission?: 'admins' | 'players' | 'all';
+    permDrafts?: 'admins' | 'players' | 'all';
+    permEnemyTeams?: 'admins' | 'players' | 'all';
+    permPlayers?: 'admins' | 'players' | 'all';
   };
   const teamWithPlan = team as TeamWithPlan;
   const currentTeamHasPlan = teamWithPlan?.hasTeamPlan === true;
   const currentTeamPlanStatus = teamWithPlan?.teamPlanStatus;
-  const currentTeamContentPermission = teamWithPlan?.teamContentPermission || 'admins';
   const isArchived = currentTeamPlanStatus === 'canceled' && !currentTeamHasPlan;
+
+  // Check if the currently selected team is banned
+  const isBannedTeam = (() => {
+    if (isMembershipTeam) {
+      const m = memberships.find(m => m.teamId === selectedTeamId);
+      return !!(m as any)?.bannedAt;
+    }
+    return !!team?.bannedAt;
+  })();
 
   const handleGetTeamPlan = async () => {
     if (!team || !isPaidTier || !isStripeConfigured) return;
@@ -398,24 +412,8 @@ export default function MyTeamPage() {
     // On success, Stripe redirects — no need to reset loading
   };
 
-  const handleUpdateContentPermission = async (permission: 'admins' | 'players' | 'all') => {
-    if (!team || !supabase || !isOwner) return;
-    setIsContentPermUpdating(true);
-    try {
-      const { error } = await supabase
-        .from('my_teams')
-        .update({ team_content_permission: permission } as never)
-        .eq('id', team.id);
-      if (error) throw error;
-      // Update local state
-      (teamWithPlan as any).teamContentPermission = permission;
-      useMyTeamStore.setState((s) => ({ teams: [...s.teams] }));
-    } catch (err) {
-      console.error('Error updating content permission:', err);
-    } finally {
-      setIsContentPermUpdating(false);
-    }
-  };
+  // Team settings modal state
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
   const handleOpenBillingPortal = async () => {
     setIsBillingLoading(true);
@@ -625,7 +623,7 @@ export default function MyTeamPage() {
     const { active, over } = event;
     setActivePlayer(null);
 
-    if (!over) return;
+    if (!over || !canManagePlayers) return;
 
     const activeId = active.id as string;
     const overId = over.id as string;
@@ -657,6 +655,52 @@ export default function MyTeamPage() {
   const subs = team?.players.filter((p) => p.isSub) || [];
 
   const getPlayerForRole = (role: Role) => mainRoster.find((p) => p.role === role);
+
+  // Auto-fill missing role slots (owned teams and membership teams for admins)
+  useEffect(() => {
+    if (!team) return;
+    const existingRoles = new Set(mainRoster.map((p) => p.role));
+    const missingRoles = ROLES.filter((r) => !existingRoles.has(r.value));
+    if (missingRoles.length === 0) return;
+
+    const missingPlayers = missingRoles.map((r) => createEmptyPlayer(r.value));
+    if (isMembershipTeam) {
+      if (permissions.canEditAllPlayers) {
+        updateMembershipTeamData((t) => ({ ...t, players: [...t.players, ...missingPlayers] }));
+      }
+    } else {
+      updateTeam({ players: [...team.players, ...missingPlayers] });
+    }
+  }, [team?.id]);
+
+  // Create a player for a specific role when clicking an empty slot
+  const handleAddPlayer = (role: Role) => {
+    if (!team) return;
+    const newPlayer = createEmptyPlayer(role);
+    if (isMembershipTeam) {
+      if (permissions.canEditAllPlayers) {
+        updateMembershipTeamData((t) => ({ ...t, players: [...t.players, newPlayer] }));
+      }
+    } else {
+      updateTeam({ players: [...team.players, newPlayer] });
+    }
+  };
+
+  const canEditPlayers = !isMembershipTeam || permissions.canEditAllPlayers;
+  const canEditAnyPlayer = canEditPlayers; // alias for clarity: can edit ALL player slots
+  const canEditOwnPlayer = permissions.canEditOwnPlayer;
+
+  // Helper: can the current user edit a specific player?
+  const canEditPlayer = (playerId: string): boolean => {
+    if (canEditAnyPlayer) return true;
+    if (canEditOwnPlayer && permissions.playerSlotId === playerId) return true;
+    return false;
+  };
+
+  // Can the current user perform team-level edits? (rename, reset, settings menu actions)
+  const canEditTeamInfo = !isMembershipTeam || permissions.canEditTeamInfo;
+  // Can manage players (add/remove subs, drag-and-drop positions)
+  const canManagePlayers = !isMembershipTeam || permissions.canEditAllPlayers;
 
   // Show loading spinner while memberships are loading and we have no team yet
   if (!team && membershipsLoading) {
@@ -753,46 +797,81 @@ export default function MyTeamPage() {
         {/* Team Tabs */}
         <div className="flex items-center gap-2 flex-wrap">
           {/* Owned Teams */}
-          {teams.map((t) => (
+          {teams.map((t) => {
+            const hasPro = (t as any).has_team_plan || (t as any).hasTeamPlan;
+            const isBanned = !!t.bannedAt;
+            return (
             <div
               key={t.id}
               className={`group flex items-center gap-2 px-4 py-2 rounded-lg cursor-pointer transition-all ${
-                t.id === selectedTeamId
-                  ? 'bg-lol-gold/20 border border-lol-gold text-lol-gold'
+                isBanned
+                  ? t.id === selectedTeamId
+                    ? 'bg-red-500/20 border border-red-500 text-red-400 shadow-[0_0_12px_rgba(239,68,68,0.4)] animate-pulse'
+                    : 'bg-lol-card border border-lol-border text-gray-400 hover:border-gray-500 hover:text-gray-300'
+                  : t.id === selectedTeamId
+                  ? hasPro
+                    ? 'bg-blue-500/20 border border-blue-400 text-blue-400 shadow-[0_0_12px_rgba(59,130,246,0.3)]'
+                    : 'bg-lol-gold/20 border border-lol-gold text-lol-gold'
+                  : hasPro
+                  ? 'bg-lol-card border border-blue-500/30 text-gray-400 hover:border-blue-400/60 hover:text-gray-300 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'
                   : 'bg-lol-card border border-lol-border text-gray-400 hover:border-gray-500 hover:text-gray-300'
               }`}
               onClick={() => selectTeam(t.id)}
             >
               <span className="font-medium truncate max-w-32">{t.name || 'Unnamed'}</span>
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-yellow-500/20 text-yellow-400">
-                Owner
-              </span>
+              {isBanned ? (
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-500/20 text-red-400">
+                  Banned
+                </span>
+              ) : (
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-yellow-500/20 text-yellow-400">
+                  Owner
+                </span>
+              )}
             </div>
-          ))}
+            );
+          })}
 
           {/* Membership Teams (teams user is a member of) */}
-          {memberships.map((m) => (
+          {memberships.map((m) => {
+            const mBanned = !!(m as any).bannedAt;
+            return (
             <div
               key={m.teamId}
               className={`group flex items-center gap-2 px-4 py-2 rounded-lg cursor-pointer transition-all ${
-                m.teamId === selectedTeamId
-                  ? 'bg-lol-gold/20 border border-lol-gold text-lol-gold'
+                mBanned
+                  ? m.teamId === selectedTeamId
+                    ? 'bg-red-500/20 border border-red-500 text-red-400 shadow-[0_0_12px_rgba(239,68,68,0.4)] animate-pulse'
+                    : 'bg-lol-card border border-lol-border text-gray-400 hover:border-gray-500 hover:text-gray-300'
+                  : m.teamId === selectedTeamId
+                  ? m.hasTeamPlan
+                    ? 'bg-blue-500/20 border border-blue-400 text-blue-400 shadow-[0_0_12px_rgba(59,130,246,0.3)]'
+                    : 'bg-lol-gold/20 border border-lol-gold text-lol-gold'
+                  : m.hasTeamPlan
+                  ? 'bg-lol-card border border-blue-500/30 text-gray-400 hover:border-blue-400/60 hover:text-gray-300 hover:shadow-[0_0_8px_rgba(59,130,246,0.15)]'
                   : 'bg-lol-card border border-lol-border text-gray-400 hover:border-gray-500 hover:text-gray-300'
               }`}
               onClick={() => selectTeam(m.teamId)}
             >
               <span className="font-medium truncate max-w-32">{m.teamName}</span>
-              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                m.role === 'admin'
-                  ? 'bg-purple-500/20 text-purple-400'
-                  : m.role === 'player'
-                  ? 'bg-green-500/20 text-green-400'
-                  : 'bg-blue-500/20 text-blue-400'
-              }`}>
-                {m.role.charAt(0).toUpperCase() + m.role.slice(1)}
-              </span>
+              {mBanned ? (
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-500/20 text-red-400">
+                  Banned
+                </span>
+              ) : (
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                  m.role === 'admin'
+                    ? 'bg-purple-500/20 text-purple-400'
+                    : m.role === 'player'
+                    ? 'bg-green-500/20 text-green-400'
+                    : 'bg-blue-500/20 text-blue-400'
+                }`}>
+                  {m.role.charAt(0).toUpperCase() + m.role.slice(1)}
+                </span>
+              )}
             </div>
-          ))}
+            );
+          })}
 
           {/* Loading memberships indicator */}
           {membershipsLoading && (
@@ -851,8 +930,8 @@ export default function MyTeamPage() {
                   {team.name || 'My Team'}
                 </h1>
                 {currentTeamHasPlan && (
-                  <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">
-                    Team Plan
+                  <span className="px-3.5 py-1.5 text-sm font-bold rounded-xl bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                    TEAM PRO
                   </span>
                 )}
                 {currentTeamPlanStatus === 'canceling' && (
@@ -866,31 +945,15 @@ export default function MyTeamPage() {
                   </span>
                 )}
               </div>
-              <p className="text-gray-400 mt-1">
-                {isMembershipTeam
-                  ? `Member \u00B7 ${memberships.find(m => m.teamId === selectedTeamId)?.role || 'viewer'} \u00B7 Owned by ${memberships.find(m => m.teamId === selectedTeamId)?.ownerName || 'unknown'}`
-                  : 'Manage your roster'}
-              </p>
-              {/* Team Plan upsell for owners without a plan */}
-              {isOwner && isPaidTier && !currentTeamHasPlan && isStripeConfigured && (
-                <button
-                  onClick={handleGetTeamPlan}
-                  disabled={isTeamPlanLoading}
-                  className="mt-2 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 transition-all text-sm font-medium disabled:opacity-50"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
-                  {isTeamPlanLoading ? 'Loading...' : 'Get Team Plan'}
-                </button>
-              )}
-              {teamPlanError && (
-                <p className="mt-1 text-xs text-red-400">{teamPlanError}</p>
+              {isMembershipTeam && (
+                <p className="text-gray-400 mt-1">
+                  {`Member \u00B7 ${memberships.find(m => m.teamId === selectedTeamId)?.role || 'viewer'} \u00B7 Owned by ${memberships.find(m => m.teamId === selectedTeamId)?.ownerName || 'unknown'}`}
+                </p>
               )}
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {user && isOwner && (
+            {user && permissions.canManageMembers && !isBannedTeam && (
               <Button variant="secondary" onClick={() => setIsInviteModalOpen(true)}>
                 <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
@@ -898,10 +961,8 @@ export default function MyTeamPage() {
                 Invite Members
               </Button>
             )}
-            <Button variant="secondary" onClick={() => setIsImportModalOpen(true)}>
-              Import from OP.GG
-            </Button>
-            {/* Settings Dropdown */}
+            {/* Settings Dropdown - hidden when banned */}
+            {!isBannedTeam && (
             <div className="relative" ref={settingsRef}>
               <Button
                 variant="ghost"
@@ -915,6 +976,7 @@ export default function MyTeamPage() {
               </Button>
               {isSettingsOpen && (
                 <div className="absolute right-0 mt-2 w-48 bg-lol-card border border-lol-border rounded-lg shadow-xl z-50 overflow-hidden">
+                  {canEditTeamInfo && (
                   <button
                     onClick={() => {
                       setIsSettingsOpen(false);
@@ -927,6 +989,8 @@ export default function MyTeamPage() {
                     </svg>
                     Rename Team
                   </button>
+                  )}
+                  {canEditTeamInfo && (
                   <button
                     onClick={handleReset}
                     className="w-full px-4 py-3 text-left text-sm text-yellow-400 hover:bg-yellow-500/10 flex items-center gap-3 transition-colors border-t border-lol-border"
@@ -936,6 +1000,7 @@ export default function MyTeamPage() {
                     </svg>
                     Reset Team
                   </button>
+                  )}
                   {isOwner ? (
                     <button
                       onClick={handleDeleteTeamClick}
@@ -960,6 +1025,7 @@ export default function MyTeamPage() {
                 </div>
               )}
             </div>
+            )}
           </div>
         </div>
 
@@ -978,14 +1044,13 @@ export default function MyTeamPage() {
                 </p>
                 {isOwner && isPaidTier && isStripeConfigured && (
                   <button
-                    onClick={handleGetTeamPlan}
-                    disabled={isTeamPlanLoading}
-                    className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 transition-all text-sm font-medium disabled:opacity-50"
+                    onClick={() => setShowTeamPlanModal(true)}
+                    className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 transition-all text-sm font-medium"
                   >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                     </svg>
-                    {isTeamPlanLoading ? 'Loading...' : 'Reactivate Team Plan'}
+                    Reactivate Team Plan
                   </button>
                 )}
               </div>
@@ -993,11 +1058,68 @@ export default function MyTeamPage() {
           </div>
         )}
 
+        {/* Ban Banner */}
+        {(() => {
+          const banInfo = isMembershipTeam
+            ? memberships.find(m => m.teamId === selectedTeamId)
+            : team;
+          const teamBannedAt = banInfo && ('bannedAt' in banInfo) ? (banInfo as any).bannedAt : null;
+          const teamBanReason = banInfo && ('banReason' in banInfo) ? (banInfo as any).banReason : null;
+          const teamBanExpiresAt = banInfo && ('banExpiresAt' in banInfo) ? (banInfo as any).banExpiresAt : null;
+          if (!teamBannedAt) return null;
+          const expiresDate = teamBanExpiresAt ? new Date(teamBanExpiresAt) : null;
+          const isPermanent = !expiresDate;
+          const isExpired = expiresDate && expiresDate.getTime() < Date.now();
+          if (isExpired) return null;
+          return (
+            <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl shadow-[0_0_15px_rgba(239,68,68,0.15)]">
+              <div className="flex items-start gap-3">
+                <svg className="w-5 h-5 text-red-400 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                </svg>
+                <div>
+                  <h3 className="text-red-400 font-semibold text-sm">
+                    {isPermanent ? 'Team Banned' : 'Team Suspended'}
+                  </h3>
+                  {teamBanReason && (
+                    <p className="text-gray-300 text-sm mt-1">{teamBanReason}</p>
+                  )}
+                  {expiresDate && (
+                    <p className="text-gray-400 text-xs mt-2">
+                      Expires: {expiresDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} at {expiresDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  )}
+                  {isPermanent && (
+                    <p className="text-gray-500 text-xs mt-2">
+                      This ban is permanent. Contact support if you believe this is a mistake.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Hide all team content when banned */}
+        {isBannedTeam ? (
+          <div className="text-center py-12">
+            <svg className="w-16 h-16 text-red-500/40 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+            </svg>
+            <p className="text-gray-500 text-sm">This team has been banned. All team content is locked and read-only.</p>
+          </div>
+        ) : (<>
+
         {/* Main Roster */}
         <Card variant="bordered" padding="lg">
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">Main Roster</h2>
             <div className="flex items-center gap-4">
+              {canManagePlayers && (
+                <Button variant="secondary" size="sm" onClick={() => setIsImportModalOpen(true)}>
+                  Import from OP.GG
+                </Button>
+              )}
               {isRankApiConfigured() && teamPlayers.length > 0 && (
                 <Button
                   variant="ghost"
@@ -1029,14 +1151,20 @@ export default function MyTeamPage() {
             strategy={horizontalListSortingStrategy}
           >
             <div className="flex gap-3 p-2 rounded-xl bg-lol-dark/50">
-              {ROLES.map((role) => (
-                <RoleSlot
-                  key={role.value}
-                  role={role.value as Role}
-                  player={getPlayerForRole(role.value as Role)}
-                  onPlayerChange={updatePlayer}
-                />
-              ))}
+              {ROLES.map((role) => {
+                const player = getPlayerForRole(role.value as Role);
+                const playerEditable = player ? canEditPlayer(player.id) : canManagePlayers;
+                return (
+                  <RoleSlot
+                    key={role.value}
+                    role={role.value as Role}
+                    player={player}
+                    onPlayerChange={playerEditable ? updatePlayer : () => {}}
+                    onAddPlayer={canManagePlayers ? handleAddPlayer : undefined}
+                    readOnly={!playerEditable}
+                  />
+                );
+              })}
             </div>
           </SortableContext>
           <div className="flex items-center gap-4 mt-3">
@@ -1048,25 +1176,31 @@ export default function MyTeamPage() {
         <Card variant="bordered" padding="lg">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">Substitutes ({subs.length}/{MAX_SUBS})</h2>
-            <Button variant="ghost" size="sm" onClick={addSub} disabled={subs.length >= MAX_SUBS}>
-              + Add Sub
-            </Button>
+            {canManagePlayers && (
+              <Button variant="ghost" size="sm" onClick={addSub} disabled={subs.length >= MAX_SUBS}>
+                + Add Sub
+              </Button>
+            )}
           </div>
           <SortableContext items={subs.map((p) => p.id)}>
             <SubsDropZone>
               {subs.length === 0 ? (
                 <p className="text-sm text-gray-500 p-4 w-full text-center">
-                  No subs - drag a player here or click Add Sub
+                  {canManagePlayers ? 'No subs - drag a player here or click Add Sub' : 'No substitutes'}
                 </p>
               ) : (
-                subs.map((sub) => (
-                  <SubSlot
-                    key={sub.id}
-                    player={sub}
-                    onPlayerChange={updatePlayer}
-                    onRemove={() => removeSub(sub.id)}
-                  />
-                ))
+                subs.map((sub) => {
+                  const subEditable = canEditPlayer(sub.id);
+                  return (
+                    <SubSlot
+                      key={sub.id}
+                      player={sub}
+                      onPlayerChange={subEditable ? updatePlayer : () => {}}
+                      onRemove={() => removeSub(sub.id)}
+                      readOnly={!subEditable}
+                    />
+                  );
+                })
               )}
             </SubsDropZone>
           </SortableContext>
@@ -1110,27 +1244,36 @@ export default function MyTeamPage() {
           </div>
         </Card>
 
-        {/* Content Permissions - only show for owners of teams with a plan */}
+        {/* Team Settings - only show for owners of teams with a plan */}
         {isOwner && currentTeamHasPlan && (
           <Card variant="bordered" padding="lg">
-            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">Content Permissions</h2>
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-white text-sm font-medium">Who can create team content?</p>
-                <p className="text-gray-500 text-xs mt-1">Controls who can create drafts and enemy teams for this team.</p>
+                <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">Team Settings</h2>
+                <p className="text-gray-500 text-xs mt-1">Manage permissions for drafts, enemy teams, and players.</p>
               </div>
-              <select
-                value={currentTeamContentPermission}
-                onChange={(e) => handleUpdateContentPermission(e.target.value as 'admins' | 'players' | 'all')}
-                disabled={isContentPermUpdating}
-                className="bg-lol-dark border border-lol-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-lol-gold disabled:opacity-50"
-              >
-                <option value="admins">Owner & Admins</option>
-                <option value="players">Owner, Admins & Players</option>
-                <option value="all">All Members</option>
-              </select>
+              <Button variant="secondary" size="sm" onClick={() => setIsSettingsModalOpen(true)}>
+                <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                Settings
+              </Button>
             </div>
           </Card>
+        )}
+
+        {/* Team Settings Modal */}
+        {isOwner && currentTeamHasPlan && team && (
+          <TeamSettingsModal
+            isOpen={isSettingsModalOpen}
+            onClose={() => setIsSettingsModalOpen(false)}
+            teamId={team.id}
+            teamName={team.name}
+            permDrafts={teamWithPlan?.permDrafts || 'admins'}
+            permEnemyTeams={teamWithPlan?.permEnemyTeams || 'admins'}
+            permPlayers={teamWithPlan?.permPlayers || 'admins'}
+          />
         )}
 
         {/* Team Members - only show when authenticated */}
@@ -1146,9 +1289,12 @@ export default function MyTeamPage() {
               isInviteModalOpen={isInviteModalOpen}
               onInviteModalClose={() => setIsInviteModalOpen(false)}
               onLeaveTeam={() => handleLeaveTeamClick()}
+              showGetTeamPlan={isOwner && isPaidTier && !currentTeamHasPlan && isStripeConfigured}
+              onGetTeamPlan={() => setShowTeamPlanModal(true)}
             />
           </Card>
         )}
+        </>)}
         </>)}
 
         {/* Import Modal */}
@@ -1163,9 +1309,6 @@ export default function MyTeamPage() {
           title="Import from OP.GG"
         >
           <div className="space-y-5">
-            <p className="text-sm text-gray-400 bg-lol-dark rounded-lg p-4 border border-lol-border">
-              Paste an OP.GG multi-search URL to import your team.
-            </p>
             <Input
               label="OP.GG URL"
               value={importUrl}
@@ -1382,6 +1525,91 @@ export default function MyTeamPage() {
                 {isRenamingTeam ? 'Renaming...' : 'Rename'}
               </Button>
             </div>
+          </div>
+        </Modal>
+
+        {/* Team Pro Info & Purchase Modal */}
+        <Modal
+          isOpen={showTeamPlanModal}
+          onClose={() => { setShowTeamPlanModal(false); setTeamPlanError(null); }}
+          title="Team Pro"
+          size="sm"
+        >
+          <div className="space-y-5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-blue-400">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                <span className="font-semibold">Upgrade your team</span>
+              </div>
+              <span className="text-blue-400 font-bold text-lg">€15<span className="text-sm font-normal text-gray-400">/month</span></span>
+            </div>
+
+            <ul className="space-y-4">
+              <li className="flex items-start gap-3">
+                <svg className="w-4 h-4 text-green-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <div>
+                  <span className="text-white font-medium text-sm">Unlimited team drafts</span>
+                  <p className="text-gray-500 text-xs mt-0.5">Don't count toward personal draft limit</p>
+                </div>
+              </li>
+              <li className="flex items-start gap-3">
+                <svg className="w-4 h-4 text-green-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <div>
+                  <span className="text-white font-medium text-sm">300 shared enemy teams</span>
+                  <p className="text-gray-500 text-xs mt-0.5">Visible to all team members</p>
+                </div>
+              </li>
+              <li className="flex items-start gap-3">
+                <svg className="w-4 h-4 text-green-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <div>
+                  <span className="text-white font-medium text-sm">Content permissions</span>
+                  <p className="text-gray-500 text-xs mt-0.5">Control who can create team drafts and enemy teams</p>
+                </div>
+              </li>
+              <li className="flex items-start gap-3">
+                <svg className="w-4 h-4 text-green-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <div>
+                  <span className="text-white font-medium text-sm">Team-wide collaboration</span>
+                  <p className="text-gray-500 text-xs mt-0.5">All members can access shared team data</p>
+                </div>
+              </li>
+            </ul>
+
+            {teamPlanError && (
+              <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                <p className="text-red-400 text-sm">{teamPlanError}</p>
+              </div>
+            )}
+
+            <button
+              onClick={handleGetTeamPlan}
+              disabled={isTeamPlanLoading}
+              className="w-full py-2.5 bg-blue-500 text-white font-medium rounded-lg hover:bg-blue-400 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {isTeamPlanLoading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  Redirecting to checkout...
+                </span>
+              ) : 'Subscribe — €15/month'}
+            </button>
+
+            <p className="text-xs text-gray-500 text-center">
+              Billed separately per team. Requires Pro or Supporter subscription.
+            </p>
           </div>
         </Modal>
 

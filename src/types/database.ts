@@ -32,6 +32,7 @@ export type NotificationType =
   | 'message'
   | 'draft_invite'
   | 'moderation'
+  | 'warning'
   | 'ownership_transfer_request'
   | 'ownership_transfer_accepted'
   | 'ownership_transfer_declined'
@@ -60,6 +61,10 @@ export interface Database {
           avatar_moderated_until: string | null;
           avatar_moderation_status: string | null;
           downgraded_at: string | null;
+          downgrade_reason: string | null;
+          profile_card_bg: string | null;
+          profile_card_gradient: string | null;
+          profile_card_gradient_angle: number | null;
           created_at: string;
           updated_at: string;
         };
@@ -82,6 +87,10 @@ export interface Database {
           avatar_moderated_until?: string | null;
           avatar_moderation_status?: string | null;
           downgraded_at?: string | null;
+          downgrade_reason?: string | null;
+          profile_card_bg?: string | null;
+          profile_card_gradient?: string | null;
+          profile_card_gradient_angle?: number | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -104,6 +113,10 @@ export interface Database {
           avatar_moderated_until?: string | null;
           avatar_moderation_status?: string | null;
           downgraded_at?: string | null;
+          downgrade_reason?: string | null;
+          profile_card_bg?: string | null;
+          profile_card_gradient?: string | null;
+          profile_card_gradient_angle?: number | null;
           updated_at?: string;
         };
       };
@@ -142,8 +155,13 @@ export interface Database {
           has_team_plan: boolean;
           team_plan_status: string | null;
           team_max_enemy_teams: number;
-          team_content_permission: 'admins' | 'players' | 'all';
+          perm_drafts: 'admins' | 'players' | 'all';
+          perm_enemy_teams: 'admins' | 'players' | 'all';
+          perm_players: 'admins' | 'players' | 'all';
           archived_at: string | null;
+          banned_at: string | null;
+          ban_reason: string | null;
+          ban_expires_at: string | null;
         };
         Insert: {
           id?: string;
@@ -157,8 +175,13 @@ export interface Database {
           has_team_plan?: boolean;
           team_plan_status?: string | null;
           team_max_enemy_teams?: number;
-          team_content_permission?: 'admins' | 'players' | 'all';
+          perm_drafts?: 'admins' | 'players' | 'all';
+          perm_enemy_teams?: 'admins' | 'players' | 'all';
+          perm_players?: 'admins' | 'players' | 'all';
           archived_at?: string | null;
+          banned_at?: string | null;
+          ban_reason?: string | null;
+          ban_expires_at?: string | null;
         };
         Update: {
           name?: string;
@@ -169,8 +192,13 @@ export interface Database {
           has_team_plan?: boolean;
           team_plan_status?: string | null;
           team_max_enemy_teams?: number;
-          team_content_permission?: 'admins' | 'players' | 'all';
+          perm_drafts?: 'admins' | 'players' | 'all';
+          perm_enemy_teams?: 'admins' | 'players' | 'all';
+          perm_players?: 'admins' | 'players' | 'all';
           archived_at?: string | null;
+          banned_at?: string | null;
+          ban_reason?: string | null;
+          ban_expires_at?: string | null;
         };
       };
       players: {
@@ -454,6 +482,9 @@ export interface Database {
           invited_by: string | null;
           joined_at: string;
           can_edit_groups: boolean;
+          grant_drafts: boolean;
+          grant_enemy_teams: boolean;
+          grant_players: boolean;
         };
         Insert: {
           id?: string;
@@ -464,11 +495,17 @@ export interface Database {
           invited_by?: string | null;
           joined_at?: string;
           can_edit_groups?: boolean;
+          grant_drafts?: boolean;
+          grant_enemy_teams?: boolean;
+          grant_players?: boolean;
         };
         Update: {
           role?: TeamMemberRole;
           player_slot_id?: string | null;
           can_edit_groups?: boolean;
+          grant_drafts?: boolean;
+          grant_enemy_teams?: boolean;
+          grant_players?: boolean;
         };
       };
       team_invites: {
@@ -964,6 +1001,74 @@ export interface Database {
         };
         Returns: unknown;
       };
+      admin_rename_team: {
+        Args: {
+          target_team_id: string;
+          new_name: string;
+        };
+        Returns: unknown;
+      };
+      admin_delete_team: {
+        Args: {
+          target_team_id: string;
+          p_message?: string;
+        };
+        Returns: unknown;
+      };
+      admin_ban_team: {
+        Args: {
+          target_team_id: string;
+          p_reason?: string;
+          ban_hours?: number | null;
+        };
+        Returns: unknown;
+      };
+      admin_unban_team: {
+        Args: {
+          target_team_id: string;
+        };
+        Returns: unknown;
+      };
+      admin_warn_user: {
+        Args: {
+          target_user_id: string;
+          p_message?: string;
+          p_next_consequence?: string;
+          p_category?: string;
+        };
+        Returns: unknown;
+      };
+      admin_get_warning_count: {
+        Args: {
+          target_user_id: string;
+        };
+        Returns: number;
+      };
+      get_platform_stats: {
+        Args: Record<string, never>;
+        Returns: unknown;
+      };
+      has_admin_pin: {
+        Args: Record<string, never>;
+        Returns: unknown;
+      };
+      set_admin_pin: {
+        Args: {
+          new_pin: string;
+          old_pin?: string;
+        };
+        Returns: unknown;
+      };
+      verify_admin_pin: {
+        Args: {
+          pin: string;
+        };
+        Returns: unknown;
+      };
+      extend_admin_session: {
+        Args: Record<string, never>;
+        Returns: unknown;
+      };
     };
   };
 }
@@ -1030,6 +1135,10 @@ export interface Friend {
   acceptedAt: string;
   role?: ProfileRole | null;
   roleTeamName?: string | null;
+  tier?: UserTier | null;
+  profileCardBg?: string | null;
+  profileCardGradient?: string | null;
+  profileCardGradientAngle?: number | null;
 }
 
 export interface PendingFriendRequest {
@@ -1094,7 +1203,15 @@ export interface TeamMembership {
   ownerAvatar: string | null;
   hasTeamPlan: boolean;
   teamPlanStatus: string | null;
-  teamContentPermission: 'admins' | 'players' | 'all';
+  permDrafts: 'admins' | 'players' | 'all';
+  permEnemyTeams: 'admins' | 'players' | 'all';
+  permPlayers: 'admins' | 'players' | 'all';
+  grantDrafts: boolean;
+  grantEnemyTeams: boolean;
+  grantPlayers: boolean;
+  bannedAt: string | null;
+  banReason: string | null;
+  banExpiresAt: string | null;
 }
 
 // Accept invite response

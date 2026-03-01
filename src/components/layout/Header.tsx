@@ -208,7 +208,7 @@ export default function Header() {
             {notifications.length > 5 && (
               <div className="px-4 py-2 border-t border-lol-border">
                 <Link
-                  to="/friends"
+                  to="/social"
                   onClick={() => setShowDropdown(false)}
                   className="text-xs text-lol-gold hover:text-lol-gold-light transition-colors"
                 >

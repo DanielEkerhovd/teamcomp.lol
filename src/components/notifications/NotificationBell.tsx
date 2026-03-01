@@ -53,6 +53,13 @@ function NotificationItem({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         );
+      case 'warning':
+      case 'moderation':
+        return (
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+          </svg>
+        );
       default:
         return (
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -74,6 +81,10 @@ function NotificationItem({
         return 'bg-yellow-500/20 text-yellow-400';
       case 'draft_invite':
         return 'bg-orange-500/20 text-orange-400';
+      case 'warning':
+        return 'bg-amber-500/20 text-amber-400';
+      case 'moderation':
+        return 'bg-red-500/20 text-red-400';
       default:
         return 'bg-gray-500/20 text-gray-400';
     }
@@ -82,21 +93,24 @@ function NotificationItem({
   const getActionLink = () => {
     switch (notification.type) {
       case 'friend_request':
-        return '/friends?tab=pending';
+        return '/social?tab=pending';
       case 'team_invite':
-        return '/friends?tab=team_invites';
+        return '/social?tab=team_invites';
       case 'team_member_joined':
       case 'team_member_left':
       case 'team_role_changed':
         return notification.data?.teamId ? `/my-teams?team=${notification.data.teamId}` : '/my-teams';
       case 'ownership_transfer_request':
-        return '/friends?tab=team_invites';
+        return '/social?tab=team_invites';
       case 'ownership_transfer_accepted':
       case 'ownership_transfer_declined':
       case 'ownership_transfer_cancelled':
         return notification.data?.teamId ? `/my-teams?team=${notification.data.teamId}` : '/my-teams';
       case 'draft_invite':
         return notification.data?.inviteToken ? `/live-draft/join/${notification.data.inviteToken}` : null;
+      case 'warning':
+      case 'moderation':
+        return '/social?tab=notifications';
       default:
         return null;
     }

@@ -258,34 +258,69 @@ export default function LiveDraftListPage() {
         </div>
       </Card>
 
-      <Button onClick={() => setIsCreateModalOpen(true)} size="lg">
-        + New Live Draft
-      </Button>
+      {/* Create button — shown when user has existing sessions */}
+      {user && !isLoading && sessions.length > 0 && (
+        <div className="flex items-center gap-4 p-4 rounded-xl bg-lol-card border border-lol-border">
+          <Button onClick={() => setIsCreateModalOpen(true)}>
+            + New Live Draft
+          </Button>
+          <p className="text-gray-400 text-sm">
+            Start a new real-time draft session
+          </p>
+        </div>
+      )}
 
-      {/* Empty State */}
-      {user && !isLoading && sessions.length === 0 && (
-        <Card className="text-center py-16">
-          <div className="text-gray-500 mb-4">
-            <svg className="w-16 h-16 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      {/* Empty State — large placeholder */}
+      {!isLoading && (!user || sessions.length === 0) && (
+        <div className="relative rounded-2xl border border-lol-gold/20 bg-linear-to-b from-lol-gold/3 to-transparent py-24 px-8 text-center">
+          {/* Background decoration */}
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-[0.04]">
+            <svg className="w-72 h-72" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                strokeWidth={1.5}
+                strokeWidth={0.5}
                 d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
               />
             </svg>
           </div>
-          <h2 className="text-xl font-semibold text-white mb-2">
-            No live drafts yet
-          </h2>
-          <p className="text-gray-400 mb-6 max-w-md mx-auto">
-            Create your first live draft session to start drafting in real-time
-            with your opponent
-          </p>
-          <Button onClick={() => setIsCreateModalOpen(true)} size="lg">
-            Create Your First Live Draft
-          </Button>
-        </Card>
+
+          <div className="relative space-y-6 max-w-lg mx-auto">
+            {/* Icon */}
+            <div className="mx-auto w-20 h-20 rounded-2xl bg-lol-gold/10 border border-lol-gold/20 flex items-center justify-center">
+              <svg className="w-10 h-10 text-lol-gold" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                />
+              </svg>
+            </div>
+
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold text-white">
+                No live drafts yet
+              </h2>
+              <p className="text-gray-400 text-lg leading-relaxed">
+                Create your first live draft session to start drafting champions
+                in real-time with your opponent.
+              </p>
+            </div>
+
+            <Button
+              onClick={() => setIsCreateModalOpen(true)}
+              size="lg"
+              className="text-base! px-8! py-3!"
+            >
+              + Create New Draft
+            </Button>
+
+            <p className="text-gray-600 text-sm">
+              Set up teams, pick a draft mode, invite your opponent, and go live.
+            </p>
+          </div>
+        </div>
       )}
 
       {/* Active Drafts Section */}
@@ -314,7 +349,7 @@ export default function LiveDraftListPage() {
           <div className="flex items-center gap-3 flex-wrap">
             <div className="relative">
               <svg
-                className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none"
+                className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -331,7 +366,7 @@ export default function LiveDraftListPage() {
                 placeholder="Search past drafts..."
                 value={pastSearch}
                 onChange={(e) => setPastSearch(e.target.value)}
-                className="pl-9 pr-3 py-1.5 text-sm rounded-lg bg-lol-surface border border-lol-border text-gray-200 placeholder-gray-500 focus:outline-none focus:border-lol-gold/50 w-64"
+                className="pl-11 pr-4 py-3 text-sm rounded-xl bg-lol-dark border border-lol-border text-white placeholder-gray-500 focus:outline-none focus:border-lol-gold/50 focus:ring-2 focus:ring-lol-gold/20 transition-all duration-200 w-64"
               />
             </div>
             <div className="flex items-center gap-1">
@@ -541,39 +576,43 @@ function SessionCard({
           <span>Teams</span>
           <div className="flex items-center gap-1.5 text-gray-300">
             <div className="flex items-center gap-1">
-              {session.team1_captain_avatar_url ? (
-                <img
-                  src={session.team1_captain_avatar_url}
-                  alt=""
-                  className="w-5 h-5 rounded-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
+              <div className="relative w-5 h-5 shrink-0">
                 <div className="w-5 h-5 rounded-full bg-blue-400/10 flex items-center justify-center">
                   <svg className="w-3 h-3 text-blue-400/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                   </svg>
                 </div>
-              )}
+                {session.team1_captain_avatar_url && (
+                  <img
+                    src={session.team1_captain_avatar_url}
+                    alt=""
+                    className="absolute inset-0 w-5 h-5 rounded-full object-cover"
+                    referrerPolicy="no-referrer"
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                  />
+                )}
+              </div>
               <span className="truncate max-w-20">{session.team1_name}</span>
             </div>
             <span className="text-gray-500 text-xs">vs</span>
             <div className="flex items-center gap-1">
               <span className="truncate max-w-20">{session.team2_name}</span>
-              {session.team2_captain_avatar_url ? (
-                <img
-                  src={session.team2_captain_avatar_url}
-                  alt=""
-                  className="w-5 h-5 rounded-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
+              <div className="relative w-5 h-5 shrink-0">
                 <div className="w-5 h-5 rounded-full bg-red-400/10 flex items-center justify-center">
                   <svg className="w-3 h-3 text-red-400/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                   </svg>
                 </div>
-              )}
+                {session.team2_captain_avatar_url && (
+                  <img
+                    src={session.team2_captain_avatar_url}
+                    alt=""
+                    className="absolute inset-0 w-5 h-5 rounded-full object-cover"
+                    referrerPolicy="no-referrer"
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                  />
+                )}
+              </div>
             </div>
           </div>
         </div>

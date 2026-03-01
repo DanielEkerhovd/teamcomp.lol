@@ -24,6 +24,7 @@ function getNotifIcon(type: Notification['type']) {
     case 'ownership_transfer_declined':
     case 'ownership_transfer_cancelled':
       return <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />;
+    case 'warning':
     case 'moderation':
       return <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />;
     default:
@@ -42,6 +43,7 @@ function getNotifColor(type: Notification['type']) {
     case 'ownership_transfer_accepted': return 'bg-green-500/20 text-green-400';
     case 'ownership_transfer_declined':
     case 'ownership_transfer_cancelled': return 'bg-red-500/20 text-red-400';
+    case 'warning': return 'bg-amber-500/20 text-amber-400';
     case 'moderation': return 'bg-red-500/20 text-red-400';
     default: return 'bg-gray-500/20 text-gray-400';
   }
@@ -50,9 +52,9 @@ function getNotifColor(type: Notification['type']) {
 function getNotifActionLink(notification: Notification): string | null {
   switch (notification.type) {
     case 'friend_request':
-      return '/friends?tab=pending';
+      return '/social?tab=pending';
     case 'team_invite':
-      return '/friends?tab=team_invites';
+      return '/social?tab=team_invites';
     case 'team_member_joined':
     case 'team_member_left':
     case 'team_role_changed':
@@ -60,11 +62,14 @@ function getNotifActionLink(notification: Notification): string | null {
     case 'draft_invite':
       return notification.data?.inviteToken ? `/live-draft/join/${notification.data.inviteToken}` : null;
     case 'ownership_transfer_request':
-      return '/friends?tab=team_invites';
+      return '/social?tab=team_invites';
     case 'ownership_transfer_accepted':
     case 'ownership_transfer_declined':
     case 'ownership_transfer_cancelled':
       return notification.data?.teamId ? `/my-teams?team=${notification.data.teamId}` : '/my-teams';
+    case 'warning':
+    case 'moderation':
+      return '/social?tab=notifications';
     default:
       return null;
   }
@@ -341,7 +346,7 @@ export default function UserMenu({ collapsed }: UserMenuProps) {
                 {unreadNotifications.length > 4 && (
                   <div className="px-3 py-1.5 border-t border-lol-border">
                     <button
-                      onClick={() => handleNavigate('/friends?tab=notifications')}
+                      onClick={() => handleNavigate('/social?tab=notifications')}
                       className="w-full text-center text-[11px] text-gray-500 hover:text-lol-gold transition-colors"
                     >
                       +{unreadNotifications.length - 4} more — View all
@@ -358,7 +363,7 @@ export default function UserMenu({ collapsed }: UserMenuProps) {
               <div className="p-1">
                 {/* Friends */}
                 <button
-                  onClick={() => handleNavigate('/friends')}
+                  onClick={() => handleNavigate('/social')}
                   className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-300 hover:text-white hover:bg-lol-surface rounded-lg transition-colors"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -374,7 +379,7 @@ export default function UserMenu({ collapsed }: UserMenuProps) {
 
                 {/* Messages */}
                 <button
-                  onClick={() => handleNavigate('/friends?tab=messages')}
+                  onClick={() => handleNavigate('/social?tab=messages')}
                   className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-300 hover:text-white hover:bg-lol-surface rounded-lg transition-colors"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -390,13 +395,18 @@ export default function UserMenu({ collapsed }: UserMenuProps) {
 
                 {/* Notifications */}
                 <button
-                  onClick={() => handleNavigate('/friends?tab=notifications')}
+                  onClick={() => handleNavigate('/social?tab=notifications')}
                   className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-300 hover:text-white hover:bg-lol-surface rounded-lg transition-colors"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                   </svg>
                   <span className="flex-1 text-left">Notifications</span>
+                  {notifUnreadCount > 0 && (
+                    <span className="flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold text-white bg-red-500 rounded-full">
+                      {notifUnreadCount > 99 ? '99+' : notifUnreadCount}
+                    </span>
+                  )}
                 </button>
 
                 {/* Divider */}

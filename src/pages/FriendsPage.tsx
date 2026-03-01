@@ -269,15 +269,15 @@ function NotificationItem({
   const getActionLink = () => {
     switch (notification.type) {
       case 'team_invite':
-        return '/friends?tab=team_invites';
+        return '/social?tab=team_invites';
       case 'friend_request':
-        return '/friends?tab=pending';
+        return '/social?tab=pending';
       case 'team_member_joined':
       case 'team_member_left':
       case 'team_role_changed':
         return notification.data?.teamId ? `/my-teams?team=${notification.data.teamId}` : '/my-teams';
       case 'ownership_transfer_request':
-        return '/friends?tab=team_invites';
+        return '/social?tab=team_invites';
       case 'ownership_transfer_accepted':
       case 'ownership_transfer_declined':
       case 'ownership_transfer_cancelled':

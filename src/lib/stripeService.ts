@@ -14,7 +14,7 @@ interface CreateCheckoutParams {
 export const STRIPE_PRICES = {
   pro: import.meta.env.VITE_STRIPE_PRO_PRICE_ID as string,
   supporter: import.meta.env.VITE_STRIPE_SUPPORTER_PRICE_ID as string,
-  team: import.meta.env.VITE_STRIPE_TEAM_PRICE_ID as string,
+  team: import.meta.env.VITE_STRIPE_TEAM_PRO_PRICE_ID as string,
 } as const;
 
 export async function createCheckoutSession(params: CreateCheckoutParams): Promise<{ error: string | null }> {

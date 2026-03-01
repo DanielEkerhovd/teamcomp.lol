@@ -76,6 +76,9 @@ export interface Team {
   updatedAt: number;
   championPool?: TeamChampionPriority[];
   isFavorite?: boolean;
+  bannedAt?: string | null;
+  banReason?: string | null;
+  banExpiresAt?: string | null;
 }
 
 export interface Champion {
@@ -157,6 +160,8 @@ export interface DraftSession {
   ourPriorities?: string[];
   notes: string;
   notepad?: Note[];
+  isFavorite?: boolean;
+  isPlanned?: boolean;
   createdAt: number;
   updatedAt: number;
 }

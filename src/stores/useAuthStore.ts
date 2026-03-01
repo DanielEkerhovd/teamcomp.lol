@@ -4,6 +4,7 @@ import { supabase, isSupabaseConfigured, clearCachedSession } from '../lib/supab
 import { checkModerationAndRecord, checkImageModerationAndRecord, getViolationWarning } from '../lib/moderation';
 import { resizeImage } from '../lib/imageResize';
 import type { Profile, UserTier, ProfileRole } from '../types/database';
+import { useAdminSessionStore } from './useAdminSessionStore';
 
 // Guard against multiple initialization calls (React Strict Mode)
 let isInitializing = false;
@@ -27,6 +28,10 @@ export interface UserProfile {
   bannedAt: string | null;
   banReason: string | null;
   downgradedAt: string | null;
+  downgradeReason: string | null;
+  profileCardBg: string | null;
+  profileCardGradient: string | null;
+  profileCardGradientAngle: number | null;
 }
 
 interface AuthState {
@@ -62,6 +67,7 @@ interface AuthState {
   updateEmail: (newEmail: string) => Promise<{ error: string | null }>;
   updatePrivacy: (isPrivate: boolean) => Promise<{ error: string | null }>;
   deleteAccount: () => Promise<{ error: string | null }>;
+  updateProfileCard: (bg: string | null, gradient: string | null, angle: number | null) => Promise<{ error: string | null }>;
 }
 
 const transformProfile = (dbProfile: Profile, roleTeamName?: string | null): UserProfile => ({
@@ -83,6 +89,10 @@ const transformProfile = (dbProfile: Profile, roleTeamName?: string | null): Use
   bannedAt: dbProfile.banned_at ?? null,
   banReason: dbProfile.ban_reason ?? null,
   downgradedAt: dbProfile.downgraded_at ?? null,
+  downgradeReason: dbProfile.downgrade_reason ?? null,
+  profileCardBg: dbProfile.profile_card_bg ?? null,
+  profileCardGradient: dbProfile.profile_card_gradient ?? null,
+  profileCardGradientAngle: dbProfile.profile_card_gradient_angle ?? null,
 });
 
 export const useAuthStore = create<AuthState>()((set, get) => ({
@@ -325,6 +335,9 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
         // Always clear cached session as fallback (handles edge cases where supabase call fails)
         clearCachedSession();
+
+        // Clear admin PIN session
+        useAdminSessionStore.getState().reset();
 
         // Clear all local data stores
         const storeKeys = [
@@ -701,6 +714,66 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
         // Refresh the profile to get updated data
         await get().refreshProfile();
+
+        return { error: null };
+      },
+
+      updateProfileCard: async (
+        bg: string | null,
+        gradient: string | null,
+        angle: number | null
+      ) => {
+        const { user, profile } = get();
+        if (!user || !supabase) {
+          return { error: 'Please sign in to continue' };
+        }
+
+        // Tier gate
+        const tier = profile?.tier;
+        if (tier === 'free' || tier === 'beta') {
+          return { error: 'Profile card customization requires a Pro or Supporter plan.' };
+        }
+
+        // Only supporter+ can use gradients
+        if (gradient && tier === 'paid') {
+          return { error: 'Gradients require a Supporter plan.' };
+        }
+
+        // Validate hex colors
+        const hexRegex = /^#[0-9A-Fa-f]{6}$/;
+        if (bg && !hexRegex.test(bg)) {
+          return { error: 'Invalid background color.' };
+        }
+        if (gradient && !hexRegex.test(gradient)) {
+          return { error: 'Invalid gradient color.' };
+        }
+        if (angle !== null && (angle < 0 || angle > 360)) {
+          return { error: 'Invalid gradient angle.' };
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error: updateError } = await (supabase as any)
+          .from('profiles')
+          .update({
+            profile_card_bg: bg,
+            profile_card_gradient: gradient,
+            profile_card_gradient_angle: angle,
+          })
+          .eq('id', user.id);
+
+        if (updateError) {
+          return { error: updateError.message };
+        }
+
+        // Optimistic local update
+        set((state) => ({
+          profile: state.profile ? {
+            ...state.profile,
+            profileCardBg: bg,
+            profileCardGradient: gradient,
+            profileCardGradientAngle: angle,
+          } : null,
+        }));
 
         return { error: null };
       },

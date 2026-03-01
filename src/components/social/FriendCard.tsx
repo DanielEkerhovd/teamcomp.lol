@@ -1,6 +1,7 @@
 import { Friend, PendingFriendRequest, BlockedUser, ProfileRole } from '../../types/database';
 import { formatDistanceToNow } from '../../lib/dateUtils';
 import DefaultAvatar from '../ui/DefaultAvatar';
+import { getProfileCardStyle, hasCustomCardColors, type ProfileCardColors } from '../../lib/profileCardUtils';
 
 // Role display labels
 const ROLE_LABELS: Record<ProfileRole, string> = {
@@ -45,9 +46,23 @@ interface FriendCardProps {
 
 export function FriendCard({ friend, onRemove, onMessage, onBlock }: FriendCardProps) {
   const roleDisplay = getRoleDisplay(friend.role, friend.roleTeamName);
+  const cardColors: ProfileCardColors = {
+    bg: friend.profileCardBg ?? null,
+    gradient: friend.profileCardGradient ?? null,
+    gradientAngle: friend.profileCardGradientAngle ?? null,
+  };
+  const hasCustom = hasCustomCardColors(cardColors);
+  const customStyle = hasCustom ? getProfileCardStyle(cardColors) : undefined;
 
   return (
-    <div className="flex items-center gap-3 p-3 bg-lol-surface rounded-lg border border-lol-border hover:border-lol-gold/30 transition-colors">
+    <div
+      className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
+        hasCustom
+          ? 'border-white/10 hover:border-white/20'
+          : 'bg-lol-surface border-lol-border hover:border-lol-gold/30'
+      }`}
+      style={customStyle}
+    >
       {friend.avatarUrl ? (
         <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0">
           <img

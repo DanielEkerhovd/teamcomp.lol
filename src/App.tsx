@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, useNavigate } from 'react-router-dom';
 import HomePage from './pages/HomePage';
 import EnemyTeamPage from './pages/EnemyTeamPage';
@@ -246,19 +246,17 @@ function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed
           href="https://discord.gg/zKVUjtPSb6"
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center py-3 px-3 rounded-xl font-medium text-gray-400 hover:text-[#5865F2] hover:bg-lol-surface transition-all duration-300 group relative"
+          className={`flex items-center justify-center py-2 px-2.5 rounded-xl text-xs font-medium text-gray-400 bg-lol-surface/50 border border-lol-border hover:text-[#5865F2] hover:border-lol-border transition-all duration-300 group relative ${collapsed ? '' : 'gap-2'}`}
         >
-          <span className="shrink-0">
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z" />
-            </svg>
-          </span>
-          <span className={`whitespace-nowrap transition-all duration-300 overflow-hidden ${collapsed ? 'max-w-0 opacity-0 ml-0' : 'max-w-[200px] opacity-100 ml-3'}`}>
-            Discord
+          <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z" />
+          </svg>
+          <span className={`whitespace-nowrap transition-all duration-300 overflow-hidden ${collapsed ? 'max-w-0 opacity-0' : 'max-w-[200px] opacity-100'}`}>
+            Join Discord
           </span>
           {collapsed && (
             <div className="absolute left-full ml-3 px-3 py-2 bg-lol-card border border-lol-border rounded-lg text-sm text-white whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 shadow-xl z-50">
-              Discord
+              Join Discord
             </div>
           )}
         </a>
@@ -308,34 +306,8 @@ function Layout({ children }: { children: React.ReactNode }) {
   );
 }
 
-/**
- * Handles redirect back to the original page after OAuth sign-in.
- * OAuth flows land on `/` (the app root), so this picks up the stored
- * return URL and navigates there once the user is authenticated.
- */
 function PageTracker() {
   usePageTracker();
-  return null;
-}
-
-function AuthRedirectHandler() {
-  const { user } = useAuthStore();
-  const navigate = useNavigate();
-  const hasRedirected = useRef(false);
-
-  useEffect(() => {
-    if (user && !hasRedirected.current) {
-      try {
-        const returnUrl = localStorage.getItem('teamcomp-lol-auth-return-url');
-        if (returnUrl) {
-          localStorage.removeItem('teamcomp-lol-auth-return-url');
-          hasRedirected.current = true;
-          navigate(returnUrl, { replace: true });
-        }
-      } catch { /* ignore */ }
-    }
-  }, [user, navigate]);
-
   return null;
 }
 
@@ -343,7 +315,6 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <AuthRedirectHandler />
         <PageTracker />
         <Routes>
           {/* Public routes (no sidebar) */}
@@ -366,7 +337,7 @@ export default function App() {
                   <Route path="/champion-pool" element={<ChampionPoolPage />} />
                   <Route path="/tools" element={<ToolsPage />} />
                   <Route path="/profile" element={<ProfilePage />} />
-                  <Route path="/friends" element={<FriendsPage />} />
+                  <Route path="/social" element={<FriendsPage />} />
                   <Route path="/admin" element={<AdminPage />} />
                   <Route path="/upgrade" element={<UpgradePage />} />
                   <Route path="/splasharts" element={<SplashArtsPage />} />

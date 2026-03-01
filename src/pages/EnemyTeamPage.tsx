@@ -49,6 +49,8 @@ function SubsDropZone({
   );
 }
 
+type EnemyFilter = 'personal' | string; // string = myTeamId
+
 export default function EnemyTeamPage() {
   const {
     teams,
@@ -67,6 +69,11 @@ export default function EnemyTeamPage() {
     addNote,
     updateNote,
     deleteNote,
+    teamEnemyTeams,
+    teamEnemyTeamsLoading,
+    loadTeamEnemyTeams,
+    addTeamEnemyTeam,
+    deleteTeamEnemyTeam,
   } = useEnemyTeamStore();
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newTeamName, setNewTeamName] = useState("");
@@ -86,9 +93,48 @@ export default function EnemyTeamPage() {
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [teamToDelete, setTeamToDelete] = useState<string | null>(null);
   const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
+  const [enemyFilter, setEnemyFilter] = useState<EnemyFilter>('personal');
+  const [isAddingTeamEnemy, setIsAddingTeamEnemy] = useState(false);
 
+  const { user } = useAuthStore();
   const { maxEnemyTeams } = useTierLimits();
   const isAtLimit = teams.length >= maxEnemyTeams;
+
+  // Get paid teams (owned + membership) for team enemy tabs
+  const myTeams = useMyTeamStore((s) => s.teams);
+  const memberships = useMyTeamStore((s) => s.memberships);
+  const paidTeamTabs = [
+    ...myTeams
+      .filter((t) => (t as any).has_team_plan || (t as any).hasTeamPlan)
+      .map((t) => ({ id: t.id, name: t.name, maxEnemyTeams: 300 })),
+    ...memberships
+      .filter((m) => m.hasTeamPlan)
+      .map((m) => ({ id: m.teamId, name: m.teamName, maxEnemyTeams: 300 })),
+  ];
+
+  const isTeamFilter = enemyFilter !== 'personal';
+  const activeTeamTab = paidTeamTabs.find((t) => t.id === enemyFilter);
+  const activeTeamEnemies = isTeamFilter ? (teamEnemyTeams[enemyFilter] || []) : [];
+  const teamEnemyCount = activeTeamEnemies.length;
+  const teamEnemyMax = activeTeamTab?.maxEnemyTeams || 300;
+  const isTeamAtLimit = teamEnemyCount >= teamEnemyMax;
+
+  // Check if the filtered team is banned
+  const isFilteredTeamBanned = (() => {
+    if (!isTeamFilter) return false;
+    const ownedTeam = myTeams.find(t => t.id === enemyFilter);
+    if (ownedTeam?.bannedAt) return true;
+    const membership = memberships.find(m => m.teamId === enemyFilter);
+    if ((membership as any)?.bannedAt) return true;
+    return false;
+  })();
+
+  // Load team enemy teams when switching to a team filter
+  useEffect(() => {
+    if (isTeamFilter && user) {
+      loadTeamEnemyTeams(enemyFilter);
+    }
+  }, [enemyFilter, isTeamFilter, user, loadTeamEnemyTeams]);
 
   const {
     fetchRanksForContext,
@@ -206,6 +252,24 @@ export default function EnemyTeamPage() {
       return;
     }
 
+    // Team enemy team add
+    if (isTeamFilter) {
+      setIsAddingTeamEnemy(true);
+      const result = await addTeamEnemyTeam(enemyFilter, newTeamName.trim());
+      setIsAddingTeamEnemy(false);
+      if (!result.success) {
+        setAddTeamError(result.error === 'max_teams_reached'
+          ? `You've reached the maximum limit of ${teamEnemyMax} team enemy teams`
+          : 'Failed to add team');
+        return;
+      }
+      setNewTeamName("");
+      setAddTeamError("");
+      setIsAddModalOpen(false);
+      setExpandedTeamId(result.team!.id);
+      return;
+    }
+
     const result = addTeam(newTeamName.trim());
     if (!result.success) {
       if (result.error === 'duplicate_name') {
@@ -281,9 +345,13 @@ export default function EnemyTeamPage() {
     setTeamToDelete(id);
   };
 
-  const confirmDeleteTeam = () => {
+  const confirmDeleteTeam = async () => {
     if (teamToDelete) {
-      deleteTeam(teamToDelete);
+      if (isTeamFilter) {
+        await deleteTeamEnemyTeam(enemyFilter, teamToDelete);
+      } else {
+        deleteTeam(teamToDelete);
+      }
       if (expandedTeamId === teamToDelete) {
         setExpandedTeamId(null);
       }
@@ -301,7 +369,9 @@ export default function EnemyTeamPage() {
   const getSubs = (players: (typeof teams)[0]["players"]) =>
     players.filter((p) => p.isSub);
 
-  const filteredTeams = teams
+  const sourceTeams = isTeamFilter ? activeTeamEnemies : teams;
+
+  const filteredTeams = sourceTeams
     .filter((team) => {
       // Search filter - match team name or player names
       const searchLower = searchQuery.toLowerCase();
@@ -326,50 +396,91 @@ export default function EnemyTeamPage() {
       return sortOrder === "newest" ? bTime - aTime : aTime - bTime;
     });
 
+  const currentLimit = isTeamFilter ? teamEnemyMax : maxEnemyTeams;
+  const currentCount = isTeamFilter ? teamEnemyCount : teams.length;
+  const currentIsAtLimit = isTeamFilter ? isTeamAtLimit : isAtLimit;
+
   return (
     <div className="space-y-8">
-      <div className="flex items-center gap-4">
-        <div className="flex gap-3">
-          <Button
-            onClick={() => setIsAddModalOpen(true)}
-            disabled={isAtLimit}
-            title={isAtLimit ? `Maximum of ${maxEnemyTeams} teams reached` : undefined}
-          >
-            + Add Team
-          </Button>
-        </div>
-        <div>
-          <h1 className="text-3xl font-bold text-white">Enemy Teams</h1>
-          <p className="text-gray-400 mt-1">
-            Scout and track your opponents
-            <span className="ml-2 text-gray-500">
-              ({teams.length}/{maxEnemyTeams})
-            </span>
-          </p>
-        </div>
+      <div>
+        <h1 className="text-3xl font-bold text-white">Enemy Teams</h1>
+        <p className="text-gray-400 mt-1">
+          Scout and track your opponents
+          <span className="ml-2 text-gray-500">
+            ({currentCount}/{isTeamFilter ? `${currentLimit}` : maxEnemyTeams})
+            {isTeamFilter && ' team'}
+          </span>
+        </p>
       </div>
 
+      {/* Filter Tabs - show when user has paid teams */}
+      {paidTeamTabs.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setEnemyFilter('personal')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              enemyFilter === 'personal'
+                ? 'bg-lol-gold/20 border border-lol-gold text-lol-gold'
+                : 'bg-lol-card border border-lol-border text-gray-400 hover:border-gray-500 hover:text-gray-300'
+            }`}
+          >
+            Personal
+            <span className="ml-1.5 text-xs opacity-70">({teams.length}/{maxEnemyTeams})</span>
+          </button>
+          {paidTeamTabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setEnemyFilter(tab.id)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                enemyFilter === tab.id
+                  ? 'bg-blue-500/20 border border-blue-500/50 text-blue-400'
+                  : 'bg-lol-card border border-lol-border text-gray-400 hover:border-gray-500 hover:text-gray-300'
+              }`}
+            >
+              {tab.name}
+              <span className="ml-1.5 text-xs opacity-70">
+                ({(teamEnemyTeams[tab.id] || []).length}/{tab.maxEnemyTeams})
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Loading team enemy teams */}
+      {isTeamFilter && teamEnemyTeamsLoading && (
+        <div className="flex items-center justify-center py-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-lol-gold" />
+        </div>
+      )}
+
       {/* Limit Warning Banner */}
-      {isAtLimit && (
+      {currentIsAtLimit && !(isTeamFilter && teamEnemyTeamsLoading) && (
         <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 flex items-center gap-3">
           <svg className="w-5 h-5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
           <div>
-            <p className="text-red-400 font-medium">Team limit reached</p>
+            <p className="text-red-400 font-medium">{isTeamFilter ? 'Team enemy team' : 'Team'} limit reached</p>
             <p className="text-red-400/70 text-sm">
-              You've reached the maximum of {maxEnemyTeams} enemy teams. Delete some teams to add new ones.
+              You've reached the maximum of {currentLimit} {isTeamFilter ? 'team ' : ''}enemy teams. Delete some teams to add new ones.
             </p>
           </div>
         </div>
       )}
 
       {/* Search and Filter Bar */}
-      {teams.length > 0 && (
+      {sourceTeams.length > 0 && !(isTeamFilter && teamEnemyTeamsLoading) && (
         <div className="flex gap-3 items-center">
+          <Button
+            onClick={() => setIsAddModalOpen(true)}
+            disabled={currentIsAtLimit || isAddingTeamEnemy || isFilteredTeamBanned}
+            title={isFilteredTeamBanned ? 'This team is banned' : currentIsAtLimit ? `Maximum of ${currentLimit} teams reached` : undefined}
+          >
+            {isFilteredTeamBanned ? 'Team Banned' : '+ Add Team'}
+          </Button>
           <div className="relative flex-1 max-w-md">
             <svg
-              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500"
+              className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -386,7 +497,7 @@ export default function EnemyTeamPage() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search teams or players..."
-              className="w-full pl-10 pr-4 py-2.5 bg-lol-dark border border-lol-border rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-lol-gold/50 focus:ring-2 focus:ring-lol-gold/20 transition-all duration-200"
+              className="w-full pl-11 pr-4 py-3 text-sm bg-lol-dark border border-lol-border rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-lol-gold/50 focus:ring-2 focus:ring-lol-gold/20 transition-all duration-200"
             />
           </div>
           <button
@@ -444,7 +555,7 @@ export default function EnemyTeamPage() {
         </div>
       )}
 
-      {teams.length === 0 ? (
+      {!(isTeamFilter && teamEnemyTeamsLoading) && sourceTeams.length === 0 ? (
         <Card className="text-center py-12">
           <div className="text-gray-500 mb-2">
             <svg
@@ -461,9 +572,11 @@ export default function EnemyTeamPage() {
               />
             </svg>
           </div>
-          <p className="text-gray-400 mb-6">No enemy teams added yet</p>
-          <Button onClick={() => setIsAddModalOpen(true)}>
-            + Add Team
+          <p className="text-gray-400 mb-6">
+            {isTeamFilter ? `No enemy teams added for ${activeTeamTab?.name || 'this team'} yet` : 'No enemy teams added yet'}
+          </p>
+          <Button onClick={() => setIsAddModalOpen(true)} disabled={isFilteredTeamBanned}>
+            {isFilteredTeamBanned ? 'Team Banned' : '+ Add Team'}
           </Button>
         </Card>
       ) : filteredTeams.length === 0 ? (
@@ -955,9 +1068,6 @@ export default function EnemyTeamPage() {
         title="Import from OP.GG"
       >
         <div className="space-y-5">
-          <p className="text-sm text-gray-400 bg-lol-dark rounded-lg p-4 border border-lol-border">
-            Paste an OP.GG multi-search URL to import players into this team.
-          </p>
           <Input
             label="OP.GG URL"
             value={importToTeamUrl}

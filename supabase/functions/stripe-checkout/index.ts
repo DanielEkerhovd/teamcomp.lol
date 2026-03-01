@@ -78,7 +78,7 @@ serve(async (req) => {
       // Validate price ID
       const proPriceId = Deno.env.get('STRIPE_PRO_PRICE_ID');
       const supporterPriceId = Deno.env.get('STRIPE_SUPPORTER_PRICE_ID');
-      const teamPriceId = Deno.env.get('STRIPE_TEAM_PRICE_ID');
+      const teamPriceId = Deno.env.get('STRIPE_TEAM_PRO_PRICE_ID');
 
       const isTeamSubscription = priceId === teamPriceId && !!teamId;
       const isPersonalSubscription = priceId === proPriceId || priceId === supporterPriceId;
