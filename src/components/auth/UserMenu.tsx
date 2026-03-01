@@ -7,6 +7,7 @@ import { useNotificationsStore } from '../../stores/useNotificationsStore';
 import { formatDistanceToNow } from '../../lib/dateUtils';
 import type { Notification } from '../../lib/notificationService';
 import LoginModal from './LoginModal';
+import DefaultAvatar from '../ui/DefaultAvatar';
 
 function getNotifIcon(type: Notification['type']) {
   switch (type) {
@@ -18,6 +19,11 @@ function getNotifIcon(type: Notification['type']) {
       return <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />;
     case 'draft_invite':
       return <><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></>;
+    case 'ownership_transfer_request':
+    case 'ownership_transfer_accepted':
+    case 'ownership_transfer_declined':
+    case 'ownership_transfer_cancelled':
+      return <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />;
     case 'moderation':
       return <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />;
     default:
@@ -32,6 +38,10 @@ function getNotifColor(type: Notification['type']) {
     case 'friend_accepted': return 'bg-green-500/20 text-green-400';
     case 'team_role_changed': return 'bg-yellow-500/20 text-yellow-400';
     case 'draft_invite': return 'bg-orange-500/20 text-orange-400';
+    case 'ownership_transfer_request': return 'bg-amber-500/20 text-amber-400';
+    case 'ownership_transfer_accepted': return 'bg-green-500/20 text-green-400';
+    case 'ownership_transfer_declined':
+    case 'ownership_transfer_cancelled': return 'bg-red-500/20 text-red-400';
     case 'moderation': return 'bg-red-500/20 text-red-400';
     default: return 'bg-gray-500/20 text-gray-400';
   }
@@ -40,15 +50,21 @@ function getNotifColor(type: Notification['type']) {
 function getNotifActionLink(notification: Notification): string | null {
   switch (notification.type) {
     case 'friend_request':
-      return '/social?tab=pending';
+      return '/friends?tab=pending';
     case 'team_invite':
-      return '/social?tab=team_invites';
+      return '/friends?tab=team_invites';
     case 'team_member_joined':
     case 'team_member_left':
     case 'team_role_changed':
       return notification.data?.teamId ? `/my-teams?team=${notification.data.teamId}` : '/my-teams';
     case 'draft_invite':
       return notification.data?.inviteToken ? `/live-draft/join/${notification.data.inviteToken}` : null;
+    case 'ownership_transfer_request':
+      return '/friends?tab=team_invites';
+    case 'ownership_transfer_accepted':
+    case 'ownership_transfer_declined':
+    case 'ownership_transfer_cancelled':
+      return notification.data?.teamId ? `/my-teams?team=${notification.data.teamId}` : '/my-teams';
     default:
       return null;
   }
@@ -218,7 +234,6 @@ export default function UserMenu({ collapsed }: UserMenuProps) {
 
   // Authenticated user display
   const displayName = profile?.displayName || user.email?.split('@')[0] || 'User';
-  const initials = displayName.slice(0, 2).toUpperCase();
 
   // Show custom role if set, otherwise fall back to tier badge
   const formatRole = (role: string) =>
@@ -245,15 +260,16 @@ export default function UserMenu({ collapsed }: UserMenuProps) {
         {/* Avatar with aggregate badge */}
         <span className="relative shrink-0">
           {profile?.avatarUrl ? (
-            <img
-              src={profile.avatarUrl}
-              alt={displayName}
-              className="size-9 rounded-lg object-cover"
-            />
-          ) : (
-            <div className="size-9 rounded-lg bg-gradient-to-br from-lol-gold to-lol-gold-light flex items-center justify-center text-lol-dark font-semibold text-sm">
-              {initials}
+            <div className="size-9 rounded-lg overflow-hidden">
+              <img
+                src={profile.avatarUrl}
+                alt={displayName}
+                className="w-full h-full object-cover scale-110"
+                referrerPolicy="no-referrer"
+              />
             </div>
+          ) : (
+            <DefaultAvatar size="size-9" className="rounded-lg" />
           )}
           {totalUnread > 0 && (
             <span className="absolute -top-1.5 -right-1.5 flex items-center justify-center min-w-[16px] h-4 px-1 text-[10px] font-bold text-white bg-red-500 rounded-full ring-2 ring-lol-dark">
@@ -264,7 +280,14 @@ export default function UserMenu({ collapsed }: UserMenuProps) {
 
         <div className={`min-w-0 text-left transition-all duration-300 overflow-hidden ${collapsed ? 'max-w-0 opacity-0 ml-0' : 'max-w-[200px] opacity-100 ml-3'}`}>
           <div className="text-sm font-medium text-white truncate">{displayName}</div>
-          <div className={`text-xs leading-tight line-clamp-2 ${subtitleColor}`}>{subtitleText}</div>
+          {profile?.role && profile.roleTeamName ? (
+            <div className={`text-xs leading-tight ${subtitleColor}`}>
+              <div className="truncate">{formatRole(profile.role)} for</div>
+              <div className="truncate">{profile.roleTeamName}</div>
+            </div>
+          ) : (
+            <div className={`text-xs leading-tight truncate ${subtitleColor}`}>{subtitleText}</div>
+          )}
         </div>
         {collapsed && (
           <div className="absolute left-full ml-3 px-3 py-2 bg-lol-card border border-lol-border rounded-lg text-sm text-white whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 shadow-xl z-50">
@@ -318,7 +341,7 @@ export default function UserMenu({ collapsed }: UserMenuProps) {
                 {unreadNotifications.length > 4 && (
                   <div className="px-3 py-1.5 border-t border-lol-border">
                     <button
-                      onClick={() => handleNavigate('/social?tab=notifications')}
+                      onClick={() => handleNavigate('/friends?tab=notifications')}
                       className="w-full text-center text-[11px] text-gray-500 hover:text-lol-gold transition-colors"
                     >
                       +{unreadNotifications.length - 4} more — View all
@@ -335,7 +358,7 @@ export default function UserMenu({ collapsed }: UserMenuProps) {
               <div className="p-1">
                 {/* Friends */}
                 <button
-                  onClick={() => handleNavigate('/social')}
+                  onClick={() => handleNavigate('/friends')}
                   className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-300 hover:text-white hover:bg-lol-surface rounded-lg transition-colors"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -351,7 +374,7 @@ export default function UserMenu({ collapsed }: UserMenuProps) {
 
                 {/* Messages */}
                 <button
-                  onClick={() => handleNavigate('/social?tab=messages')}
+                  onClick={() => handleNavigate('/friends?tab=messages')}
                   className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-300 hover:text-white hover:bg-lol-surface rounded-lg transition-colors"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -367,7 +390,7 @@ export default function UserMenu({ collapsed }: UserMenuProps) {
 
                 {/* Notifications */}
                 <button
-                  onClick={() => handleNavigate('/social?tab=notifications')}
+                  onClick={() => handleNavigate('/friends?tab=notifications')}
                   className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-300 hover:text-white hover:bg-lol-surface rounded-lg transition-colors"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

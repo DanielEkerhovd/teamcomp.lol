@@ -262,6 +262,32 @@ export default function LiveDraftListPage() {
         + New Live Draft
       </Button>
 
+      {/* Empty State */}
+      {user && !isLoading && sessions.length === 0 && (
+        <Card className="text-center py-16">
+          <div className="text-gray-500 mb-4">
+            <svg className="w-16 h-16 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+              />
+            </svg>
+          </div>
+          <h2 className="text-xl font-semibold text-white mb-2">
+            No live drafts yet
+          </h2>
+          <p className="text-gray-400 mb-6 max-w-md mx-auto">
+            Create your first live draft session to start drafting in real-time
+            with your opponent
+          </p>
+          <Button onClick={() => setIsCreateModalOpen(true)} size="lg">
+            Create Your First Live Draft
+          </Button>
+        </Card>
+      )}
+
       {/* Active Drafts Section */}
       {user && activeSessions.length > 0 && (
         <div className="space-y-4">
@@ -513,9 +539,43 @@ function SessionCard({
       <div className="space-y-2 text-sm">
         <div className="flex items-center justify-between text-gray-400">
           <span>Teams</span>
-          <span className="text-gray-300">
-            {session.team1_name} vs {session.team2_name}
-          </span>
+          <div className="flex items-center gap-1.5 text-gray-300">
+            <div className="flex items-center gap-1">
+              {session.team1_captain_avatar_url ? (
+                <img
+                  src={session.team1_captain_avatar_url}
+                  alt=""
+                  className="w-5 h-5 rounded-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-5 h-5 rounded-full bg-blue-400/10 flex items-center justify-center">
+                  <svg className="w-3 h-3 text-blue-400/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                </div>
+              )}
+              <span className="truncate max-w-20">{session.team1_name}</span>
+            </div>
+            <span className="text-gray-500 text-xs">vs</span>
+            <div className="flex items-center gap-1">
+              <span className="truncate max-w-20">{session.team2_name}</span>
+              {session.team2_captain_avatar_url ? (
+                <img
+                  src={session.team2_captain_avatar_url}
+                  alt=""
+                  className="w-5 h-5 rounded-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-5 h-5 rounded-full bg-red-400/10 flex items-center justify-center">
+                  <svg className="w-3 h-3 text-red-400/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="flex items-center justify-between text-gray-400">

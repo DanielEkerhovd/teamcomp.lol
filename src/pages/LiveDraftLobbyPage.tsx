@@ -995,7 +995,7 @@ function TeamCard({
           {/* Captain Info */}
           <div className="flex items-center gap-3 p-3 rounded-xl bg-black/20 border border-white/10">
             {captainAvatarUrl ? (
-              <img src={captainAvatarUrl} alt="" className="w-10 h-10 rounded-full" />
+              <img src={captainAvatarUrl} alt="" className="w-10 h-10 rounded-full object-cover" referrerPolicy="no-referrer" />
             ) : (
               <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
                 side === 'blue' ? 'bg-blue-500/20' : side === 'red' ? 'bg-red-500/20' : 'bg-lol-gold/20'

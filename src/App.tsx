@@ -19,12 +19,16 @@ import JoinLiveDraftPage from './pages/JoinLiveDraftPage';
 import LiveDraftPage from './pages/LiveDraftPage';
 import AdminPage from './pages/AdminPage';
 import SplashArtsPage from './pages/SplashArtsPage';
+import UpgradePage from './pages/UpgradePage';
 import FirstTimeSetupModal from './components/onboarding/FirstTimeSetupModal';
 import UsernameSetupModal from './components/onboarding/UsernameSetupModal';
+import TeamOnboardingModal from './components/onboarding/TeamOnboardingModal';
 import BanOverlay from './components/auth/BanOverlay';
 import { AuthProvider } from './contexts/AuthContext';
 import UserMenu from './components/auth/UserMenu';
-import { useAuthStore, useTierLimits } from './stores/useAuthStore';
+import { useAuthStore } from './stores/useAuthStore';
+import { useMyTeamStore } from './stores/useMyTeamStore';
+import { usePageTracker } from './hooks/usePageTracker';
 
 function NotFoundPage() {
   const navigate = useNavigate();
@@ -128,8 +132,10 @@ function NavDivider({ label, collapsed }: { label?: string; collapsed: boolean }
 
 function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed: (v: boolean) => void }) {
   const { profile } = useAuthStore();
-  const { maxTeams } = useTierLimits();
-  const myTeamLabel = maxTeams <= 1 ? 'My Team' : 'My Teams';
+  const teams = useMyTeamStore((s) => s.teams);
+  const memberships = useMyTeamStore((s) => s.memberships);
+  const totalTeams = teams.length + memberships.length;
+  const myTeamLabel = totalTeams > 1 ? 'My Teams' : 'My Team';
 
   const mainNavItems = [
     { to: '/', label: 'Home', icon: HomeIcon },
@@ -290,12 +296,13 @@ function Layout({ children }: { children: React.ReactNode }) {
           collapsed ? 'ml-20' : 'ml-[240px]'
         }`}
       >
-        <div className="px-8 py-6">{children}</div>
+        <div className="px-8 py-6 max-w-450 mx-auto">{children}</div>
       </main>
 
       {/* Modals */}
       <FirstTimeSetupModal />
       <UsernameSetupModal />
+      <TeamOnboardingModal />
       <BanOverlay />
     </div>
   );
@@ -306,6 +313,11 @@ function Layout({ children }: { children: React.ReactNode }) {
  * OAuth flows land on `/` (the app root), so this picks up the stored
  * return URL and navigates there once the user is authenticated.
  */
+function PageTracker() {
+  usePageTracker();
+  return null;
+}
+
 function AuthRedirectHandler() {
   const { user } = useAuthStore();
   const navigate = useNavigate();
@@ -332,6 +344,7 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <AuthRedirectHandler />
+        <PageTracker />
         <Routes>
           {/* Public routes (no sidebar) */}
           <Route path="/share/:token" element={<SharedDraftPage />} />
@@ -353,8 +366,9 @@ export default function App() {
                   <Route path="/champion-pool" element={<ChampionPoolPage />} />
                   <Route path="/tools" element={<ToolsPage />} />
                   <Route path="/profile" element={<ProfilePage />} />
-                  <Route path="/social" element={<FriendsPage />} />
+                  <Route path="/friends" element={<FriendsPage />} />
                   <Route path="/admin" element={<AdminPage />} />
+                  <Route path="/upgrade" element={<UpgradePage />} />
                   <Route path="/splasharts" element={<SplashArtsPage />} />
                   <Route path="/live-draft" element={<LiveDraftListPage />} />
                   <Route path="/live-draft/join/:token" element={<JoinLiveDraftPage />} />

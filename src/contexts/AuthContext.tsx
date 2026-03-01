@@ -1,9 +1,11 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
 import { Session } from '@supabase/supabase-js';
-import { useAuthStore } from '../stores/useAuthStore';
+import { useAuthStore, FREE_TIER_MAX_TEAMS, FREE_TIER_MAX_ENEMY_TEAMS, FREE_TIER_MAX_DRAFTS } from '../stores/useAuthStore';
 import { supabase, isSupabaseConfigured, getCachedSession, clearCachedSession } from '../lib/supabase';
 import { syncManager } from '../lib/syncManager';
 import LocalDataMergeModal, { getLocalDataSummary, clearAllLocalStores, ExcludedItems, AlreadyInCloud, getLocalDataWithIds, compareLocalWithCloud } from '../components/onboarding/LocalDataMergeModal';
+import TierDowngradeModal from '../components/downgrade/TierDowngradeModal';
+import { getContentForSelection, archiveContent, clearDowngradeFlag, type DowngradeContentData } from '../lib/downgradeService';
 import { useMyTeamStore } from '../stores/useMyTeamStore';
 import { useEnemyTeamStore } from '../stores/useEnemyTeamStore';
 import { useDraftStore } from '../stores/useDraftStore';
@@ -56,9 +58,40 @@ interface PendingMerge {
 
 const AuthContext = createContext<AuthContextValue>({ isConfigured: false });
 
+interface PendingDowngrade {
+  downgradedAt: string;
+  contentData: DowngradeContentData;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const { initialize, setSession, isInitialized } = useAuthStore();
   const [pendingMerge, setPendingMerge] = useState<PendingMerge | null>(null);
+  const [pendingDowngrade, setPendingDowngrade] = useState<PendingDowngrade | null>(null);
+
+  // Check if user needs to resolve a tier downgrade
+  const checkForDowngrade = useCallback(async () => {
+    const { profile, user } = useAuthStore.getState();
+    if (!profile || !user || !profile.downgradedAt) return;
+
+    // Fetch actual content counts from the database
+    const contentData = await getContentForSelection(user.id);
+
+    const isOverLimit =
+      contentData.myTeams.length > FREE_TIER_MAX_TEAMS ||
+      contentData.enemyTeams.length > FREE_TIER_MAX_ENEMY_TEAMS ||
+      contentData.drafts.length > FREE_TIER_MAX_DRAFTS;
+
+    if (isOverLimit) {
+      setPendingDowngrade({ downgradedAt: profile.downgradedAt, contentData });
+    } else {
+      // Within limits already — silently clear the flag
+      await clearDowngradeFlag(user.id);
+      // Update local profile state
+      useAuthStore.setState({
+        profile: { ...profile, downgradedAt: null },
+      });
+    }
+  }, []);
 
   useEffect(() => {
     // Track whether we've already handled the sign-in to prevent race conditions
@@ -113,6 +146,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
 
           useAuthStore.setState({ isInitialized: true, isLoading: false });
+
+          // Check for tier downgrade after cloud data is loaded
+          await checkForDowngrade();
         } catch (err) {
           // Any error during validation - clear cache and stay logged out
           console.warn('Session validation error, clearing cache:', err);
@@ -160,6 +196,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               } finally {
                 isLoadingCloudData = false;
               }
+              // Check for tier downgrade after cloud data is loaded
+              await checkForDowngrade();
             } else if (session && hasHandledSignIn) {
               // Cached session path (validateAndRestore) is handling initialization.
               // Don't set isInitialized here — validateAndRestore will do it after
@@ -224,6 +262,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               } finally {
                 isLoadingCloudData = false;
               }
+              // Check for tier downgrade after cloud data is loaded
+              await checkForDowngrade();
             } else if (event === 'TOKEN_REFRESHED') {
               await setSession(session);
             }
@@ -248,7 +288,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       clearTimeout(fallbackTimeout);
     };
-  }, [initialize, setSession]);
+  }, [initialize, setSession, checkForDowngrade]);
 
   // Handle user choosing to upload local data
   const handleUploadLocalData = async (excluded: ExcludedItems) => {
@@ -373,6 +413,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setPendingMerge(null);
   };
 
+  // Handle user confirming their content selection after downgrade
+  const handleDowngradeConfirm = async (kept: { teamIds: string[]; enemyTeamIds: string[]; draftIds: string[] }) => {
+    if (!pendingDowngrade) return;
+
+    const { user, profile } = useAuthStore.getState();
+    if (!user || !profile) return;
+
+    // Determine which IDs to archive (everything NOT in the kept list)
+    const toArchive = {
+      teamIds: pendingDowngrade.contentData.myTeams
+        .filter(t => !kept.teamIds.includes(t.id))
+        .map(t => t.id),
+      enemyTeamIds: pendingDowngrade.contentData.enemyTeams
+        .filter(t => !kept.enemyTeamIds.includes(t.id))
+        .map(t => t.id),
+      draftIds: pendingDowngrade.contentData.drafts
+        .filter(d => !kept.draftIds.includes(d.id))
+        .map(d => d.id),
+    };
+
+    // Archive the unselected content
+    const result = await archiveContent(user.id, toArchive);
+    if (result.error) throw new Error(result.error);
+
+    // Clear the downgrade flag
+    await clearDowngradeFlag(user.id);
+
+    // Update local profile state
+    useAuthStore.setState({
+      profile: { ...profile, downgradedAt: null },
+    });
+
+    // Reload cloud data so archived items disappear from stores
+    try {
+      await Promise.race([
+        syncManager.loadAllFromCloud(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Cloud load timeout')), 15000))
+      ]);
+    } catch (err) {
+      console.warn('Cloud reload after downgrade failed:', err);
+    }
+
+    setPendingDowngrade(null);
+  };
+
+  // Handle user clicking resubscribe (checkout redirects away, so just clear state)
+  const handleDowngradeResubscribed = () => {
+    // Checkout will redirect the user away from the page.
+    // When they come back, the webhook will have updated their tier
+    // and the downgraded_at flag will be cleared.
+    setPendingDowngrade(null);
+  };
+
   // Show loading state until auth is initialized
   if (!isInitialized) {
     return (
@@ -400,6 +493,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         onUpload={handleUploadLocalData}
         onDiscard={handleDiscardLocalData}
       />
+      {/* Tier downgrade content selection modal */}
+      {pendingDowngrade && (
+        <TierDowngradeModal
+          isOpen={true}
+          downgradedAt={pendingDowngrade.downgradedAt}
+          contentData={pendingDowngrade.contentData}
+          onConfirm={handleDowngradeConfirm}
+          onResubscribed={handleDowngradeResubscribed}
+        />
+      )}
     </AuthContext.Provider>
   );
 }

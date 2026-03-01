@@ -10,6 +10,7 @@ interface ConfirmationModalProps {
   confirmText?: string;
   cancelText?: string;
   variant?: 'danger' | 'warning';
+  size?: 'sm' | 'md';
   isLoading?: boolean;
   error?: string | null;
 }
@@ -23,6 +24,7 @@ export default function ConfirmationModal({
   confirmText = 'Confirm',
   cancelText = 'Cancel',
   variant = 'danger',
+  size = 'sm',
   isLoading = false,
   error = null,
 }: ConfirmationModalProps) {
@@ -65,7 +67,7 @@ export default function ConfirmationModal({
       onClick={handleOverlayClick}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
     >
-      <div className="max-w-sm w-full mx-4 bg-lol-card border border-lol-border rounded-2xl shadow-2xl shadow-black/50 animate-in zoom-in-95 duration-200">
+      <div className={`${size === 'md' ? 'max-w-md' : 'max-w-sm'} w-full mx-4 bg-lol-card border border-lol-border rounded-2xl shadow-2xl shadow-black/50 animate-in zoom-in-95 duration-200`}>
         <div className="p-6 text-center">
           <div className={`w-12 h-12 mx-auto mb-4 rounded-full bg-lol-surface flex items-center justify-center ${iconColors[variant]}`}>
             {variant === 'danger' ? (

@@ -10,7 +10,7 @@ import {
   DragEndEvent,
 } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable';
-import { useMyTeamStore, MAX_SUBS, getMaxTeams, TeamPermissions } from '../stores/useMyTeamStore';
+import { useMyTeamStore, MAX_SUBS, getMaxTeams, getTotalTeamCount, TeamPermissions } from '../stores/useMyTeamStore';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useRankStore } from '../stores/useRankStore';
 import { useMasteryStore } from '../stores/useMasteryStore';
@@ -24,6 +24,8 @@ import { teamMembershipService } from '../lib/teamMembershipService';
 import { notificationService } from '../lib/notificationService';
 import { syncManager } from '../lib/syncManager';
 import { checkModerationAndRecord, getViolationWarning } from '../lib/moderation';
+import { createTeamCheckoutSession, createPortalSession, isStripeConfigured } from '../lib/stripeService';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 function SubsDropZone({ children }: { children: React.ReactNode }) {
   const { isOver, setNodeRef } = useDroppable({
@@ -134,9 +136,13 @@ export default function MyTeamPage() {
   const [renameError, setRenameError] = useState<string | null>(null);
   const [isRenamingTeam, setIsRenamingTeam] = useState(false);
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const [isTeamPlanLoading, setIsTeamPlanLoading] = useState(false);
+  const [teamPlanError, setTeamPlanError] = useState<string | null>(null);
+  const [isContentPermUpdating, setIsContentPermUpdating] = useState(false);
+  const [isBillingLoading, setIsBillingLoading] = useState(false);
 
   const { user } = useAuthStore();
-  const { isFreeTier, maxTeams } = useTierLimits();
+  const { isFreeTier, isPaidTier, maxTeams } = useTierLimits();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Load memberships when authenticated
@@ -144,6 +150,57 @@ export default function MyTeamPage() {
     if (user) {
       loadMemberships();
     }
+  }, [user, loadMemberships]);
+
+  // Realtime: refresh team tabs when ownership changes on my_teams
+  useEffect(() => {
+    if (!user || !isSupabaseConfigured() || !supabase) return;
+
+    const channel = supabase
+      .channel(`my-teams-ownership-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'my_teams' },
+        (payload) => {
+          const oldUserId = (payload.old as { user_id?: string })?.user_id;
+          const newUserId = (payload.new as { user_id?: string })?.user_id;
+          if (oldUserId === newUserId) return; // Not an ownership change
+
+          // Ownership changed — refresh the teams/memberships lists
+          const teamId = (payload.new as { id?: string })?.id;
+
+          if (oldUserId === user.id) {
+            // We lost ownership: remove from owned teams
+            useMyTeamStore.setState((state) => ({
+              teams: state.teams.filter((t) => t.id !== teamId),
+            }));
+          }
+
+          if (newUserId === user.id && teamId) {
+            // We gained ownership: fetch team data and add to owned teams
+            teamMembershipService.fetchTeamData(teamId).then((teamData) => {
+              if (teamData) {
+                useMyTeamStore.setState((state) => {
+                  const alreadyOwned = state.teams.some((t) => t.id === teamId);
+                  return {
+                    teams: alreadyOwned ? state.teams : [...state.teams, teamData],
+                    memberships: state.memberships.filter((m) => m.teamId !== teamId),
+                    selectedTeamId: teamId,
+                  };
+                });
+              }
+            });
+          }
+
+          // Always reload memberships so role badges update
+          loadMemberships();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase?.removeChannel(channel);
+    };
   }, [user, loadMemberships]);
 
   // Deep-link: select team from ?team=<teamId> URL param
@@ -317,6 +374,59 @@ export default function MyTeamPage() {
     setIsResetModalOpen(false);
   };
 
+  // Team plan helpers
+  type TeamWithPlan = typeof team & {
+    hasTeamPlan?: boolean;
+    teamPlanStatus?: string | null;
+    teamContentPermission?: 'admins' | 'players' | 'all';
+  };
+  const teamWithPlan = team as TeamWithPlan;
+  const currentTeamHasPlan = teamWithPlan?.hasTeamPlan === true;
+  const currentTeamPlanStatus = teamWithPlan?.teamPlanStatus;
+  const currentTeamContentPermission = teamWithPlan?.teamContentPermission || 'admins';
+  const isArchived = currentTeamPlanStatus === 'canceled' && !currentTeamHasPlan;
+
+  const handleGetTeamPlan = async () => {
+    if (!team || !isPaidTier || !isStripeConfigured) return;
+    setIsTeamPlanLoading(true);
+    setTeamPlanError(null);
+    const { error } = await createTeamCheckoutSession(team.id);
+    if (error) {
+      setTeamPlanError(error);
+      setIsTeamPlanLoading(false);
+    }
+    // On success, Stripe redirects — no need to reset loading
+  };
+
+  const handleUpdateContentPermission = async (permission: 'admins' | 'players' | 'all') => {
+    if (!team || !supabase || !isOwner) return;
+    setIsContentPermUpdating(true);
+    try {
+      const { error } = await supabase
+        .from('my_teams')
+        .update({ team_content_permission: permission } as never)
+        .eq('id', team.id);
+      if (error) throw error;
+      // Update local state
+      (teamWithPlan as any).teamContentPermission = permission;
+      useMyTeamStore.setState((s) => ({ teams: [...s.teams] }));
+    } catch (err) {
+      console.error('Error updating content permission:', err);
+    } finally {
+      setIsContentPermUpdating(false);
+    }
+  };
+
+  const handleOpenBillingPortal = async () => {
+    setIsBillingLoading(true);
+    setDeleteError(null);
+    const { error } = await createPortalSession();
+    if (error) {
+      setDeleteError(error);
+    }
+    setIsBillingLoading(false);
+  };
+
   const handleDeleteTeamClick = () => {
     setIsSettingsOpen(false);
     setDeleteError(null);
@@ -403,7 +513,7 @@ export default function MyTeamPage() {
 
   const handleAddTeam = () => {
     const currentMaxTeams = getMaxTeams();
-    if (teams.length >= currentMaxTeams) return;
+    if (getTotalTeamCount() >= currentMaxTeams) return;
     setNewTeamName('');
     setCreateTeamError(null);
     setIsCreateModalOpen(true);
@@ -703,7 +813,7 @@ export default function MyTeamPage() {
               </svg>
               <span className="text-sm font-medium">Are you managing more teams? Pro is made for coaches!</span>
             </Link>
-          ) : teams.length < maxTeams ? (
+          ) : getTotalTeamCount() < maxTeams ? (
             <button
               onClick={handleAddTeam}
               className="flex items-center gap-1 px-3 py-2 rounded-lg border border-dashed border-gray-600 text-gray-500 hover:border-lol-gold hover:text-lol-gold transition-all"
@@ -714,6 +824,13 @@ export default function MyTeamPage() {
               </svg>
               <span className="text-sm font-medium">New</span>
             </button>
+          ) : isPaidTier ? (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-gray-600 text-gray-500">
+              <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+              <span className="text-xs">Managing more teams? <a href="mailto:contact@draftsheet.gg" className="text-lol-gold hover:underline">Contact us</a> for custom plans</span>
+            </div>
           ) : null}
         </div>
 
@@ -729,14 +846,47 @@ export default function MyTeamPage() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-white">
-                {team.name || 'My Team'}
-              </h1>
+              <div className="flex items-center gap-3">
+                <h1 className="text-3xl font-bold text-white">
+                  {team.name || 'My Team'}
+                </h1>
+                {currentTeamHasPlan && (
+                  <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                    Team Plan
+                  </span>
+                )}
+                {currentTeamPlanStatus === 'canceling' && (
+                  <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">
+                    Canceling
+                  </span>
+                )}
+                {currentTeamPlanStatus === 'canceled' && (
+                  <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-gray-500/20 text-gray-400 border border-gray-500/30">
+                    Archived
+                  </span>
+                )}
+              </div>
               <p className="text-gray-400 mt-1">
                 {isMembershipTeam
                   ? `Member \u00B7 ${memberships.find(m => m.teamId === selectedTeamId)?.role || 'viewer'} \u00B7 Owned by ${memberships.find(m => m.teamId === selectedTeamId)?.ownerName || 'unknown'}`
                   : 'Manage your roster'}
               </p>
+              {/* Team Plan upsell for owners without a plan */}
+              {isOwner && isPaidTier && !currentTeamHasPlan && isStripeConfigured && (
+                <button
+                  onClick={handleGetTeamPlan}
+                  disabled={isTeamPlanLoading}
+                  className="mt-2 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 transition-all text-sm font-medium disabled:opacity-50"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                  {isTeamPlanLoading ? 'Loading...' : 'Get Team Plan'}
+                </button>
+              )}
+              {teamPlanError && (
+                <p className="mt-1 text-xs text-red-400">{teamPlanError}</p>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -812,6 +962,36 @@ export default function MyTeamPage() {
             </div>
           </div>
         </div>
+
+        {/* Archive Mode Banner */}
+        {isArchived && (
+          <div className="p-4 bg-gray-500/10 border border-gray-500/30 rounded-xl">
+            <div className="flex items-start gap-3">
+              <svg className="w-5 h-5 text-gray-400 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+              </svg>
+              <div>
+                <h3 className="text-white font-semibold text-sm">Team Archived</h3>
+                <p className="text-gray-400 text-sm mt-1">
+                  This team's plan has expired. All team content is read-only.
+                  {isOwner && ' You can transfer drafts and enemy teams to your personal account, or reactivate the team plan.'}
+                </p>
+                {isOwner && isPaidTier && isStripeConfigured && (
+                  <button
+                    onClick={handleGetTeamPlan}
+                    disabled={isTeamPlanLoading}
+                    className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 transition-all text-sm font-medium disabled:opacity-50"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    {isTeamPlanLoading ? 'Loading...' : 'Reactivate Team Plan'}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Main Roster */}
         <Card variant="bordered" padding="lg">
@@ -930,6 +1110,29 @@ export default function MyTeamPage() {
           </div>
         </Card>
 
+        {/* Content Permissions - only show for owners of teams with a plan */}
+        {isOwner && currentTeamHasPlan && (
+          <Card variant="bordered" padding="lg">
+            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">Content Permissions</h2>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-white text-sm font-medium">Who can create team content?</p>
+                <p className="text-gray-500 text-xs mt-1">Controls who can create drafts and enemy teams for this team.</p>
+              </div>
+              <select
+                value={currentTeamContentPermission}
+                onChange={(e) => handleUpdateContentPermission(e.target.value as 'admins' | 'players' | 'all')}
+                disabled={isContentPermUpdating}
+                className="bg-lol-dark border border-lol-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-lol-gold disabled:opacity-50"
+              >
+                <option value="admins">Owner & Admins</option>
+                <option value="players">Owner, Admins & Players</option>
+                <option value="all">All Members</option>
+              </select>
+            </div>
+          </Card>
+        )}
+
         {/* Team Members - only show when authenticated */}
         {user && (
           <Card variant="bordered" padding="lg">
@@ -1003,22 +1206,66 @@ export default function MyTeamPage() {
         />
 
         {/* Delete team confirmation modal */}
-        <ConfirmationModal
-          isOpen={isDeleteModalOpen}
-          onClose={() => {
-            if (!isDeleting) {
-              setIsDeleteModalOpen(false);
-              setDeleteError(null);
-            }
-          }}
-          onConfirm={confirmDeleteTeam}
-          title="Delete Team"
-          message={`Are you sure you want to delete "${team?.name}"? This action cannot be undone. All team members will be removed and notified.`}
-          confirmText="Delete Team"
-          variant="danger"
-          isLoading={isDeleting}
-          error={deleteError}
-        />
+        {currentTeamHasPlan && currentTeamPlanStatus === 'active' ? (
+          <Modal
+            isOpen={isDeleteModalOpen}
+            onClose={() => {
+              if (!isBillingLoading) {
+                setIsDeleteModalOpen(false);
+                setDeleteError(null);
+              }
+            }}
+            title="Team Has Active Plan"
+          >
+            <div className="space-y-4">
+              <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                <p className="text-yellow-400 text-sm">
+                  This team has an active Team Plan subscription. To delete this team, you must first cancel the subscription from the billing portal.
+                </p>
+                <p className="text-gray-400 text-xs mt-2">
+                  After cancellation, the team will remain active until the end of your billing period, then enter archive mode. You can delete it after that.
+                </p>
+              </div>
+              {deleteError && (
+                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                  <p className="text-red-400 text-sm">{deleteError}</p>
+                </div>
+              )}
+              <div className="flex gap-3 justify-end">
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setIsDeleteModalOpen(false);
+                    setDeleteError(null);
+                  }}
+                  disabled={isBillingLoading}
+                >
+                  Cancel
+                </Button>
+                <Button onClick={handleOpenBillingPortal} disabled={isBillingLoading}>
+                  {isBillingLoading ? 'Loading...' : 'Manage Billing'}
+                </Button>
+              </div>
+            </div>
+          </Modal>
+        ) : (
+          <ConfirmationModal
+            isOpen={isDeleteModalOpen}
+            onClose={() => {
+              if (!isDeleting) {
+                setIsDeleteModalOpen(false);
+                setDeleteError(null);
+              }
+            }}
+            onConfirm={confirmDeleteTeam}
+            title="Delete Team"
+            message={`Are you sure you want to delete "${team?.name}"? This action cannot be undone. All team members will be removed and notified.`}
+            confirmText="Delete Team"
+            variant="danger"
+            isLoading={isDeleting}
+            error={deleteError}
+          />
+        )}
 
         {/* Leave team confirmation modal */}
         <ConfirmationModal

@@ -783,12 +783,13 @@ export const syncManager = {
       const { useDraftStore } = await import('../stores/useDraftStore');
       const { usePlayerPoolStore } = await import('../stores/usePlayerPoolStore');
 
-      // Load my teams with players
+      // Load my teams with players (exclude archived)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: myTeams } = await (supabase as any)
         .from('my_teams')
         .select('*')
         .eq('user_id', user.id)
+        .is('archived_at', null)
         .order('sort_order');
 
       if (myTeams && myTeams.length > 0) {
@@ -867,12 +868,13 @@ export const syncManager = {
         }
       }
 
-      // Load enemy teams with players
+      // Load enemy teams with players (exclude archived)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: enemyTeams } = await (supabase as any)
         .from('enemy_teams')
         .select('*')
         .eq('user_id', user.id)
+        .is('archived_at', null)
         .order('sort_order');
 
       if (enemyTeams && enemyTeams.length > 0) {
@@ -935,12 +937,13 @@ export const syncManager = {
         }
       }
 
-      // Load draft sessions
+      // Load draft sessions (exclude archived)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: sessions } = await (supabase as any)
         .from('draft_sessions')
         .select('*')
         .eq('user_id', user.id)
+        .is('archived_at', null)
         .order('sort_order');
 
       if (sessions && sessions.length > 0) {

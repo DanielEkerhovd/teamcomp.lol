@@ -15,7 +15,8 @@ import {
 } from "@dnd-kit/sortable";
 import { useDroppable } from "@dnd-kit/core";
 import { useEnemyTeamStore, MAX_SUBS } from "../stores/useEnemyTeamStore";
-import { useTierLimits } from "../stores/useAuthStore";
+import { useAuthStore, useTierLimits } from "../stores/useAuthStore";
+import { useMyTeamStore } from "../stores/useMyTeamStore";
 import { useRankStore } from "../stores/useRankStore";
 import { useMasteryStore } from "../stores/useMasteryStore";
 import { parseOpggMultiSearchUrl, ROLES, Role, Player } from "../types";

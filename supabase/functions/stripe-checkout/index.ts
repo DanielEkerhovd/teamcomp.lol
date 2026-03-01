@@ -36,7 +36,7 @@ serve(async (req) => {
     }
 
     // Parse request body
-    const { mode, priceId, amount } = await req.json();
+    const { mode, priceId, amount, teamId } = await req.json();
 
     if (mode !== 'subscription' && mode !== 'donation') {
       return new Response(
@@ -50,7 +50,7 @@ serve(async (req) => {
     // Look up or create Stripe customer
     const { data: profile } = await adminClient
       .from('profiles')
-      .select('stripe_customer_id, email, display_name')
+      .select('stripe_customer_id, email, display_name, tier')
       .eq('id', user.id)
       .single();
 
@@ -72,26 +72,93 @@ serve(async (req) => {
     }
 
     const siteUrl = Deno.env.get('SITE_URL') || 'https://teamcomp.lol';
-    const successUrl = `${siteUrl}/profile?checkout=success#plan`;
     const cancelUrl = `${siteUrl}/profile?checkout=cancelled#plan`;
 
     if (mode === 'subscription') {
       // Validate price ID
       const proPriceId = Deno.env.get('STRIPE_PRO_PRICE_ID');
       const supporterPriceId = Deno.env.get('STRIPE_SUPPORTER_PRICE_ID');
+      const teamPriceId = Deno.env.get('STRIPE_TEAM_PRICE_ID');
 
-      if (priceId !== proPriceId && priceId !== supporterPriceId) {
+      const isTeamSubscription = priceId === teamPriceId && !!teamId;
+      const isPersonalSubscription = priceId === proPriceId || priceId === supporterPriceId;
+
+      if (!isTeamSubscription && !isPersonalSubscription) {
         return new Response(
           JSON.stringify({ error: 'Invalid price ID' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
 
-      // Check for existing active subscription
+      if (isTeamSubscription) {
+        // --- TEAM SUBSCRIPTION ---
+
+        // Verify user has a paid tier (Pro required to buy team plans)
+        if (!profile?.tier || !['paid', 'supporter', 'beta', 'admin', 'developer'].includes(profile.tier)) {
+          return new Response(
+            JSON.stringify({ error: 'You need a Pro subscription before purchasing a Team Plan.' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // Verify user owns the team
+        const { data: team } = await adminClient
+          .from('my_teams')
+          .select('id, user_id, name, has_team_plan, team_plan_status')
+          .eq('id', teamId)
+          .single();
+
+        if (!team || team.user_id !== user.id) {
+          return new Response(
+            JSON.stringify({ error: 'Team not found or you are not the owner.' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // Check team doesn't already have an active plan
+        if (team.has_team_plan && team.team_plan_status === 'active') {
+          return new Response(
+            JSON.stringify({ error: 'This team already has an active Team Plan.' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        const successUrl = `${siteUrl}/my-team?checkout=team-success&teamId=${teamId}`;
+
+        const session = await stripe.checkout.sessions.create({
+          customer: stripeCustomerId,
+          mode: 'subscription',
+          line_items: [{ price: priceId, quantity: 1 }],
+          success_url: successUrl,
+          cancel_url: `${siteUrl}/my-team?checkout=cancelled`,
+          metadata: {
+            supabase_user_id: user.id,
+            team_id: teamId,
+            type: 'team',
+          },
+          subscription_data: {
+            metadata: {
+              supabase_user_id: user.id,
+              team_id: teamId,
+              type: 'team',
+            },
+          },
+        });
+
+        return new Response(
+          JSON.stringify({ url: session.url }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // --- PERSONAL SUBSCRIPTION ---
+
+      // Check for existing active personal subscription
       const { data: existingSub } = await adminClient
         .from('subscriptions')
         .select('id')
         .eq('user_id', user.id)
+        .is('team_id', null)
         .in('status', ['active', 'trialing', 'past_due'])
         .limit(1)
         .maybeSingle();
@@ -102,6 +169,8 @@ serve(async (req) => {
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
+
+      const successUrl = `${siteUrl}/profile?checkout=success#plan`;
 
       const session = await stripe.checkout.sessions.create({
         customer: stripeCustomerId,

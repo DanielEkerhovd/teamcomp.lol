@@ -7,6 +7,8 @@ import { Region, REGIONS } from "../types";
 import type { ProfileRole } from "../types/database";
 import LoginModal from "../components/auth/LoginModal";
 import ConfirmationModal from "../components/ui/ConfirmationModal";
+import DefaultAvatar from "../components/ui/DefaultAvatar";
+import ChampionAvatarModal from "../components/profile/ChampionAvatarModal";
 import { createCheckoutSession, createPortalSession, STRIPE_PRICES, isStripeConfigured } from "../lib/stripeService";
 import { supabase } from "../lib/supabase";
 import type { DbSubscription } from "../types/database";
@@ -35,7 +37,6 @@ const ROLE_OPTIONS: {
 // Combined avatar + username row component
 function AvatarUsernameRow({
   avatarUrl,
-  initials,
   displayName,
   isUploading,
   error,
@@ -44,11 +45,9 @@ function AvatarUsernameRow({
   onSaveUsername,
   fileInputRef,
   onFileChange,
-  isFreeTier,
   avatarCooldownUntil,
 }: {
   avatarUrl?: string | null;
-  initials: string;
   displayName: string;
   isUploading: boolean;
   error: string | null;
@@ -57,7 +56,6 @@ function AvatarUsernameRow({
   onSaveUsername: (value: string) => Promise<{ error: string | null }>;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  isFreeTier?: boolean;
   avatarCooldownUntil?: string | null;
 }) {
   const [isEditing, setIsEditing] = useState(false);
@@ -115,15 +113,13 @@ function AvatarUsernameRow({
   return (
     <div className="group">
       <div className="flex items-center gap-4 p-4 rounded-xl hover:bg-lol-surface/50 transition-colors -mx-4">
-        {!isFreeTier && (
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            onChange={onFileChange}
-            className="hidden"
-          />
-        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={onFileChange}
+          className="hidden"
+        />
         {/* Avatar */}
         <div className="relative shrink-0">
           <button
@@ -132,17 +128,16 @@ function AvatarUsernameRow({
             className={`relative group/avatar ${isAvatarCooldown ? 'cursor-not-allowed opacity-60' : ''}`}
           >
             {avatarUrl ? (
-              <img
-                src={avatarUrl}
-                alt={displayName || "User"}
-                className={`${avatarSize} rounded-xl object-cover`}
-              />
-            ) : (
-              <div
-                className={`${avatarSize} rounded-xl bg-gradient-to-br from-lol-gold to-lol-gold-light flex items-center justify-center text-lol-dark font-bold text-base`}
-              >
-                {initials}
+              <div className={`${avatarSize} rounded-xl overflow-hidden`}>
+                <img
+                  src={avatarUrl}
+                  alt={displayName || "User"}
+                  className="w-full h-full object-cover scale-110"
+                  referrerPolicy="no-referrer"
+                />
               </div>
+            ) : (
+              <DefaultAvatar size={avatarSize} className="rounded-xl" />
             )}
             {/* Hover overlay */}
             <div className="absolute inset-0 rounded-xl bg-black/60 opacity-0 group-hover/avatar:opacity-100 transition-opacity flex items-center justify-center">
@@ -164,20 +159,6 @@ function AvatarUsernameRow({
                     className="opacity-75"
                     fill="currentColor"
                     d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  />
-                </svg>
-              ) : isFreeTier ? (
-                <svg
-                  className="w-5 h-5 text-white"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                   />
                 </svg>
               ) : (
@@ -404,6 +385,15 @@ function AvatarUsernameRow({
           </button>
         )}
       </div>
+      {/* Avatar upload error (shown outside of username editing) */}
+      {!isEditing && error && (
+        <div className="flex items-center gap-2 mx-0 mt-1 mb-2 px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400">
+          <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span>{error}</span>
+        </div>
+      )}
       {/* Avatar moderation cooldown warning */}
       {isAvatarCooldown && (
         <div className="flex items-center gap-2 mx-0 mt-1 mb-2 px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400">
@@ -1243,7 +1233,7 @@ export default function ProfilePage() {
     updateDisplayName,
     updateAvatar,
     removeAvatar,
-    generateRandomAvatar,
+    setChampionAvatar,
     updateRole,
     updateEmail,
     updatePrivacy,
@@ -1255,6 +1245,7 @@ export default function ProfilePage() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showAvatarModal, setShowAvatarModal] = useState(false);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -1263,8 +1254,10 @@ export default function ProfilePage() {
 
   // Stripe checkout state
   const [checkingOutPlan, setCheckingOutPlan] = useState<"pro" | "supporter" | null>(null);
-  const [checkoutError, setCheckoutError] = useState<string | null>(null);
-  const [checkoutSuccess, setCheckoutSuccess] = useState<string | null>(null);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const [planSuccess, setPlanSuccess] = useState<string | null>(null);
+  const [donationError, setDonationError] = useState<string | null>(null);
+  const [donationSuccess, setDonationSuccess] = useState<string | null>(null);
   const [isDonating, setIsDonating] = useState(false);
   const [donationAmount, setDonationAmount] = useState("");
   const [activeSubscription, setActiveSubscription] = useState<DbSubscription | null>(null);
@@ -1280,19 +1273,18 @@ export default function ProfilePage() {
     const donationParam = params.get("donation");
 
     if (checkoutParam === "success") {
-      setCheckoutSuccess("Your subscription is being activated. It may take a moment to reflect.");
+      setPlanSuccess("Your subscription is being activated. It may take a moment to reflect.");
       refreshProfile();
-      // Clean URL params
       const url = new URL(window.location.href);
       url.searchParams.delete("checkout");
       window.history.replaceState({}, "", url.toString());
     } else if (checkoutParam === "cancelled") {
-      setCheckoutError("Checkout was cancelled.");
+      setPlanError("Checkout was cancelled.");
       const url = new URL(window.location.href);
       url.searchParams.delete("checkout");
       window.history.replaceState({}, "", url.toString());
     } else if (donationParam === "success") {
-      setCheckoutSuccess("Thank you for your donation!");
+      setDonationSuccess("Thank you for your donation!");
       const url = new URL(window.location.href);
       url.searchParams.delete("donation");
       window.history.replaceState({}, "", url.toString());
@@ -1326,41 +1318,41 @@ export default function ProfilePage() {
 
   const handleCheckout = async (plan: "pro" | "supporter") => {
     setCheckingOutPlan(plan);
-    setCheckoutError(null);
-    setCheckoutSuccess(null);
+    setPlanError(null);
+    setPlanSuccess(null);
     const result = await createCheckoutSession({
       mode: "subscription",
       priceId: STRIPE_PRICES[plan],
     });
     if (result.error) {
-      setCheckoutError(result.error);
+      setPlanError(result.error);
       setCheckingOutPlan(null);
     }
   };
 
   const handleDonate = async () => {
     if (!donationAmount || Number(donationAmount) < 1) {
-      setCheckoutError("Minimum donation is €1.00");
+      setDonationError("Minimum donation is €1.00");
       return;
     }
     setIsDonating(true);
-    setCheckoutError(null);
-    setCheckoutSuccess(null);
+    setDonationError(null);
+    setDonationSuccess(null);
     const result = await createCheckoutSession({
       mode: "donation",
       amount: Math.round(Number(donationAmount) * 100),
     });
     if (result.error) {
-      setCheckoutError(result.error);
+      setDonationError(result.error);
       setIsDonating(false);
     }
   };
 
   const handleManageSubscription = async () => {
-    setCheckoutError(null);
+    setPlanError(null);
     const result = await createPortalSession();
     if (result.error) {
-      setCheckoutError(result.error);
+      setPlanError(result.error);
     }
   };
 
@@ -1384,18 +1376,28 @@ export default function ProfilePage() {
     }
   };
 
-  const handleAvatarClick = async () => {
-    if (isFreeTier) {
-      setIsUploadingAvatar(true);
-      setAvatarError(null);
-      const result = await generateRandomAvatar();
+  const handleAvatarClick = () => {
+    setAvatarError(null);
+    setShowAvatarModal(true);
+  };
+
+  const handleUploadAvatar = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleChampionSelect = async (url: string) => {
+    setShowAvatarModal(false);
+    setIsUploadingAvatar(true);
+    setAvatarError(null);
+    try {
+      const result = await setChampionAvatar(url);
       if (result.error) {
         setAvatarError(result.error);
       }
-      setIsUploadingAvatar(false);
-    } else {
-      fileInputRef.current?.click();
+    } catch {
+      setAvatarError("Something went wrong setting your avatar. Please try again.");
     }
+    setIsUploadingAvatar(false);
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1405,10 +1407,13 @@ export default function ProfilePage() {
     setIsUploadingAvatar(true);
     setAvatarError(null);
 
-    const result = await updateAvatar(file);
-
-    if (result.error) {
-      setAvatarError(result.error);
+    try {
+      const result = await updateAvatar(file);
+      if (result.error) {
+        setAvatarError(result.error);
+      }
+    } catch {
+      setAvatarError("Something went wrong uploading your avatar. Please try again.");
     }
 
     setIsUploadingAvatar(false);
@@ -1437,8 +1442,8 @@ export default function ProfilePage() {
         <h1 className="text-3xl font-bold text-white mb-8">Settings</h1>
 
         <div className="bg-lol-card border border-lol-border rounded-2xl p-8 text-center mb-6">
-          <div className="w-24 h-24 mx-auto rounded-2xl bg-gradient-to-br from-gray-600 to-gray-700 flex items-center justify-center text-white font-bold text-4xl mb-4">
-            ?
+          <div className="mx-auto mb-4">
+            <DefaultAvatar size="w-24 h-24" className="rounded-2xl" />
           </div>
           <h2 className="text-xl font-semibold text-white mb-2">Guest User</h2>
           <p className="text-gray-400 mb-6">
@@ -1513,9 +1518,6 @@ export default function ProfilePage() {
   }
 
   // Authenticated view
-  const initials = (profile?.displayName || user.email?.split("@")[0] || "U")
-    .slice(0, 2)
-    .toUpperCase();
   const tierBadge =
     profile?.tier === "paid"
       ? "Pro"
@@ -1592,7 +1594,6 @@ export default function ProfilePage() {
           {/* Avatar + Username Row */}
           <AvatarUsernameRow
             avatarUrl={profile?.avatarUrl}
-            initials={initials}
             displayName={profile?.displayName || ""}
             isUploading={isUploadingAvatar}
             error={avatarError}
@@ -1601,7 +1602,6 @@ export default function ProfilePage() {
             onSaveUsername={updateDisplayName}
             fileInputRef={fileInputRef}
             onFileChange={handleFileChange}
-            isFreeTier={isFreeTier}
             avatarCooldownUntil={profile?.avatarModeratedUntil}
           />
 
@@ -1763,15 +1763,15 @@ export default function ProfilePage() {
           <h3 className="text-lg font-semibold text-white">Plan</h3>
         </div>
 
-        {/* Checkout feedback */}
-        {checkoutSuccess && (
+        {/* Plan checkout feedback */}
+        {planSuccess && (
           <div className="mb-4 p-3 rounded-lg bg-green-500/10 border border-green-500/30 text-green-400 text-sm">
-            {checkoutSuccess}
+            {planSuccess}
           </div>
         )}
-        {checkoutError && (
+        {planError && (
           <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
-            {checkoutError}
+            {planError}
           </div>
         )}
 
@@ -2390,6 +2390,17 @@ export default function ProfilePage() {
           If you like teamcomp.lol, consider making a one-time donation to support its development!
         </p>
 
+        {donationSuccess && (
+          <div className="mb-4 p-3 rounded-lg bg-green-500/10 border border-green-500/30 text-green-400 text-sm">
+            {donationSuccess}
+          </div>
+        )}
+        {donationError && (
+          <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+            {donationError}
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-2 mb-4">
           {[3, 5, 10, 25].map((amt) => (
             <button
@@ -2528,6 +2539,15 @@ export default function ProfilePage() {
         variant="danger"
         isLoading={isDeleting}
         error={deleteError}
+      />
+
+      {/* Champion Avatar Picker */}
+      <ChampionAvatarModal
+        isOpen={showAvatarModal}
+        onClose={() => setShowAvatarModal(false)}
+        onSelect={handleChampionSelect}
+        onUploadClick={!isFreeTier ? handleUploadAvatar : undefined}
+        isLoading={isUploadingAvatar}
       />
     </div>
   );

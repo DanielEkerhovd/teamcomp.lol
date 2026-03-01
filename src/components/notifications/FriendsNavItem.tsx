@@ -37,7 +37,7 @@ export default function FriendsNavItem({ collapsed }: FriendsNavItemProps) {
 
   return (
     <NavLink
-      to="/social"
+      to="/friends"
       className={({ isActive }) =>
         `relative flex items-center py-3 px-3 rounded-xl font-medium transition-all duration-300 group ${
           isActive

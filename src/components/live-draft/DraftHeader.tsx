@@ -95,7 +95,8 @@ function TeamCard({
             <img
               src={team.captainAvatarUrl}
               alt=""
-              className="w-8 h-8 rounded-full"
+              className="w-8 h-8 rounded-full object-cover"
+              referrerPolicy="no-referrer"
             />
           ) : (
             <div

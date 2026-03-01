@@ -31,10 +31,12 @@ serve(async (req) => {
 
     const proPriceId = Deno.env.get('STRIPE_PRO_PRICE_ID')!;
     const supporterPriceId = Deno.env.get('STRIPE_SUPPORTER_PRICE_ID')!;
+    const teamPriceId = Deno.env.get('STRIPE_TEAM_PRICE_ID') || '';
 
-    function tierFromPriceId(priceId: string): 'paid' | 'supporter' | null {
+    function tierFromPriceId(priceId: string): 'paid' | 'supporter' | 'team' | null {
       if (priceId === proPriceId) return 'paid';
       if (priceId === supporterPriceId) return 'supporter';
+      if (teamPriceId && priceId === teamPriceId) return 'team';
       return null;
     }
 
@@ -72,26 +74,59 @@ serve(async (req) => {
             break;
           }
 
-          // Upsert subscription record
-          await adminClient.from('subscriptions').upsert({
-            user_id: userId,
-            stripe_subscription_id: subscription.id,
-            stripe_customer_id: subscription.customer as string,
-            status: subscription.status,
-            price_id: priceId,
-            tier,
-            current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
-            current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
-            cancel_at_period_end: subscription.cancel_at_period_end,
-            updated_at: new Date().toISOString(),
-          }, { onConflict: 'stripe_subscription_id' });
+          const teamId = session.metadata?.team_id
+            || subscription.metadata?.team_id
+            || null;
 
-          // Update user tier (trigger handles limit columns)
-          await adminClient.from('profiles').update({
-            tier,
-            stripe_customer_id: subscription.customer as string,
-            tier_expires_at: null, // Stripe manages lifecycle, not cron
-          }).eq('id', userId);
+          if (tier === 'team' && teamId) {
+            // --- TEAM SUBSCRIPTION ---
+            // Upsert subscription record with team_id
+            await adminClient.from('subscriptions').upsert({
+              user_id: userId,
+              stripe_subscription_id: subscription.id,
+              stripe_customer_id: subscription.customer as string,
+              status: subscription.status,
+              price_id: priceId,
+              tier: 'paid', // stored as 'paid' in subscriptions table since 'team' isn't a user tier
+              team_id: teamId,
+              current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
+              current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+              cancel_at_period_end: subscription.cancel_at_period_end,
+              updated_at: new Date().toISOString(),
+            }, { onConflict: 'stripe_subscription_id' });
+
+            // Activate team plan
+            await adminClient.from('my_teams').update({
+              has_team_plan: true,
+              team_plan_status: 'active',
+              team_max_enemy_teams: 300,
+            }).eq('id', teamId);
+
+          } else {
+            // --- PERSONAL SUBSCRIPTION ---
+            await adminClient.from('subscriptions').upsert({
+              user_id: userId,
+              stripe_subscription_id: subscription.id,
+              stripe_customer_id: subscription.customer as string,
+              status: subscription.status,
+              price_id: priceId,
+              tier,
+              current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
+              current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+              cancel_at_period_end: subscription.cancel_at_period_end,
+              updated_at: new Date().toISOString(),
+            }, { onConflict: 'stripe_subscription_id' });
+
+            // Update user tier (trigger handles limit columns + clears downgraded_at)
+            await adminClient.from('profiles').update({
+              tier,
+              stripe_customer_id: subscription.customer as string,
+              tier_expires_at: null,
+            }).eq('id', userId);
+
+            // Restore any archived content from a previous downgrade
+            await adminClient.rpc('unarchive_user_content', { p_user_id: userId });
+          }
 
         } else if (session.mode === 'payment') {
           // One-time donation
@@ -126,6 +161,8 @@ serve(async (req) => {
           break;
         }
 
+        const teamId = subscription.metadata?.team_id || null;
+
         // Update subscription record
         await adminClient.from('subscriptions').upsert({
           user_id: userId,
@@ -133,7 +170,8 @@ serve(async (req) => {
           stripe_customer_id: subscription.customer as string,
           status: subscription.status,
           price_id: priceId,
-          tier,
+          tier: tier === 'team' ? 'paid' : tier,
+          team_id: teamId,
           current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
           current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
           cancel_at_period_end: subscription.cancel_at_period_end,
@@ -143,17 +181,45 @@ serve(async (req) => {
           updated_at: new Date().toISOString(),
         }, { onConflict: 'stripe_subscription_id' });
 
-        // Update tier if subscription is still active
-        if (subscription.status === 'active' || subscription.status === 'trialing') {
-          await adminClient.from('profiles').update({
-            tier,
-            tier_expires_at: null,
-          }).eq('id', userId);
-        } else if (subscription.status === 'canceled' || subscription.status === 'unpaid') {
-          await adminClient.from('profiles').update({
-            tier: 'free',
-            tier_expires_at: null,
-          }).eq('id', userId);
+        if (tier === 'team' && teamId) {
+          // --- TEAM SUBSCRIPTION ---
+          if (subscription.status === 'active' || subscription.status === 'trialing') {
+            await adminClient.from('my_teams').update({
+              has_team_plan: true,
+              team_plan_status: 'active',
+              team_max_enemy_teams: 300,
+            }).eq('id', teamId);
+          } else if (subscription.cancel_at_period_end) {
+            await adminClient.from('my_teams').update({
+              team_plan_status: 'canceling',
+            }).eq('id', teamId);
+          } else if (subscription.status === 'past_due') {
+            await adminClient.from('my_teams').update({
+              team_plan_status: 'past_due',
+            }).eq('id', teamId);
+          } else if (subscription.status === 'canceled' || subscription.status === 'unpaid') {
+            await adminClient.from('my_teams').update({
+              has_team_plan: false,
+              team_plan_status: 'canceled',
+              team_max_enemy_teams: 0,
+            }).eq('id', teamId);
+          }
+        } else {
+          // --- PERSONAL SUBSCRIPTION ---
+          if (subscription.status === 'active' || subscription.status === 'trialing') {
+            await adminClient.from('profiles').update({
+              tier,
+              tier_expires_at: null,
+            }).eq('id', userId);
+
+            // Restore any archived content from a previous downgrade
+            await adminClient.rpc('unarchive_user_content', { p_user_id: userId });
+          } else if (subscription.status === 'canceled' || subscription.status === 'unpaid') {
+            await adminClient.from('profiles').update({
+              tier: 'free',
+              tier_expires_at: null,
+            }).eq('id', userId);
+          }
         }
         break;
       }
@@ -168,6 +234,8 @@ serve(async (req) => {
           break;
         }
 
+        const teamId = subscription.metadata?.team_id || null;
+
         // Mark subscription as canceled
         await adminClient.from('subscriptions').update({
           status: 'canceled',
@@ -175,11 +243,21 @@ serve(async (req) => {
           updated_at: new Date().toISOString(),
         }).eq('stripe_subscription_id', subscription.id);
 
-        // Revert to free tier (trigger handles limit columns)
-        await adminClient.from('profiles').update({
-          tier: 'free',
-          tier_expires_at: null,
-        }).eq('id', userId);
+        if (teamId) {
+          // --- TEAM SUBSCRIPTION: enter archive mode ---
+          await adminClient.from('my_teams').update({
+            has_team_plan: false,
+            team_plan_status: 'canceled',
+            team_max_enemy_teams: 0,
+          }).eq('id', teamId);
+        } else {
+          // --- PERSONAL SUBSCRIPTION ---
+          // Revert to free tier (trigger handles limit columns)
+          await adminClient.from('profiles').update({
+            tier: 'free',
+            tier_expires_at: null,
+          }).eq('id', userId);
+        }
         break;
       }
 
@@ -192,6 +270,19 @@ serve(async (req) => {
             status: 'past_due',
             updated_at: new Date().toISOString(),
           }).eq('stripe_subscription_id', subscriptionId);
+
+          // Check if this is a team subscription and update team status
+          const { data: sub } = await adminClient
+            .from('subscriptions')
+            .select('team_id')
+            .eq('stripe_subscription_id', subscriptionId)
+            .single();
+
+          if (sub?.team_id) {
+            await adminClient.from('my_teams').update({
+              team_plan_status: 'past_due',
+            }).eq('id', sub.team_id);
+          }
         }
         break;
       }

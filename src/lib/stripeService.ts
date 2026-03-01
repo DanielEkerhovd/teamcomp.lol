@@ -8,11 +8,13 @@ interface CreateCheckoutParams {
   mode: CheckoutMode;
   priceId?: string;
   amount?: number; // in cents, for donations
+  teamId?: string; // for team subscriptions
 }
 
 export const STRIPE_PRICES = {
   pro: import.meta.env.VITE_STRIPE_PRO_PRICE_ID as string,
   supporter: import.meta.env.VITE_STRIPE_SUPPORTER_PRICE_ID as string,
+  team: import.meta.env.VITE_STRIPE_TEAM_PRICE_ID as string,
 } as const;
 
 export async function createCheckoutSession(params: CreateCheckoutParams): Promise<{ error: string | null }> {
@@ -39,6 +41,14 @@ export async function createCheckoutSession(params: CreateCheckoutParams): Promi
   }
 
   return { error: 'No checkout URL returned' };
+}
+
+export async function createTeamCheckoutSession(teamId: string): Promise<{ error: string | null }> {
+  return createCheckoutSession({
+    mode: 'subscription',
+    priceId: STRIPE_PRICES.team,
+    teamId,
+  });
 }
 
 export async function createPortalSession(): Promise<{ error: string | null }> {

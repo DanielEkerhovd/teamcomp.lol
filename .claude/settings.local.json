@@ -50,7 +50,12 @@
       "Bash(npx vite build)",
       "WebFetch(domain:raw.communitydragon.org)",
       "WebFetch(domain:ddragon.leagueoflegends.com)",
-      "WebFetch(domain:supabase.com)"
+      "WebFetch(domain:supabase.com)",
+      "Bash(find /c/Coding/private/draft-sheet/supabase/migrations -name \"*.sql\" -exec grep -l \"banned\" {} ;)",
+      "Bash(find /c/Coding/private/draft-sheet/supabase/migrations -name \"*.sql\" -exec grep -l \"live_draft_user_sessions\\\\|live_draft_chat\" {} ;)",
+      "Bash(find \"c:\\\\Coding\\\\private\\\\draft-sheet\\\\supabase\\\\migrations\" -name \"*.sql\" -exec grep -l \"leave_team\\\\|respond_to_team_invite\" {} ;)",
+      "Bash(find /c/Coding/private/draft-sheet -name \"*.sql\" -exec grep -l \"invite\" {} ;)",
+      "Bash(xargs cat)"
     ],
     "defaultMode": "acceptEdits"
   }

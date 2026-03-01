@@ -1,5 +1,6 @@
 import { Friend, PendingFriendRequest, BlockedUser, ProfileRole } from '../../types/database';
 import { formatDistanceToNow } from '../../lib/dateUtils';
+import DefaultAvatar from '../ui/DefaultAvatar';
 
 // Role display labels
 const ROLE_LABELS: Record<ProfileRole, string> = {
@@ -43,21 +44,21 @@ interface FriendCardProps {
 }
 
 export function FriendCard({ friend, onRemove, onMessage, onBlock }: FriendCardProps) {
-  const initials = friend.displayName?.slice(0, 2).toUpperCase() || '??';
   const roleDisplay = getRoleDisplay(friend.role, friend.roleTeamName);
 
   return (
     <div className="flex items-center gap-3 p-3 bg-lol-surface rounded-lg border border-lol-border hover:border-lol-gold/30 transition-colors">
       {friend.avatarUrl ? (
-        <img
-          src={friend.avatarUrl}
-          alt={friend.displayName}
-          className="w-10 h-10 rounded-lg object-cover"
-        />
-      ) : (
-        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-lol-gold to-lol-gold-light flex items-center justify-center text-lol-dark font-semibold text-sm">
-          {initials}
+        <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0">
+          <img
+            src={friend.avatarUrl}
+            alt={friend.displayName}
+            className="w-full h-full object-cover scale-110"
+            referrerPolicy="no-referrer"
+          />
         </div>
+      ) : (
+        <DefaultAvatar size="w-10 h-10" className="rounded-lg" />
       )}
 
       <div className="flex-1 min-w-0">
@@ -132,11 +133,14 @@ export function PendingRequestCard({
   return (
     <div className="flex items-center gap-3 p-3 bg-lol-surface rounded-lg border border-lol-border">
       {request.avatarUrl ? (
-        <img
-          src={request.avatarUrl}
-          alt={request.displayName}
-          className="w-10 h-10 rounded-lg object-cover"
-        />
+        <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0">
+          <img
+            src={request.avatarUrl}
+            alt={request.displayName}
+            className="w-full h-full object-cover scale-110"
+            referrerPolicy="no-referrer"
+          />
+        </div>
       ) : (
         <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-gray-600 to-gray-700 flex items-center justify-center text-white font-semibold text-sm">
           {initials}
@@ -209,11 +213,14 @@ export function BlockedUserCard({ blockedUser, onUnblock }: BlockedUserCardProps
   return (
     <div className="flex items-center gap-3 p-3 bg-lol-surface rounded-lg border border-lol-border">
       {blockedUser.avatarUrl ? (
-        <img
-          src={blockedUser.avatarUrl}
-          alt={blockedUser.displayName}
-          className="w-10 h-10 rounded-lg object-cover grayscale opacity-60"
-        />
+        <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 grayscale opacity-60">
+          <img
+            src={blockedUser.avatarUrl}
+            alt={blockedUser.displayName}
+            className="w-full h-full object-cover scale-110"
+            referrerPolicy="no-referrer"
+          />
+        </div>
       ) : (
         <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-gray-600 to-gray-700 flex items-center justify-center text-white font-semibold text-sm opacity-60">
           {initials}

@@ -7,3 +7,4 @@ export { default as RankBadge } from './RankBadge';
 export { default as RoleIcon } from './RoleIcon';
 export { default as TeamMembersPanel } from './TeamMembersPanel';
 export { default as InviteModal } from './InviteModal';
+export { default as TransferOwnershipModal } from './TransferOwnershipModal';

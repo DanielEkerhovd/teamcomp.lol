@@ -8,8 +8,10 @@ import { FriendCard, PendingRequestCard, BlockedUserCard } from '../components/s
 import AddFriendModal from '../components/social/AddFriendModal';
 import { formatDistanceToNow, formatDistanceToNowShort } from '../lib/dateUtils';
 import type { Notification } from '../lib/notificationService';
-import { teamMembershipService, PendingTeamInvite } from '../lib/teamMembershipService';
+import { teamMembershipService, PendingTeamInvite, PendingOwnershipTransfer } from '../lib/teamMembershipService';
+import { useMyTeamStore } from '../stores/useMyTeamStore';
 import type { Message, ConversationPreview, Friend, ProfileRole } from '../types/database';
+import DefaultAvatar from '../components/ui/DefaultAvatar';
 
 // Role display labels
 const ROLE_LABELS: Record<ProfileRole, string> = {
@@ -58,7 +60,6 @@ function ConversationItem({
   isActive: boolean;
   onClick: () => void;
 }) {
-  const initials = conversation.friendName?.slice(0, 2).toUpperCase() || '??';
   const roleDisplay = friend ? getRoleDisplay(friend.role, friend.roleTeamName) : null;
 
   return (
@@ -77,9 +78,7 @@ function ConversationItem({
           className="w-10 h-10 rounded-lg object-cover"
         />
       ) : (
-        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-lol-gold to-lol-gold-light flex items-center justify-center text-lol-dark font-semibold text-sm">
-          {initials}
-        </div>
+        <DefaultAvatar size="w-10 h-10" className="rounded-lg" />
       )}
 
       <div className="flex-1 min-w-0">
@@ -125,7 +124,6 @@ function MessageBubble({
   onRevert?: (messageId: string) => void;
 }) {
   const isReverted = !!message.revertedAt;
-  const initials = message.senderName?.slice(0, 2).toUpperCase() || '??';
 
   const avatar = message.senderAvatar ? (
     <img
@@ -135,9 +133,7 @@ function MessageBubble({
       referrerPolicy="no-referrer"
     />
   ) : (
-    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-lol-gold to-lol-gold-light flex items-center justify-center text-lol-dark font-semibold text-[10px] shrink-0">
-      {initials}
-    </div>
+    <DefaultAvatar size="w-8 h-8" className="rounded-full" />
   );
 
   return (
@@ -273,12 +269,18 @@ function NotificationItem({
   const getActionLink = () => {
     switch (notification.type) {
       case 'team_invite':
-        return '/social?tab=team_invites';
+        return '/friends?tab=team_invites';
       case 'friend_request':
-        return '/social?tab=pending';
+        return '/friends?tab=pending';
       case 'team_member_joined':
       case 'team_member_left':
       case 'team_role_changed':
+        return notification.data?.teamId ? `/my-teams?team=${notification.data.teamId}` : '/my-teams';
+      case 'ownership_transfer_request':
+        return '/friends?tab=team_invites';
+      case 'ownership_transfer_accepted':
+      case 'ownership_transfer_declined':
+      case 'ownership_transfer_cancelled':
         return notification.data?.teamId ? `/my-teams?team=${notification.data.teamId}` : '/my-teams';
       case 'draft_invite':
         return notification.data?.inviteToken ? `/live-draft/join/${notification.data.inviteToken}` : null;
@@ -380,6 +382,11 @@ export default function FriendsPage() {
   const [teamInvites, setTeamInvites] = useState<PendingTeamInvite[]>([]);
   const [teamInvitesLoading, setTeamInvitesLoading] = useState(false);
   const [respondingInviteId] = useState<string | null>(null);
+
+  // Ownership transfer requests state
+  const [ownershipTransfers, setOwnershipTransfers] = useState<PendingOwnershipTransfer[]>([]);
+  const [respondingTransferId, setRespondingTransferId] = useState<string | null>(null);
+  const [transferConflicts, setTransferConflicts] = useState<Record<string, string>>({});
 
   const { user } = useAuthStore();
   const {
@@ -484,12 +491,16 @@ export default function FriendsPage() {
     }
   }, [searchParams]);
 
-  // Load team invites
+  // Load team invites and ownership transfers
   const loadTeamInvites = async () => {
     setTeamInvitesLoading(true);
     try {
-      const invites = await teamMembershipService.getPendingTeamInvitesForUser();
+      const [invites, transfers] = await Promise.all([
+        teamMembershipService.getPendingTeamInvitesForUser(),
+        teamMembershipService.getPendingOwnershipTransfers(),
+      ]);
       setTeamInvites(invites);
+      setOwnershipTransfers(transfers);
     } catch (err) {
       console.error('Failed to load team invites:', err);
     } finally {
@@ -514,6 +525,7 @@ export default function FriendsPage() {
       if (result.success) {
         // Navigate to the team page after accepting
         if (accept && result.teamId) {
+          await useMyTeamStore.getState().loadMemberships();
           navigate(`/my-teams?team=${result.teamId}`);
         }
       } else if (invite) {
@@ -526,6 +538,86 @@ export default function FriendsPage() {
       if (invite) {
         setTeamInvites(prev => [...prev, invite]);
       }
+    }
+  };
+
+  const handleRespondToOwnershipTransfer = async (requestId: string, accept: boolean) => {
+    // Clear any previous conflict for this transfer
+    setTransferConflicts(prev => {
+      const next = { ...prev };
+      delete next[requestId];
+      return next;
+    });
+
+    if (!accept) {
+      // Optimistic remove on decline
+      const transfer = ownershipTransfers.find(t => t.requestId === requestId);
+      setOwnershipTransfers(prev => prev.filter(t => t.requestId !== requestId));
+      setRespondingTransferId(requestId);
+
+      try {
+        const result = await teamMembershipService.respondToOwnershipTransfer(requestId, false);
+        if (!result.success && transfer) {
+          setOwnershipTransfers(prev => [...prev, transfer]);
+        }
+      } catch (err) {
+        console.error("Failed to decline ownership transfer:", err);
+        if (transfer) {
+          setOwnershipTransfers(prev => [...prev, transfer]);
+        }
+      } finally {
+        setRespondingTransferId(null);
+      }
+      return;
+    }
+
+    // Accept flow — don't remove optimistically (conflict may keep card visible)
+    setRespondingTransferId(requestId);
+
+    try {
+      const result = await teamMembershipService.respondToOwnershipTransfer(requestId, true);
+      if (result.success) {
+        setOwnershipTransfers(prev => prev.filter(t => t.requestId !== requestId));
+        if (result.teamId) {
+          // Fetch the transferred team data and add it to the local owned teams
+          // so the cloudSync orphan-delete doesn't wipe it from the DB
+          const teamData = await teamMembershipService.fetchTeamData(result.teamId);
+          if (teamData) {
+            const store = useMyTeamStore.getState();
+            // Remove from memberships (no longer a member, now an owner)
+            const updatedMemberships = store.memberships.filter(m => m.teamId !== result.teamId);
+            // Add to owned teams if not already there
+            const alreadyOwned = store.teams.some(t => t.id === result.teamId);
+            const updatedTeams = alreadyOwned ? store.teams : [...store.teams, teamData];
+            useMyTeamStore.setState({
+              teams: updatedTeams,
+              memberships: updatedMemberships,
+              selectedTeamId: result.teamId,
+            });
+          }
+          await useMyTeamStore.getState().loadMemberships();
+          navigate(`/my-teams?team=${result.teamId}`);
+        }
+      } else if (result.conflict === "free_tier_team_limit") {
+        // Keep the card visible and show the conflict message
+        setTransferConflicts(prev => ({
+          ...prev,
+          [requestId]: `You already own "${result.existingTeamName}". You need an available team slot to accept this transfer. Delete or transfer your existing team first, or upgrade your plan.`,
+        }));
+      } else {
+        setTransferConflicts(prev => ({
+          ...prev,
+          [requestId]: result.error || "Failed to accept transfer.",
+        }));
+      }
+    } catch (err) {
+      console.error("Failed to accept ownership transfer:", err);
+      setTransferConflicts(prev => ({
+        ...prev,
+        [requestId]: "Something went wrong. Please try again.",
+      }));
+    } finally {
+      setRespondingTransferId(null);
     }
   };
 
@@ -552,7 +644,7 @@ export default function FriendsPage() {
     { id: 'messages', label: 'Messages', count: unreadMessagesCount },
     { id: 'notifications', label: 'Notifications', count: notifUnreadCount },
     { id: 'pending', label: 'Requests', count: pendingReceived.length },
-    { id: 'team_invites', label: 'Team Invites', count: teamInvites.length },
+    { id: 'team_invites', label: 'Team Invites', count: teamInvites.length + ownershipTransfers.length },
     { id: 'sent', label: 'Sent', count: pendingSent.length },
     { id: 'blocked', label: 'Blocked', count: blocked.length },
   ];
@@ -774,13 +866,9 @@ export default function FriendsPage() {
                                 className="w-full flex items-center gap-3 p-3 rounded-lg transition-colors text-left hover:bg-lol-surface border border-transparent"
                               >
                                 {friend.avatarUrl ? (
-                                  <img src={friend.avatarUrl} alt={friend.displayName} className="w-10 h-10 rounded-lg object-cover" />
+                                  <img src={friend.avatarUrl} alt={friend.displayName} className="w-10 h-10 rounded-lg object-cover" referrerPolicy="no-referrer" />
                                 ) : (
-                                  <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-lol-gold to-lol-gold-light flex items-center justify-center text-lol-dark">
-                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                                    </svg>
-                                  </div>
+                                  <DefaultAvatar size="w-10 h-10" className="rounded-lg" />
                                 )}
                                 <div className="flex-1 min-w-0">
                                   <p className="text-sm font-medium text-white truncate">{friend.displayName}</p>
@@ -834,11 +922,10 @@ export default function FriendsPage() {
                           src={activeFriend?.avatarUrl || activeConvo?.friendAvatar || ''}
                           alt={activeFriend?.displayName || activeConvo?.friendName}
                           className="w-10 h-10 rounded-lg object-cover"
+                          referrerPolicy="no-referrer"
                         />
                       ) : (
-                        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-lol-gold to-lol-gold-light flex items-center justify-center text-lol-dark font-semibold text-sm">
-                          {(activeFriend?.displayName || activeConvo?.friendName || '??').slice(0, 2).toUpperCase()}
-                        </div>
+                        <DefaultAvatar size="w-10 h-10" className="rounded-lg" />
                       )}
                       <div>
                         <h3 className="font-medium text-white">
@@ -878,11 +965,10 @@ export default function FriendsPage() {
                                   src={activeFriend?.avatarUrl || activeConvo?.friendAvatar || ''}
                                   alt=""
                                   className="w-8 h-8 rounded-full object-cover shrink-0"
+                                  referrerPolicy="no-referrer"
                                 />
                               ) : (
-                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-lol-gold to-lol-gold-light flex items-center justify-center text-lol-dark font-semibold text-[10px] shrink-0">
-                                  {(activeFriend?.displayName || activeConvo?.friendName || '??').slice(0, 2).toUpperCase()}
-                                </div>
+                                <DefaultAvatar size="w-8 h-8" className="rounded-full" />
                               )}
                               <div className="px-3 py-2 bg-lol-surface rounded-2xl rounded-tl-sm rounded-bl-sm">
                                 <div className="flex items-center gap-1">
@@ -1070,7 +1156,7 @@ export default function FriendsPage() {
                 <div className="flex items-center justify-center py-12">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-lol-gold" />
                 </div>
-              ) : teamInvites.length === 0 ? (
+              ) : teamInvites.length === 0 && ownershipTransfers.length === 0 ? (
                 <div className="text-center py-12">
                   <svg className="w-12 h-12 text-gray-600 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -1079,15 +1165,30 @@ export default function FriendsPage() {
                   <p className="text-gray-500 text-sm mt-1">Team invitations will appear here</p>
                 </div>
               ) : (
-                teamInvites.map((invite) => (
-                  <TeamInviteCard
-                    key={invite.inviteId}
-                    invite={invite}
-                    onAccept={() => handleRespondToTeamInvite(invite.inviteId, true)}
-                    onDecline={() => handleRespondToTeamInvite(invite.inviteId, false)}
-                    isResponding={respondingInviteId === invite.inviteId}
-                  />
-                ))
+                <>
+                  {/* Ownership Transfer Requests */}
+                  {ownershipTransfers.map((transfer) => (
+                    <OwnershipTransferCard
+                      key={transfer.requestId}
+                      transfer={transfer}
+                      onAccept={() => handleRespondToOwnershipTransfer(transfer.requestId, true)}
+                      onDecline={() => handleRespondToOwnershipTransfer(transfer.requestId, false)}
+                      isResponding={respondingTransferId === transfer.requestId}
+                      conflictMessage={transferConflicts[transfer.requestId]}
+                    />
+                  ))}
+
+                  {/* Team Invites */}
+                  {teamInvites.map((invite) => (
+                    <TeamInviteCard
+                      key={invite.inviteId}
+                      invite={invite}
+                      onAccept={() => handleRespondToTeamInvite(invite.inviteId, true)}
+                      onDecline={() => handleRespondToTeamInvite(invite.inviteId, false)}
+                      isResponding={respondingInviteId === invite.inviteId}
+                    />
+                  ))}
+                </>
               )}
             </div>
           )}
@@ -1125,11 +1226,10 @@ function TeamInviteCard({
           src={invite.invitedBy.avatarUrl}
           alt={invite.invitedBy.displayName}
           className="w-12 h-12 rounded-lg object-cover"
+          referrerPolicy="no-referrer"
         />
       ) : (
-        <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-lol-gold to-lol-gold-light flex items-center justify-center text-lol-dark font-semibold">
-          {invite.invitedBy.displayName.slice(0, 2).toUpperCase()}
-        </div>
+        <DefaultAvatar size="w-12 h-12" className="rounded-lg" />
       )}
 
       <div className="flex-1 min-w-0">
@@ -1178,6 +1278,99 @@ function TeamInviteCard({
           )}
         </button>
       </div>
+    </div>
+  );
+}
+
+// Ownership Transfer Card Component
+function OwnershipTransferCard({
+  transfer,
+  onAccept,
+  onDecline,
+  isResponding,
+  conflictMessage,
+}: {
+  transfer: PendingOwnershipTransfer;
+  onAccept: () => void;
+  onDecline: () => void;
+  isResponding: boolean;
+  conflictMessage?: string;
+}) {
+  const expiresIn = Math.ceil((new Date(transfer.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+  // Ownership transfers are net-zero (user is already a member, swaps membership for ownership)
+  // so no team slot check is needed
+  const canAccept = !conflictMessage;
+
+  return (
+    <div className={`flex flex-col gap-3 p-4 bg-lol-card rounded-xl border ${conflictMessage ? 'border-yellow-500/20' : 'border-yellow-500/30'}`}>
+      <div className="flex items-center gap-4">
+        {/* From User Avatar */}
+        {transfer.fromUser.avatarUrl ? (
+          <img
+            src={transfer.fromUser.avatarUrl}
+            alt={transfer.fromUser.displayName}
+            className="w-12 h-12 rounded-lg object-cover"
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-yellow-500 to-yellow-600 flex items-center justify-center text-lol-dark font-semibold">
+            {transfer.fromUser.displayName.slice(0, 2).toUpperCase()}
+          </div>
+        )}
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-medium text-white">{transfer.fromUser.displayName}</span>
+            <span className="text-gray-400">wants to transfer ownership of</span>
+            <span className="font-medium text-yellow-400">{transfer.teamName}</span>
+            <span className="text-gray-400">to you</span>
+          </div>
+          <div className="flex items-center gap-3 mt-1">
+            <span className="px-2 py-0.5 rounded text-xs font-medium bg-yellow-500/20 text-yellow-400">
+              Ownership Transfer
+            </span>
+            <span className="text-xs text-gray-500">
+              Expires in {expiresIn} day{expiresIn !== 1 ? 's' : ''}
+            </span>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onDecline}
+            disabled={isResponding}
+            className="px-4 py-2 text-sm font-medium text-gray-400 hover:text-white hover:bg-lol-surface rounded-lg transition-colors disabled:opacity-50"
+          >
+            Decline
+          </button>
+          <button
+            onClick={onAccept}
+            disabled={isResponding || !canAccept}
+            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 ${
+              canAccept
+                ? 'bg-yellow-500 hover:bg-yellow-400 text-lol-dark'
+                : 'bg-yellow-500/30 text-yellow-300/50 cursor-not-allowed'
+            }`}
+          >
+            {isResponding ? (
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-lol-dark" />
+            ) : (
+              'Accept'
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Server-side error message */}
+      {conflictMessage && (
+        <div className="flex items-start gap-2 px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-lg">
+          <svg className="w-4 h-4 text-red-400 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+          </svg>
+          <p className="text-sm text-red-300">{conflictMessage}</p>
+        </div>
+      )}
     </div>
   );
 }

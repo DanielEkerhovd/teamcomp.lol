@@ -5,6 +5,7 @@ import { useSettingsStore } from './useSettingsStore';
 import { cloudSync } from './middleware/cloudSync';
 import { syncManager } from '../lib/syncManager';
 import { useAuthStore } from './useAuthStore';
+import { supabase } from '../lib/supabase';
 
 // Maximum number of subs per team
 export const MAX_SUBS = 5;
@@ -36,6 +37,9 @@ const isTeamNameTaken = (teams: Team[], name: string, excludeTeamId?: string): b
 
 interface EnemyTeamState {
   teams: Team[];
+  // Team enemy teams - shared across team members, keyed by myTeamId
+  teamEnemyTeams: Record<string, Team[]>;
+  teamEnemyTeamsLoading: boolean;
   addTeam: (name: string) => EnemyTeamOperationResult;
   isTeamNameAvailable: (name: string, excludeTeamId?: string) => boolean;
   importTeamFromOpgg: (name: string, region: Region, players: { summonerName: string; tagLine: string }[]) => EnemyTeamOperationResult;
@@ -47,6 +51,11 @@ interface EnemyTeamState {
   addSub: (teamId: string) => void;
   removeSub: (teamId: string, playerId: string) => void;
   getTeam: (id: string) => Team | undefined;
+  // Team enemy team operations
+  loadTeamEnemyTeams: (myTeamId: string) => Promise<void>;
+  addTeamEnemyTeam: (myTeamId: string, name: string) => Promise<EnemyTeamOperationResult>;
+  deleteTeamEnemyTeam: (myTeamId: string, enemyTeamId: string) => Promise<void>;
+  getTeamEnemyTeam: (myTeamId: string, enemyTeamId: string) => Team | undefined;
   // Drag-based role management
   swapPlayerRoles: (teamId: string, playerId1: string, playerId2: string) => void;
   moveToRole: (teamId: string, playerId: string, role: Role) => void;
@@ -78,6 +87,8 @@ export const useEnemyTeamStore = create<EnemyTeamState>()(
     cloudSync(
       (set, get) => ({
         teams: [],
+        teamEnemyTeams: {},
+        teamEnemyTeamsLoading: false,
 
       addTeam: (name: string): EnemyTeamOperationResult => {
         const currentTeams = get().teams;
@@ -677,6 +688,110 @@ export const useEnemyTeamStore = create<EnemyTeamState>()(
             };
           }),
         }));
+      },
+
+      // --- Team enemy team operations (DB-only, not cloud synced) ---
+
+      loadTeamEnemyTeams: async (myTeamId: string) => {
+        if (!supabase) return;
+        set({ teamEnemyTeamsLoading: true });
+        try {
+          const { data, error } = await (supabase
+            .from('enemy_teams' as 'profiles')
+            .select('*')
+            .eq('team_id', myTeamId)
+            .order('created_at', { ascending: true }) as unknown as Promise<{ data: Array<{
+              id: string; name: string; notes: string; team_id: string;
+              is_favorite: boolean; created_at: string; updated_at: string;
+            }> | null; error: Error | null }>);
+
+          if (error) throw error;
+
+          const teams: Team[] = (data || []).map(row => ({
+            id: row.id,
+            name: row.name,
+            notes: row.notes || '',
+            isFavorite: row.is_favorite || false,
+            players: ROLES.map(role => ({
+              id: generateId(), summonerName: '', tagLine: '', role: role.value as Role,
+              notes: '', region: 'euw' as Region, isSub: false, championPool: [], championGroups: [],
+            })),
+            createdAt: new Date(row.created_at).getTime(),
+            updatedAt: new Date(row.updated_at).getTime(),
+          }));
+
+          set(state => ({
+            teamEnemyTeams: { ...state.teamEnemyTeams, [myTeamId]: teams },
+            teamEnemyTeamsLoading: false,
+          }));
+        } catch (err) {
+          console.error('Error loading team enemy teams:', err);
+          set({ teamEnemyTeamsLoading: false });
+        }
+      },
+
+      addTeamEnemyTeam: async (myTeamId: string, name: string): Promise<EnemyTeamOperationResult> => {
+        if (!supabase) return { success: false, error: 'max_teams_reached' };
+        const { user } = useAuthStore.getState();
+        if (!user) return { success: false, error: 'max_teams_reached' };
+
+        const newId = generateId();
+        try {
+          const { error } = await (supabase
+            .from('enemy_teams' as 'profiles')
+            .insert({
+              id: newId,
+              user_id: user.id,
+              name: name.trim(),
+              notes: '',
+              team_id: myTeamId,
+            } as never) as unknown as Promise<{ error: Error | null }>);
+
+          if (error) {
+            if (error.message?.includes('limit reached')) {
+              return { success: false, error: 'max_teams_reached' };
+            }
+            throw error;
+          }
+
+          const newTeam = createEmptyTeam(name);
+          newTeam.id = newId;
+
+          set(state => ({
+            teamEnemyTeams: {
+              ...state.teamEnemyTeams,
+              [myTeamId]: [...(state.teamEnemyTeams[myTeamId] || []), newTeam],
+            },
+          }));
+
+          return { success: true, team: newTeam };
+        } catch (err) {
+          console.error('Error adding team enemy team:', err);
+          return { success: false, error: 'max_teams_reached' };
+        }
+      },
+
+      deleteTeamEnemyTeam: async (myTeamId: string, enemyTeamId: string) => {
+        if (!supabase) return;
+        try {
+          await (supabase
+            .from('enemy_teams' as 'profiles')
+            .delete()
+            .eq('id', enemyTeamId) as unknown as Promise<{ error: Error | null }>);
+
+          set(state => ({
+            teamEnemyTeams: {
+              ...state.teamEnemyTeams,
+              [myTeamId]: (state.teamEnemyTeams[myTeamId] || []).filter(t => t.id !== enemyTeamId),
+            },
+          }));
+        } catch (err) {
+          console.error('Error deleting team enemy team:', err);
+        }
+      },
+
+      getTeamEnemyTeam: (myTeamId: string, enemyTeamId: string): Team | undefined => {
+        return get().teamEnemyTeams[myTeamId]?.find(t => t.id === enemyTeamId);
       },
     }),
       {

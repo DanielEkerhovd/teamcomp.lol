@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import type { User, Session, AuthError } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured, clearCachedSession } from '../lib/supabase';
-import { checkModerationAndRecord, getViolationWarning } from '../lib/moderation';
+import { checkModerationAndRecord, checkImageModerationAndRecord, getViolationWarning } from '../lib/moderation';
+import { resizeImage } from '../lib/imageResize';
 import type { Profile, UserTier, ProfileRole } from '../types/database';
 
 // Guard against multiple initialization calls (React Strict Mode)
@@ -22,8 +23,10 @@ export interface UserProfile {
   isPrivate: boolean;
   stripeCustomerId: string | null;
   avatarModeratedUntil: string | null;
+  avatarModerationStatus: string | null;
   bannedAt: string | null;
   banReason: string | null;
+  downgradedAt: string | null;
 }
 
 interface AuthState {
@@ -54,7 +57,7 @@ interface AuthState {
   updateDisplayName: (displayName: string) => Promise<{ error: string | null }>;
   updateAvatar: (file: File) => Promise<{ error: string | null }>;
   removeAvatar: () => Promise<{ error: string | null }>;
-  generateRandomAvatar: () => Promise<{ error: string | null }>;
+  setChampionAvatar: (url: string) => Promise<{ error: string | null }>;
   updateRole: (role: ProfileRole | null, teamId: string | null) => Promise<{ error: string | null }>;
   updateEmail: (newEmail: string) => Promise<{ error: string | null }>;
   updatePrivacy: (isPrivate: boolean) => Promise<{ error: string | null }>;
@@ -76,8 +79,10 @@ const transformProfile = (dbProfile: Profile, roleTeamName?: string | null): Use
   isPrivate: dbProfile.is_private,
   stripeCustomerId: dbProfile.stripe_customer_id ?? null,
   avatarModeratedUntil: dbProfile.avatar_moderated_until ?? null,
+  avatarModerationStatus: dbProfile.avatar_moderation_status ?? null,
   bannedAt: dbProfile.banned_at ?? null,
   banReason: dbProfile.ban_reason ?? null,
+  downgradedAt: dbProfile.downgraded_at ?? null,
 });
 
 export const useAuthStore = create<AuthState>()((set, get) => ({
@@ -477,7 +482,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
         // Tier gate: only paid tiers can upload custom avatars
         if (profile?.tier === 'free') {
-          return { error: 'Custom avatar uploads require a paid plan. Use the random avatar generator instead.' };
+          return { error: 'Custom avatar uploads require a paid plan. Use a champion icon instead.' };
         }
 
         // Moderation cooldown check
@@ -491,19 +496,62 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
           return { error: 'Please select an image file' };
         }
 
-        // Validate file size (max 2MB)
-        if (file.size > 2 * 1024 * 1024) {
-          return { error: 'Image size must be under 2MB' };
+        // Relaxed raw file limit — resizing handles compression
+        if (file.size > 10 * 1024 * 1024) {
+          return { error: 'Image size must be under 10MB' };
         }
 
         const client = supabase;
-        const fileExt = file.name.split('.').pop();
-        const filePath = `${user.id}/avatar.${fileExt}`;
+        const isPrivileged = profile?.tier === 'admin' || profile?.tier === 'developer';
 
-        // Upload to Supabase Storage
+        // Spam filter: progressive cooldown check (developers exempt via DB, but skip call entirely for privileged)
+        if (!isPrivileged) {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { data: spamCheck } = await (client as any).rpc('check_avatar_change_allowed');
+            if (spamCheck && !spamCheck.allowed) {
+              const waitMinutes = Math.ceil(spamCheck.wait_seconds / 60);
+              if (waitMinutes >= 60) {
+                const hours = Math.ceil(waitMinutes / 60);
+                return { error: `You're changing your avatar too frequently. Please wait ${hours} hour${hours > 1 ? 's' : ''} before trying again.` };
+              }
+              return { error: `You're changing your avatar too frequently. Please wait ${waitMinutes} minute${waitMinutes > 1 ? 's' : ''} before trying again.` };
+            }
+          } catch (err) {
+            console.error('Spam filter check failed:', err);
+            // Fail open — allow if the check itself errors
+          }
+        }
+
+        // Resize image client-side — privileged users get full quality, others get 256x256 compressed
+        let resized;
+        try {
+          if (isPrivileged) {
+            resized = await resizeImage(file, 512, 1.0);
+          } else {
+            resized = await resizeImage(file, 256, 0.85);
+          }
+        } catch (err) {
+          console.error('Image resize failed:', err);
+          return { error: 'Failed to process image. Please try a different file.' };
+        }
+
+        // Moderate image via OpenAI before uploading
+        const moderationResult = await checkImageModerationAndRecord(resized.base64);
+        if (moderationResult.serviceError) {
+          return { error: moderationResult.serviceError };
+        }
+        if (moderationResult.flagged) {
+          const warning = getViolationWarning(moderationResult);
+          return { error: warning || 'This image was flagged as inappropriate. Please choose a different avatar.' };
+        }
+
+        // Upload resized image (always JPEG)
+        const filePath = `${user.id}/avatar.jpg`;
+
         const { error: uploadError } = await client.storage
           .from('avatars')
-          .upload(filePath, file, { upsert: true });
+          .upload(filePath, resized.blob, { upsert: true, contentType: 'image/jpeg' });
 
         if (uploadError) {
           return { error: uploadError.message };
@@ -514,12 +562,20 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
           .from('avatars')
           .getPublicUrl(filePath);
 
-        // Update profile with new avatar URL (add cache buster)
+        // Record the avatar change for spam filter tracking
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (client as any).rpc('record_avatar_change');
+        } catch (err) {
+          console.error('Failed to record avatar change:', err);
+        }
+
+        // Update profile with new avatar URL and moderation status
         const avatarUrl = `${publicUrl}?t=${Date.now()}`;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { error: updateError } = await (client as any)
           .from('profiles')
-          .update({ avatar_url: avatarUrl })
+          .update({ avatar_url: avatarUrl, avatar_moderation_status: 'approved' })
           .eq('id', user.id);
 
         if (updateError) {
@@ -567,7 +623,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         return { error: null };
       },
 
-      generateRandomAvatar: async () => {
+      setChampionAvatar: async (url: string) => {
         const { user, profile } = get();
         if (!user || !supabase) {
           return { error: 'Please sign in to continue' };
@@ -579,13 +635,10 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
           return { error: `Your avatar was removed by a moderator. You can upload a new avatar after ${until}.` };
         }
 
-        const seed = crypto.randomUUID();
-        const avatarUrl = `https://api.dicebear.com/9.x/pixel-art/svg?seed=${seed}`;
-
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { error: updateError } = await (supabase as any)
           .from('profiles')
-          .update({ avatar_url: avatarUrl })
+          .update({ avatar_url: url })
           .eq('id', user.id);
 
         if (updateError) {

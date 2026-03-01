@@ -31,7 +31,11 @@ export type NotificationType =
   | 'friend_accepted'
   | 'message'
   | 'draft_invite'
-  | 'moderation';
+  | 'moderation'
+  | 'ownership_transfer_request'
+  | 'ownership_transfer_accepted'
+  | 'ownership_transfer_declined'
+  | 'ownership_transfer_cancelled';
 
 export interface Database {
   public: {
@@ -54,6 +58,8 @@ export interface Database {
           banned_at: string | null;
           ban_reason: string | null;
           avatar_moderated_until: string | null;
+          avatar_moderation_status: string | null;
+          downgraded_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -74,6 +80,8 @@ export interface Database {
           banned_at?: string | null;
           ban_reason?: string | null;
           avatar_moderated_until?: string | null;
+          avatar_moderation_status?: string | null;
+          downgraded_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -94,6 +102,8 @@ export interface Database {
           banned_at?: string | null;
           ban_reason?: string | null;
           avatar_moderated_until?: string | null;
+          avatar_moderation_status?: string | null;
+          downgraded_at?: string | null;
           updated_at?: string;
         };
       };
@@ -102,17 +112,20 @@ export interface Database {
           user_id: string;
           default_region: string;
           has_completed_onboarding: boolean;
+          has_completed_team_onboarding: boolean;
           updated_at: string;
         };
         Insert: {
           user_id: string;
           default_region?: string;
           has_completed_onboarding?: boolean;
+          has_completed_team_onboarding?: boolean;
           updated_at?: string;
         };
         Update: {
           default_region?: string;
           has_completed_onboarding?: boolean;
+          has_completed_team_onboarding?: boolean;
           updated_at?: string;
         };
       };
@@ -126,6 +139,11 @@ export interface Database {
           created_at: string;
           updated_at: string;
           sort_order: number;
+          has_team_plan: boolean;
+          team_plan_status: string | null;
+          team_max_enemy_teams: number;
+          team_content_permission: 'admins' | 'players' | 'all';
+          archived_at: string | null;
         };
         Insert: {
           id?: string;
@@ -136,6 +154,11 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
           sort_order?: number;
+          has_team_plan?: boolean;
+          team_plan_status?: string | null;
+          team_max_enemy_teams?: number;
+          team_content_permission?: 'admins' | 'players' | 'all';
+          archived_at?: string | null;
         };
         Update: {
           name?: string;
@@ -143,6 +166,11 @@ export interface Database {
           champion_pool?: unknown;
           updated_at?: string;
           sort_order?: number;
+          has_team_plan?: boolean;
+          team_plan_status?: string | null;
+          team_max_enemy_teams?: number;
+          team_content_permission?: 'admins' | 'players' | 'all';
+          archived_at?: string | null;
         };
       };
       players: {
@@ -194,6 +222,8 @@ export interface Database {
           notes: string;
           created_at: string;
           updated_at: string;
+          team_id: string | null;
+          archived_at: string | null;
         };
         Insert: {
           id?: string;
@@ -202,11 +232,15 @@ export interface Database {
           notes?: string;
           created_at?: string;
           updated_at?: string;
+          team_id?: string | null;
+          archived_at?: string | null;
         };
         Update: {
           name?: string;
           notes?: string;
           updated_at?: string;
+          team_id?: string | null;
+          archived_at?: string | null;
         };
       };
       enemy_players: {
@@ -264,6 +298,7 @@ export interface Database {
           sort_order: number;
           created_at: string;
           updated_at: string;
+          archived_at: string | null;
         };
         Insert: {
           id?: string;
@@ -278,6 +313,7 @@ export interface Database {
           sort_order?: number;
           created_at?: string;
           updated_at?: string;
+          archived_at?: string | null;
         };
         Update: {
           name?: string;
@@ -289,6 +325,7 @@ export interface Database {
           notepad?: unknown;
           sort_order?: number;
           updated_at?: string;
+          archived_at?: string | null;
         };
       };
       player_pools: {
@@ -777,6 +814,7 @@ export interface Database {
           status: string;
           price_id: string;
           tier: 'paid' | 'supporter';
+          team_id: string | null;
           current_period_start: string | null;
           current_period_end: string | null;
           cancel_at_period_end: boolean;
@@ -792,6 +830,7 @@ export interface Database {
           status?: string;
           price_id: string;
           tier: 'paid' | 'supporter';
+          team_id?: string | null;
           current_period_start?: string | null;
           current_period_end?: string | null;
           cancel_at_period_end?: boolean;
@@ -803,6 +842,7 @@ export interface Database {
           status?: string;
           price_id?: string;
           tier?: 'paid' | 'supporter';
+          team_id?: string | null;
           current_period_start?: string | null;
           current_period_end?: string | null;
           cancel_at_period_end?: boolean;
@@ -860,6 +900,38 @@ export interface Database {
           content?: string;
         };
       };
+      page_views: {
+        Row: {
+          id: number;
+          page_url: string;
+          referrer: string | null;
+          screen_width: number | null;
+          user_id: string | null;
+          session_id: string;
+          user_agent: string | null;
+          device_type: string | null;
+          created_at: string;
+        };
+        Insert: {
+          page_url: string;
+          referrer?: string | null;
+          screen_width?: number | null;
+          user_id?: string | null;
+          session_id: string;
+          user_agent?: string | null;
+          device_type?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          page_url?: string;
+          referrer?: string | null;
+          screen_width?: number | null;
+          user_id?: string | null;
+          session_id?: string;
+          user_agent?: string | null;
+          device_type?: string | null;
+        };
+      };
       moderation_violations: {
         Row: {
           id: string;
@@ -882,6 +954,15 @@ export interface Database {
           content?: string | null;
           categories?: string[];
         };
+      };
+    };
+    Functions: {
+      get_analytics_summary: {
+        Args: {
+          p_start_date?: string;
+          p_end_date?: string;
+        };
+        Returns: unknown;
       };
     };
   };
@@ -1011,6 +1092,9 @@ export interface TeamMembership {
   joinedAt: string;
   ownerName: string;
   ownerAvatar: string | null;
+  hasTeamPlan: boolean;
+  teamPlanStatus: string | null;
+  teamContentPermission: 'admins' | 'players' | 'all';
 }
 
 // Accept invite response

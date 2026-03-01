@@ -7,6 +7,7 @@ import { useAuthStore } from '../stores/useAuthStore';
 import { formatDistanceToNow, formatDistanceToNowShort } from '../lib/dateUtils';
 import type { Notification } from '../lib/notificationService';
 import type { Message, ConversationPreview, Friend, ProfileRole } from '../types/database';
+import DefaultAvatar from '../components/ui/DefaultAvatar';
 
 // Role display labels
 const ROLE_LABELS: Record<ProfileRole, string> = {
@@ -131,12 +132,18 @@ function NotificationItem({
   const getActionLink = () => {
     switch (notification.type) {
       case 'team_invite':
-        return '/social?tab=team_invites';
+        return '/friends?tab=team_invites';
       case 'friend_request':
-        return '/social?tab=pending';
+        return '/friends?tab=pending';
       case 'team_member_joined':
       case 'team_member_left':
       case 'team_role_changed':
+        return notification.data?.teamId ? `/my-teams?team=${notification.data.teamId}` : '/my-teams';
+      case 'ownership_transfer_request':
+        return '/friends?tab=team_invites';
+      case 'ownership_transfer_accepted':
+      case 'ownership_transfer_declined':
+      case 'ownership_transfer_cancelled':
         return notification.data?.teamId ? `/my-teams?team=${notification.data.teamId}` : '/my-teams';
       case 'draft_invite':
         return notification.data?.inviteToken ? `/live-draft/join/${notification.data.inviteToken}` : null;
@@ -227,7 +234,6 @@ function ConversationItem({
   isActive: boolean;
   onClick: () => void;
 }) {
-  const initials = conversation.friendName?.slice(0, 2).toUpperCase() || '??';
   const roleDisplay = friend ? getRoleDisplay(friend.role, friend.roleTeamName) : null;
 
   return (
@@ -246,9 +252,7 @@ function ConversationItem({
           className="w-10 h-10 rounded-lg object-cover"
         />
       ) : (
-        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-lol-gold to-lol-gold-light flex items-center justify-center text-lol-dark font-semibold text-sm">
-          {initials}
-        </div>
+        <DefaultAvatar size="w-10 h-10" className="rounded-lg" />
       )}
 
       <div className="flex-1 min-w-0">
@@ -294,7 +298,6 @@ function MessageBubble({
   onRevert?: (messageId: string) => void;
 }) {
   const isReverted = !!message.revertedAt;
-  const initials = message.senderName?.slice(0, 2).toUpperCase() || '??';
 
   const avatar = message.senderAvatar ? (
     <img
@@ -304,9 +307,7 @@ function MessageBubble({
       referrerPolicy="no-referrer"
     />
   ) : (
-    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-lol-gold to-lol-gold-light flex items-center justify-center text-lol-dark font-semibold text-[10px] shrink-0">
-      {initials}
-    </div>
+    <DefaultAvatar size="w-8 h-8" className="rounded-full" />
   );
 
   return (
@@ -596,13 +597,9 @@ export default function NotificationsPage() {
                               className="w-full flex items-center gap-3 p-3 rounded-lg transition-colors text-left hover:bg-lol-surface border border-transparent"
                             >
                               {friend.avatarUrl ? (
-                                <img src={friend.avatarUrl} alt={friend.displayName} className="w-10 h-10 rounded-lg object-cover" />
+                                <img src={friend.avatarUrl} alt={friend.displayName} className="w-10 h-10 rounded-lg object-cover" referrerPolicy="no-referrer" />
                               ) : (
-                                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-lol-gold to-lol-gold-light flex items-center justify-center text-lol-dark">
-                                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                                  </svg>
-                                </div>
+                                <DefaultAvatar size="w-10 h-10" className="rounded-lg" />
                               )}
                               <div className="flex-1 min-w-0">
                                 <p className="text-sm font-medium text-white truncate">{friend.displayName}</p>
@@ -648,7 +645,7 @@ export default function NotificationsPage() {
                         Add friends to start messaging
                       </p>
                       <Link
-                        to="/social"
+                        to="/friends"
                         className="inline-flex items-center gap-2 px-4 py-2 bg-lol-gold/10 hover:bg-lol-gold/20 text-lol-gold text-sm font-medium rounded-lg transition-colors"
                       >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -700,11 +697,10 @@ export default function NotificationsPage() {
                   src={activeFriend?.avatarUrl || activeConvo?.friendAvatar || ''}
                   alt={activeFriend?.displayName || activeConvo?.friendName}
                   className="w-10 h-10 rounded-lg object-cover"
+                  referrerPolicy="no-referrer"
                 />
               ) : (
-                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-lol-gold to-lol-gold-light flex items-center justify-center text-lol-dark font-semibold text-sm">
-                  {(activeFriend?.displayName || activeConvo?.friendName || '??').slice(0, 2).toUpperCase()}
-                </div>
+                <DefaultAvatar size="w-10 h-10" className="rounded-lg" />
               )}
               <div>
                 <h3 className="font-medium text-white">
@@ -782,7 +778,7 @@ export default function NotificationsPage() {
               Choose a conversation from the list or start a new one with a friend.
             </p>
             <Link
-              to="/social"
+              to="/friends"
               className="inline-flex items-center gap-2 px-4 py-2 bg-lol-gold hover:bg-lol-gold-light text-lol-dark font-medium rounded-lg transition-colors"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

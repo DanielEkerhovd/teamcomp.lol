@@ -51,6 +51,19 @@ export interface PendingTeamInvite {
   };
 }
 
+export interface PendingOwnershipTransfer {
+  requestId: string;
+  teamId: string;
+  teamName: string;
+  createdAt: string;
+  expiresAt: string;
+  fromUser: {
+    id: string;
+    displayName: string;
+    avatarUrl: string | null;
+  };
+}
+
 export interface SentTeamInvite {
   inviteId: string;
   role: 'admin' | 'player' | 'viewer';
@@ -287,6 +300,94 @@ export const teamMembershipService = {
   },
 
   /**
+   * Request ownership transfer to another member (owner only).
+   * Creates a pending request that the target must accept.
+   */
+  async requestOwnershipTransfer(teamId: string, toUserId: string): Promise<{ success: boolean; error?: string; requestId?: string }> {
+    if (!supabase) return { success: false, error: 'Unable to connect. Please check your internet connection.' };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.rpc as any)('request_ownership_transfer', {
+      p_team_id: teamId,
+      p_to_user_id: toUserId,
+    });
+
+    if (error) {
+      return { success: false, error: 'Could not send transfer request. Please try again.' };
+    }
+
+    return data;
+  },
+
+  /**
+   * Respond to an ownership transfer request (accept or decline)
+   */
+  async respondToOwnershipTransfer(
+    requestId: string,
+    accept: boolean
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    status?: 'accepted' | 'declined';
+    teamId?: string;
+    teamName?: string;
+    conflict?: 'free_tier_team_limit';
+    existingTeamId?: string;
+    existingTeamName?: string;
+    transferTeamId?: string;
+    transferTeamName?: string;
+  }> {
+    if (!supabase) return { success: false, error: 'Unable to connect. Please check your internet connection.' };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.rpc as any)('respond_to_ownership_transfer', {
+      p_request_id: requestId,
+      p_accept: accept,
+    });
+
+    if (error) {
+      return { success: false, error: 'Could not respond to transfer request. Please try again.' };
+    }
+
+    return data;
+  },
+
+  /**
+   * Cancel a pending ownership transfer request (owner only)
+   */
+  async cancelOwnershipTransfer(requestId: string): Promise<{ success: boolean; error?: string }> {
+    if (!supabase) return { success: false, error: 'Unable to connect. Please check your internet connection.' };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.rpc as any)('cancel_ownership_transfer', {
+      p_request_id: requestId,
+    });
+
+    if (error) {
+      return { success: false, error: 'Could not cancel transfer request. Please try again.' };
+    }
+
+    return data;
+  },
+
+  /**
+   * Get pending ownership transfer requests for the current user (as receiver)
+   */
+  async getPendingOwnershipTransfers(): Promise<PendingOwnershipTransfer[]> {
+    if (!supabase) return [];
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.rpc as any)('get_pending_ownership_transfers');
+
+    if (error) {
+      console.error('Error fetching pending ownership transfers:', error);
+      return [];
+    }
+
+    return data || [];
+  },
+
+  /**
    * Assign a player slot to a team member
    */
   async assignPlayerSlot(
@@ -343,6 +444,9 @@ export const teamMembershipService = {
     joinedAt: string;
     ownerName: string;
     ownerAvatar: string | null;
+    hasTeamPlan: boolean;
+    teamPlanStatus: string | null;
+    teamContentPermission: 'admins' | 'players' | 'all';
   }>> {
     if (!supabase) return [];
 

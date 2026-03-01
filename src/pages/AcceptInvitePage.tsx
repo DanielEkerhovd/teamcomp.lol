@@ -5,6 +5,7 @@ import { InviteDetails } from "../types/database";
 import { Card, Button } from "../components/ui";
 import Modal from "../components/ui/Modal";
 import { useAuthStore } from "../stores/useAuthStore";
+import { useMyTeamStore } from "../stores/useMyTeamStore";
 
 interface FreeTierConflict {
   existingTeamId: string;
@@ -84,6 +85,7 @@ export default function AcceptInvitePage() {
       }
 
       setSuccess(true);
+      await useMyTeamStore.getState().loadMemberships();
       // Redirect to team page after a short delay
       setTimeout(() => {
         navigate("/my-teams");
@@ -132,6 +134,7 @@ export default function AcceptInvitePage() {
 
       setFreeTierConflict(null);
       setSuccess(true);
+      await useMyTeamStore.getState().loadMemberships();
       setTimeout(() => {
         navigate("/my-teams");
       }, 2000);

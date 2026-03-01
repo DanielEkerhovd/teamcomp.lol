@@ -12,6 +12,11 @@ interface SettingsState {
   hasCompletedOnboarding: boolean;
   completeOnboarding: () => void;
   resetOnboarding: () => void;
+
+  // Team onboarding state
+  hasCompletedTeamOnboarding: boolean;
+  completeTeamOnboarding: () => void;
+  resetTeamOnboarding: () => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -24,6 +29,10 @@ export const useSettingsStore = create<SettingsState>()(
         hasCompletedOnboarding: false,
         completeOnboarding: () => set({ hasCompletedOnboarding: true }),
         resetOnboarding: () => set({ hasCompletedOnboarding: false }),
+
+        hasCompletedTeamOnboarding: false,
+        completeTeamOnboarding: () => set({ hasCompletedTeamOnboarding: true }),
+        resetTeamOnboarding: () => set({ hasCompletedTeamOnboarding: false }),
       }),
       {
         storeKey: 'settings',
@@ -32,11 +41,13 @@ export const useSettingsStore = create<SettingsState>()(
         selectSyncData: (state) => ({
           defaultRegion: state.defaultRegion,
           hasCompletedOnboarding: state.hasCompletedOnboarding,
+          hasCompletedTeamOnboarding: state.hasCompletedTeamOnboarding,
         }),
         transformForCloud: (data, userId) => ({
           user_id: userId,
           default_region: data.defaultRegion,
           has_completed_onboarding: data.hasCompletedOnboarding,
+          has_completed_team_onboarding: data.hasCompletedTeamOnboarding,
         }),
       }
     ),

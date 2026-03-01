@@ -835,6 +835,7 @@ export default function LiveDraftLobbyModal({
                               src={friend.avatarUrl}
                               alt=""
                               className="w-6 h-6 rounded-full object-cover shrink-0"
+                              referrerPolicy="no-referrer"
                             />
                           ) : (
                             <div className="w-6 h-6 rounded-full bg-lol-surface flex items-center justify-center shrink-0">
@@ -981,7 +982,7 @@ function TeamCard({
           {/* Captain Info */}
           <div className="flex items-center gap-2 px-4 min-h-20 rounded-lg bg-black/20 border border-white/10">
             {captainAvatarUrl ? (
-              <img src={captainAvatarUrl} alt="" className="w-8 h-8 rounded-full" />
+              <img src={captainAvatarUrl} alt="" className="w-8 h-8 rounded-full object-cover" referrerPolicy="no-referrer" />
             ) : (
               <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
                 side === 'blue' ? 'bg-blue-500/20' : side === 'red' ? 'bg-red-500/20' : 'bg-lol-gold/20'

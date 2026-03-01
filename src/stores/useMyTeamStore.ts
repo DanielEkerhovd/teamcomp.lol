@@ -24,6 +24,14 @@ export const getMaxTeams = (): number => {
   return profile?.maxTeams ?? 1; // Authenticated: use tier limit
 };
 
+// Get total team count (owned + non-paid memberships) for limit checks
+// Paid team memberships don't count toward the user's team limit
+export const getTotalTeamCount = (): number => {
+  const state = useMyTeamStore.getState();
+  const nonPaidMemberships = state.memberships.filter(m => !m.hasTeamPlan);
+  return state.teams.length + nonPaidMemberships.length;
+};
+
 // Permissions for a specific team
 export interface TeamPermissions {
   canView: boolean;
@@ -43,6 +51,23 @@ export interface TeamOperationResult {
   team?: Team;
   error?: 'duplicate_name' | 'max_teams_reached';
 }
+
+// Check if a team can be deleted (teams with active plans cannot)
+export const canDeleteTeam = (teamId: string): { allowed: boolean; hasActivePlan: boolean; planStatus: string | null } => {
+  const state = useMyTeamStore.getState();
+  const team = state.teams.find(t => t.id === teamId);
+  if (!team) return { allowed: true, hasActivePlan: false, planStatus: null };
+
+  // Teams with active team plans cannot be hard-deleted
+  // The team plan must be canceled first (or deletion schedules cancellation at period end)
+  const dbTeam = team as Team & { hasTeamPlan?: boolean; teamPlanStatus?: string | null };
+  const hasActivePlan = dbTeam.hasTeamPlan === true && dbTeam.teamPlanStatus === 'active';
+  return {
+    allowed: !hasActivePlan,
+    hasActivePlan,
+    planStatus: dbTeam.teamPlanStatus ?? null,
+  };
+};
 
 // Helper to check if a team name is taken (case-insensitive)
 const isTeamNameTaken = (teams: Team[], name: string, excludeTeamId?: string): boolean => {
@@ -219,7 +244,8 @@ export const useMyTeamStore = create<MyTeamState>()(
       addTeam: (name: string): TeamOperationResult => {
         const state = get();
         const maxTeams = getMaxTeams();
-        if (state.teams.length >= maxTeams) {
+        const totalTeams = getTotalTeamCount();
+        if (totalTeams >= maxTeams) {
           return { success: false, error: 'max_teams_reached' };
         }
         if (isTeamNameTaken(state.teams, name)) {

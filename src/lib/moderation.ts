@@ -3,6 +3,7 @@ import { supabase } from './supabase';
 export interface ModerationResult {
   flagged: boolean;
   categories?: string[];
+  serviceError?: string;
 }
 
 export interface ModerationResultWithViolation extends ModerationResult {
@@ -17,7 +18,8 @@ export type ModerationContext =
   | 'display_name'
   | 'chat_message'
   | 'live_draft_chat'
-  | 'live_draft_session';
+  | 'live_draft_session'
+  | 'avatar_upload';
 
 /**
  * Check text content for inappropriate material via the moderation edge function.
@@ -129,4 +131,69 @@ export function getViolationWarning(result: ModerationResultWithViolation): stri
 
 /** Standard user-facing error message when content is flagged */
 export const MODERATION_ERROR_MESSAGE =
-  'This text contains inappropriate content. Please revise it.';
+  'This content contains inappropriate material. Please revise it.';
+
+/**
+ * Check an image (base64 data URI) for inappropriate content via the moderation edge function.
+ * Returns a serviceError when the moderation service is unreachable.
+ */
+export async function checkImageModeration(base64: string): Promise<ModerationResult> {
+  if (!supabase) {
+    return { flagged: false, serviceError: 'Moderation service is not configured.' };
+  }
+
+  try {
+    const { data, error } = await supabase.functions.invoke('moderate-image', {
+      body: { image_base64: base64 },
+    });
+
+    if (error) {
+      console.error('Image moderation check failed:', error);
+      return { flagged: false, serviceError: 'Image moderation is currently unavailable. Please try again later.' };
+    }
+
+    return {
+      flagged: data?.flagged ?? false,
+      categories: data?.categories,
+    };
+  } catch (err) {
+    console.error('Image moderation check error:', err);
+    return { flagged: false, serviceError: 'Image moderation is currently unavailable. Please try again later.' };
+  }
+}
+
+/**
+ * Check image moderation AND record a violation if flagged.
+ * Feeds into the existing auto-ban system (5 violations/hr = 24hr ban).
+ */
+export async function checkImageModerationAndRecord(
+  base64: string
+): Promise<ModerationResultWithViolation> {
+  const result = await checkImageModeration(base64);
+
+  if (!result.flagged || !supabase) {
+    return result;
+  }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data } = await (supabase as any).rpc('record_moderation_violation', {
+      p_context: 'avatar_upload',
+      p_content: '[image]',
+      p_categories: result.categories || [],
+    });
+
+    if (data) {
+      return {
+        ...result,
+        violationCount: data.violation_count,
+        violationThreshold: data.threshold,
+        autoBanned: data.banned,
+      };
+    }
+  } catch (err) {
+    console.error('Failed to record image moderation violation:', err);
+  }
+
+  return result;
+}
