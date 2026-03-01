@@ -14,7 +14,7 @@ jobs:
           -d "{
             \"embeds\": [{
               \"title\": \"🟢 New Commit\",
-              \"description\": \"**${{ github.event.head_commit.message }}\",
+              \"description\": \"${{ github.event.head_commit.message }}\",
               \"url\": \"${{ github.event.head_commit.url }}\",
               \"color\": 3066993,
               \"fields\": [
