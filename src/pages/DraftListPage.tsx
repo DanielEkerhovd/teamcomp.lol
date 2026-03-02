@@ -10,7 +10,8 @@ type DraftFilter = 'all' | 'personal' | string; // string = teamId for team-spec
 
 export default function DraftListPage() {
   const navigate = useNavigate();
-  const { sessions, createSession, deleteSession, toggleFavorite, togglePlanned } = useDraftStore();
+  const { sessions, createSession, deleteSession, toggleFavorite, togglePlanned, updateSession, duplicateSession } = useDraftStore();
+  const { getMyPermissions } = useMyTeamStore();
   const { teams: enemyTeams, getTeam } = useEnemyTeamStore();
   const { teams: myTeams, selectedTeamId: myTeamId, memberships } = useMyTeamStore();
   const { maxDrafts } = useTierLimits();
@@ -28,7 +29,7 @@ export default function DraftListPage() {
     return ids;
   }, [myTeams, memberships]);
 
-  // Split sessions into personal (counts toward limit) and team (unlimited)
+  // Split sessions into personal (counts toward limit) and team (separate limit)
   const personalSessions = useMemo(
     () => sessions.filter(s => !s.myTeamId || !paidTeamIds.has(s.myTeamId)),
     [sessions, paidTeamIds]
@@ -36,20 +37,18 @@ export default function DraftListPage() {
 
   const isAtPersonalDraftLimit = personalSessions.length >= maxDrafts;
 
-  // Get teams that have drafts (for filter tabs)
-  const teamsWithDrafts = useMemo(() => {
-    const teamIds = new Set<string>();
-    sessions.forEach(s => {
-      if (s.myTeamId && paidTeamIds.has(s.myTeamId)) {
-        teamIds.add(s.myTeamId);
-      }
+  // Get all paid teams for filter tabs (show all, not just ones with drafts)
+  const paidTeamTabs = useMemo(() => {
+    const tabs: { id: string; name: string; maxDrafts: number }[] = [];
+    myTeams.forEach(t => {
+      const dbTeam = t as typeof t & { hasTeamPlan?: boolean; teamMaxDrafts?: number };
+      if (dbTeam.hasTeamPlan) tabs.push({ id: t.id, name: t.name, maxDrafts: dbTeam.teamMaxDrafts || 3000 });
     });
-    return Array.from(teamIds).map(id => {
-      const ownedTeam = myTeams.find(t => t.id === id);
-      const membership = memberships.find(m => m.teamId === id);
-      return { id, name: ownedTeam?.name || membership?.teamName || 'Team' };
+    memberships.forEach(m => {
+      if (m.hasTeamPlan) tabs.push({ id: m.teamId, name: m.teamName, maxDrafts: 3000 });
     });
-  }, [sessions, paidTeamIds, myTeams, memberships]);
+    return tabs;
+  }, [myTeams, memberships]);
 
   const [draftFilter, setDraftFilter] = useState<DraftFilter>('all');
   const [isNewSessionModalOpen, setIsNewSessionModalOpen] = useState(false);
@@ -60,8 +59,10 @@ export default function DraftListPage() {
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [showPlannedOnly, setShowPlannedOnly] = useState(false);
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
+  const [moveCopySession, setMoveCopySession] = useState<string | null>(null);
+  const [moveCopyTarget, setMoveCopyTarget] = useState<string | null>(null); // null = personal, string = teamId
 
-  // When filtered to a paid team, drafts are unlimited (unless team is banned)
+  // When filtered to a paid team, check team draft limit (unless team is banned)
   const isCreatingTeamDraft = draftFilter !== 'all' && draftFilter !== 'personal' && paidTeamIds.has(draftFilter);
   const isFilteredTeamBanned = (() => {
     if (!isCreatingTeamDraft) return false;
@@ -71,7 +72,14 @@ export default function DraftListPage() {
     if ((membership as any)?.bannedAt) return true;
     return false;
   })();
-  const canCreateDraft = (isCreatingTeamDraft && !isFilteredTeamBanned) || !isAtPersonalDraftLimit;
+  const isAtTeamDraftLimit = (() => {
+    if (!isCreatingTeamDraft) return false;
+    const teamTab = paidTeamTabs.find(t => t.id === draftFilter);
+    const teamMaxDrafts = teamTab?.maxDrafts || 3000;
+    const teamDraftCount = sessions.filter(s => s.myTeamId === draftFilter).length;
+    return teamDraftCount >= teamMaxDrafts;
+  })();
+  const canCreateDraft = (isCreatingTeamDraft && !isFilteredTeamBanned && !isAtTeamDraftLimit) || !isAtPersonalDraftLimit;
 
   const handleCreateSession = () => {
     if (newSessionName.trim() && canCreateDraft) {
@@ -139,15 +147,50 @@ export default function DraftListPage() {
   const counterText = useMemo(() => {
     if (draftFilter === 'all' || draftFilter === 'personal') {
       const teamDraftCount = sessions.length - personalSessions.length;
-      const parts = [`${personalSessions.length}/${maxDrafts} personal`];
+      const displayMax = maxDrafts >= 9999 ? '\u221e' : maxDrafts;
+      const parts = [`${personalSessions.length}/${displayMax} personal`];
       if (teamDraftCount > 0) parts.push(`${teamDraftCount} team`);
       return parts.join(', ');
     }
     const teamSessions = sessions.filter(s => s.myTeamId === draftFilter);
-    return `${teamSessions.length} team drafts (unlimited)`;
-  }, [draftFilter, sessions, personalSessions, maxDrafts]);
+    const teamTab = paidTeamTabs.find(t => t.id === draftFilter);
+    const teamMaxDrafts = teamTab?.maxDrafts || 3000;
+    return `${teamSessions.length}/${teamMaxDrafts} team drafts`;
+  }, [draftFilter, sessions, personalSessions, maxDrafts, paidTeamTabs]);
 
-  const showFilterTabs = teamsWithDrafts.length > 0 || paidTeamIds.size > 0;
+  // Teams the user can move/copy drafts to
+  const moveCopyDestinations = useMemo(() => {
+    const destinations: { id: string; name: string }[] = [];
+    myTeams.forEach((t) => {
+      const dbTeam = t as typeof t & { hasTeamPlan?: boolean };
+      if (dbTeam.hasTeamPlan) destinations.push({ id: t.id, name: t.name });
+    });
+    memberships.forEach((m) => {
+      if (m.hasTeamPlan && getMyPermissions(m.teamId).canManageDrafts) {
+        destinations.push({ id: m.teamId, name: m.teamName });
+      }
+    });
+    return destinations;
+  }, [myTeams, memberships, getMyPermissions]);
+
+  const moveCopySourceSession = moveCopySession ? sessions.find((s) => s.id === moveCopySession) : null;
+  const moveCopySourceIsTeam = moveCopySourceSession?.myTeamId && paidTeamIds.has(moveCopySourceSession.myTeamId);
+
+  const handleMoveDraft = () => {
+    if (!moveCopySession) return;
+    updateSession(moveCopySession, { myTeamId: moveCopyTarget });
+    setMoveCopySession(null);
+    setMoveCopyTarget(null);
+  };
+
+  const handleCopyDraft = () => {
+    if (!moveCopySession) return;
+    duplicateSession(moveCopySession, moveCopyTarget);
+    setMoveCopySession(null);
+    setMoveCopyTarget(null);
+  };
+
+  const showFilterTabs = paidTeamTabs.length > 0;
 
   return (
     <div className="space-y-8">
@@ -175,7 +218,7 @@ export default function DraftListPage() {
               {filter === 'all' ? 'All' : `Personal (${personalSessions.length})`}
             </button>
           ))}
-          {teamsWithDrafts.map(team => {
+          {paidTeamTabs.map(team => {
             const count = sessions.filter(s => s.myTeamId === team.id).length;
             return (
               <button
@@ -393,6 +436,30 @@ export default function DraftListPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
                     </svg>
                   </button>
+                  {(moveCopyDestinations.length > 0 || moveCopySourceIsTeam) && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setMoveCopySession(session.id);
+                        // Pre-select first available destination
+                        const sessionIsTeam = session.myTeamId && paidTeamIds.has(session.myTeamId);
+                        if (sessionIsTeam) {
+                          // Source is team → default to personal
+                          setMoveCopyTarget(null);
+                        } else {
+                          // Source is personal → default to first team
+                          const firstTeam = moveCopyDestinations[0];
+                          setMoveCopyTarget(firstTeam?.id ?? null);
+                        }
+                      }}
+                      className="p-1.5 rounded-lg text-gray-500 hover:text-blue-400 hover:bg-blue-500/10 opacity-0 group-hover:opacity-100 transition-all"
+                      title="Move or copy draft"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                      </svg>
+                    </button>
+                  )}
                   <button
                     onClick={(e) => handleDeleteSession(e, session.id)}
                     className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"
@@ -543,6 +610,75 @@ export default function DraftListPage() {
         message="Are you sure you want to delete this draft session?"
         confirmText="Delete"
       />
+
+      {/* Move/Copy modal */}
+      <Modal
+        isOpen={!!moveCopySession}
+        onClose={() => { setMoveCopySession(null); setMoveCopyTarget(null); }}
+        title={`Move or Copy Draft`}
+      >
+        {moveCopySourceSession && (
+          <div className="space-y-5">
+            <p className="text-sm text-gray-400">
+              Choose a destination for <span className="text-white font-medium">{moveCopySourceSession.name}</span>
+            </p>
+
+            <div>
+              <label className="text-sm font-medium text-gray-300 block mb-3">Destination</label>
+              <div className="flex flex-wrap gap-2">
+                {/* Personal option — only show if source is a team draft */}
+                {moveCopySourceIsTeam && (
+                  <button
+                    onClick={() => setMoveCopyTarget(null)}
+                    className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
+                      moveCopyTarget === null
+                        ? 'bg-lol-gold/20 border-2 border-lol-gold/50 text-lol-gold'
+                        : 'bg-lol-dark border border-lol-border text-gray-400 hover:text-white hover:border-lol-border-light'
+                    }`}
+                  >
+                    Personal
+                  </button>
+                )}
+                {/* Team options — only show teams that aren't the source */}
+                {moveCopyDestinations
+                  .filter((d) => d.id !== moveCopySourceSession.myTeamId)
+                  .map((dest) => (
+                    <button
+                      key={dest.id}
+                      onClick={() => setMoveCopyTarget(dest.id)}
+                      className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
+                        moveCopyTarget === dest.id
+                          ? 'bg-blue-500/20 border-2 border-blue-500/50 text-blue-400'
+                          : 'bg-lol-dark border border-lol-border text-gray-400 hover:text-white hover:border-lol-border-light'
+                      }`}
+                    >
+                      {dest.name}
+                    </button>
+                  ))}
+              </div>
+            </div>
+
+            <div className="flex gap-3 justify-end pt-2">
+              <Button variant="ghost" onClick={() => { setMoveCopySession(null); setMoveCopyTarget(null); }}>
+                Cancel
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={handleCopyDraft}
+                disabled={moveCopyTarget === null && !moveCopySourceIsTeam}
+              >
+                Copy
+              </Button>
+              <Button
+                onClick={handleMoveDraft}
+                disabled={moveCopyTarget === null && !moveCopySourceIsTeam}
+              >
+                Move
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

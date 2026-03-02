@@ -88,6 +88,50 @@ export interface Champion {
   tags: string[]; // Champion classes from Data Dragon (Fighter, Mage, Tank, etc.)
 }
 
+export interface ChampionStats {
+  hp: number; hpperlevel: number;
+  mp: number; mpperlevel: number;
+  movespeed: number;
+  armor: number; armorperlevel: number;
+  spellblock: number; spellblockperlevel: number;
+  attackrange: number;
+  hpregen: number; hpregenperlevel: number;
+  mpregen: number; mpregenperlevel: number;
+  crit: number; critperlevel: number;
+  attackdamage: number; attackdamageperlevel: number;
+  attackspeedperlevel: number; attackspeed: number;
+}
+
+export interface StatChange {
+  stat: string;
+  label: string;
+  oldValue: number;
+  newValue: number;
+  direction: 'buff' | 'nerf';
+}
+
+export interface ChampionPatchChange {
+  championId: string;
+  championName: string;
+  isNew: boolean;
+  changes: StatChange[];
+  spellChanges: SpellChange[];
+}
+
+export interface SpellValueChange {
+  field: string;       // "Cooldown", "Cost", "Range"
+  oldValue: string;    // "14/12/10/8/6"
+  newValue: string;    // "12/10/8/6/4"
+  direction: 'buff' | 'nerf' | 'changed';
+}
+
+export interface SpellChange {
+  spellKey: string;    // "Q", "W", "E", "R", or "Passive"
+  spellName: string;
+  changes: SpellValueChange[];
+}
+
+
 export type Priority = 'high' | 'medium' | 'low';
 
 export type ChampionTier = 'S' | 'A' | 'B' | 'C';

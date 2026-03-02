@@ -1,5 +1,6 @@
 import { supabase, isSupabaseConfigured } from './supabase';
 import { useAuthStore } from '../stores/useAuthStore';
+import { generateId } from '../types';
 
 export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
 
@@ -196,12 +197,13 @@ export const syncManager = {
     const { debounceMs = 3000, transformItem, deleteOrphans = true, deleteFilter, onAfterSync } = options;
 
     // Store pending sync data for potential flush on page unload
+    // IMPORTANT: include onAfterSync so flushPendingSyncs can trigger player syncs
     pendingSyncs.set(storeKey, {
       type: 'array',
       storeKey,
       tableName,
       data: items,
-      options: { transformItem, deleteOrphans, deleteFilter },
+      options: { transformItem, deleteOrphans, deleteFilter, onAfterSync },
     });
 
     const existingTimer = debounceTimers.get(storeKey);
@@ -390,30 +392,58 @@ export const syncManager = {
   async flushPendingSyncs(): Promise<void> {
     if (!this.isAvailable() || !supabase) return;
 
-    const promises: Promise<void>[] = [];
-
     // Clear all debounce timers
     for (const [key, timer] of debounceTimers) {
       clearTimeout(timer);
       debounceTimers.delete(key);
     }
 
-    // Execute all pending syncs
-    for (const [storeKey, pending] of pendingSyncs) {
+    // Phase 1: Execute parent syncs (teams, sessions) which may trigger onAfterSync
+    // that adds player syncs to pendingSyncs
+    const phase1Snapshot = Array.from(pendingSyncs);
+    const phase1Promises: Promise<void>[] = [];
+
+    for (const [storeKey, pending] of phase1Snapshot) {
       if (pending.type === 'single') {
         const opts = pending.options as { transform?: (data: unknown, userId: string) => unknown; upsertKey?: string };
-        promises.push(this._executeSingleSync(storeKey, pending.tableName, pending.data, opts));
+        phase1Promises.push(this._executeSingleSync(storeKey, pending.tableName, pending.data, opts));
       } else if (pending.type === 'array') {
-        const opts = pending.options as { transformItem?: (item: { id: string }, userId: string, index: number) => unknown; deleteOrphans?: boolean };
-        promises.push(this._executeArraySync(storeKey, pending.tableName, pending.data as { id: string }[], opts));
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const opts = pending.options as { transformItem?: (item: { id: string }, userId: string, index: number) => unknown; deleteOrphans?: boolean; deleteFilter?: Record<string, unknown>; onAfterSync?: (data: any, storeKey: string, debounceMs: number) => void };
+        // Pass onAfterSync with debounceMs=0 so it triggers immediate player syncs
+        phase1Promises.push(this._executeArraySync(storeKey, pending.tableName, pending.data as { id: string }[], { ...opts, debounceMs: 0 }));
       } else if (pending.type === 'players') {
         const opts = pending.options as { teamId: string };
-        promises.push(this._executePlayersSync(storeKey, pending.tableName as 'players' | 'enemy_players', opts.teamId, pending.data as Parameters<typeof this.syncPlayersToCloud>[3]));
+        phase1Promises.push(this._executePlayersSync(storeKey, pending.tableName as 'players' | 'enemy_players', opts.teamId, pending.data as Parameters<typeof this.syncPlayersToCloud>[3]));
       }
     }
 
-    // Wait for all syncs to complete
-    await Promise.allSettled(promises);
+    await Promise.allSettled(phase1Promises);
+
+    // Phase 2: Flush any NEW pending syncs added by onAfterSync (e.g., player syncs)
+    // Clear any new debounce timers that were set by onAfterSync
+    for (const [key, timer] of debounceTimers) {
+      clearTimeout(timer);
+      debounceTimers.delete(key);
+    }
+
+    const phase2Entries = Array.from(pendingSyncs);
+    if (phase2Entries.length > 0) {
+      const phase2Promises: Promise<void>[] = [];
+      for (const [storeKey, pending] of phase2Entries) {
+        if (pending.type === 'players') {
+          const opts = pending.options as { teamId: string };
+          phase2Promises.push(this._executePlayersSync(storeKey, pending.tableName as 'players' | 'enemy_players', opts.teamId, pending.data as Parameters<typeof this.syncPlayersToCloud>[3]));
+        } else if (pending.type === 'single') {
+          const opts = pending.options as { transform?: (data: unknown, userId: string) => unknown; upsertKey?: string };
+          phase2Promises.push(this._executeSingleSync(storeKey, pending.tableName, pending.data, opts));
+        } else if (pending.type === 'array') {
+          const opts = pending.options as { transformItem?: (item: { id: string }, userId: string, index: number) => unknown; deleteOrphans?: boolean; deleteFilter?: Record<string, unknown> };
+          phase2Promises.push(this._executeArraySync(storeKey, pending.tableName, pending.data as { id: string }[], opts));
+        }
+      }
+      await Promise.allSettled(phase2Promises);
+    }
   },
 
   /**
@@ -507,7 +537,7 @@ export const syncManager = {
       useMyTeamStore.setState({ teams: myTeams });
     }
     if (myTeams.length > 0) {
-      await this.syncArrayToCloudImmediate('my-teams', 'my_teams', myTeams, {
+      const myTeamsSynced = await this.syncArrayToCloudImmediate('my-teams', 'my_teams', myTeams, {
         transformItem: (team, userId, index) => ({
           id: team.id,
           user_id: userId,
@@ -518,17 +548,19 @@ export const syncManager = {
         }),
       });
 
-      // Sync players for each team
-      const { findPool } = usePlayerPoolStore.getState();
-      for (const team of myTeams) {
-        const enrichedPlayers = team.players.map((player) => {
-          const pool = player.summonerName ? findPool(player.summonerName, player.role) : null;
-          return {
-            ...player,
-            championGroups: pool?.championGroups || player.championGroups || [],
-          };
-        });
-        await this.syncPlayersToCloudImmediate('players', team.id, enrichedPlayers);
+      // Only sync players if parent teams were synced successfully (RLS requires parent to exist)
+      if (myTeamsSynced) {
+        const { findPool } = usePlayerPoolStore.getState();
+        for (const team of myTeams) {
+          const enrichedPlayers = team.players.map((player) => {
+            const pool = player.summonerName ? findPool(player.summonerName, player.role) : null;
+            return {
+              ...player,
+              championGroups: pool?.championGroups || player.championGroups || [],
+            };
+          });
+          await this.syncPlayersToCloudImmediate('players', team.id, enrichedPlayers);
+        }
       }
     }
 
@@ -543,7 +575,7 @@ export const syncManager = {
     }
 
     if (enemyTeams.length > 0) {
-      await this.syncArrayToCloudImmediate('enemy-teams', 'enemy_teams', enemyTeams, {
+      const enemyTeamsSynced = await this.syncArrayToCloudImmediate('enemy-teams', 'enemy_teams', enemyTeams, {
         transformItem: (team, userId, index) => ({
           id: team.id,
           user_id: userId,
@@ -553,9 +585,11 @@ export const syncManager = {
         }),
       });
 
-      // Sync players for each enemy team
-      for (const team of enemyTeams) {
-        await this.syncPlayersToCloudImmediate('enemy_players', team.id, team.players);
+      // Only sync players if parent teams were synced successfully (RLS requires parent to exist)
+      if (enemyTeamsSynced) {
+        for (const team of enemyTeams) {
+          await this.syncPlayersToCloudImmediate('enemy_players', team.id, team.players);
+        }
       }
     }
 
@@ -684,11 +718,11 @@ export const syncManager = {
     options: {
       transformItem?: (item: T, userId: string, index: number) => unknown;
     } = {}
-  ): Promise<void> {
-    if (!this.isAvailable() || !supabase) return;
+  ): Promise<boolean> {
+    if (!this.isAvailable() || !supabase) return false;
 
     const { user } = useAuthStore.getState();
-    if (!user) return;
+    if (!user) return false;
 
     const { transformItem } = options;
 
@@ -709,6 +743,7 @@ export const syncManager = {
 
         if (upsertError) throw upsertError;
       }
+      return true;
     } catch (error) {
       // Silently handle lock timeout errors during initial sync
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -717,6 +752,7 @@ export const syncManager = {
       } else {
         console.error(`Immediate sync error for ${storeKey}:`, error);
       }
+      return false;
     }
   },
 
@@ -807,6 +843,16 @@ export const syncManager = {
     const { user } = useAuthStore.getState();
     if (!user) return;
 
+    // Flush any pending debounced syncs (e.g. deletions) BEFORE loading from cloud.
+    // Without this, a deleted item might still exist in the cloud and get merged back.
+    if (this.hasPendingSyncs()) {
+      try {
+        await this.flushPendingSyncs();
+      } catch (err) {
+        console.warn('Failed to flush pending syncs before cloud load:', err);
+      }
+    }
+
     _isSyncingFromCloud = true;
     try {
       // Import stores dynamically
@@ -859,6 +905,7 @@ export const syncManager = {
               updatedAt: new Date(team.updated_at).getTime(),
               hasTeamPlan: team.has_team_plan || false,
               teamPlanStatus: team.team_plan_status || null,
+              teamMaxDrafts: team.team_max_drafts || 0,
               permDrafts: team.perm_drafts || 'admins',
               permEnemyTeams: team.perm_enemy_teams || 'admins',
               permPlayers: team.perm_players || 'admins',
@@ -869,13 +916,43 @@ export const syncManager = {
           })
         );
 
-        // Check if the previously selected team still exists in the loaded data
-        const selectedTeamExists = teamsWithPlayers.some(t => t.id === currentSelectedTeamId);
-        const newSelectedTeamId = selectedTeamExists ? currentSelectedTeamId : (teamsWithPlayers[0]?.id || '');
+        // Merge with local data: keep local version if it's newer or equal (unsaved changes).
+        // Use a 10s grace period because team rows sync before players — cloud may have
+        // a fresh team timestamp but stale player data during the sync window.
+        const MERGE_GRACE_MS = 10_000;
+        const localMyTeams = useMyTeamStore.getState().teams;
+        const localMyTeamMap = new Map(localMyTeams.map(t => [t.id, t]));
+        const cloudMyTeamIds = new Set(teamsWithPlayers.map(t => t.id));
 
-        // Reset the store with cloud data, preserving selection if valid
+        const mergedMyTeams = teamsWithPlayers.map(cloudTeam => {
+          const localTeam = localMyTeamMap.get(cloudTeam.id);
+          if (!localTeam) return cloudTeam;
+
+          if (localTeam.updatedAt >= cloudTeam.updatedAt - MERGE_GRACE_MS) {
+            return localTeam;
+          }
+
+          // Safety: never overwrite local data that has more filled players
+          const localFilledCount = localTeam.players.filter(p => p.summonerName?.trim()).length;
+          const cloudFilledCount = cloudTeam.players.filter((p: { summonerName?: string }) => p.summonerName?.trim()).length;
+          if (localFilledCount > cloudFilledCount) {
+            console.warn(`[syncManager] Refusing to overwrite local my team "${localTeam.name}" (${localFilledCount} players) with cloud version (${cloudFilledCount} players)`);
+            return localTeam;
+          }
+
+          return cloudTeam;
+        });
+
+        // Include any local-only teams (created but not yet synced to cloud)
+        const localOnlyMyTeams = localMyTeams.filter(t => !cloudMyTeamIds.has(t.id));
+
+        // Check if the previously selected team still exists in the merged data
+        const allMergedTeams = [...mergedMyTeams, ...localOnlyMyTeams];
+        const selectedTeamExists = allMergedTeams.some(t => t.id === currentSelectedTeamId);
+        const newSelectedTeamId = selectedTeamExists ? currentSelectedTeamId : (allMergedTeams[0]?.id || '');
+
         useMyTeamStore.setState({
-          teams: teamsWithPlayers,
+          teams: allMergedTeams,
           selectedTeamId: newSelectedTeamId,
         });
       } else {
@@ -908,12 +985,13 @@ export const syncManager = {
         }
       }
 
-      // Load enemy teams with players (exclude archived)
+      // Load personal enemy teams with players (exclude archived, exclude team-linked)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data: enemyTeams } = await (supabase as any)
         .from('enemy_teams')
         .select('*')
         .eq('user_id', user.id)
+        .is('team_id', null)
         .is('archived_at', null)
         .order('sort_order');
 
@@ -948,7 +1026,7 @@ export const syncManager = {
             const filledPlayers = standardRoles.map(role => {
               const existing = mainPlayers.find((p: { role: string }) => p.role === role);
               return existing || {
-                id: Math.random().toString(36).substring(2, 9),
+                id: generateId(),
                 summonerName: '', tagLine: '', role, notes: '', region: 'euw',
                 isSub: false, championPool: [], championGroups: [],
               };
@@ -966,7 +1044,39 @@ export const syncManager = {
           })
         );
 
-        useEnemyTeamStore.setState({ teams: teamsWithPlayers });
+        // Merge with local data: keep local version if it's newer or within grace period.
+        // Use a 10s grace period because team rows sync before players — cloud may have
+        // a fresh team timestamp but stale player data during the sync window.
+        const ENEMY_MERGE_GRACE_MS = 10_000;
+        const localTeams = useEnemyTeamStore.getState().teams;
+        const localTeamMap = new Map(localTeams.map(t => [t.id, t]));
+        const cloudTeamIds = new Set(teamsWithPlayers.map(t => t.id));
+
+        const mergedTeams = teamsWithPlayers.map(cloudTeam => {
+          const localTeam = localTeamMap.get(cloudTeam.id);
+          if (!localTeam) return cloudTeam;
+
+          // Prefer local if timestamps are within the grace period
+          if (localTeam.updatedAt >= cloudTeam.updatedAt - ENEMY_MERGE_GRACE_MS) {
+            return localTeam;
+          }
+
+          // Safety: even if cloud is significantly newer, never overwrite local data
+          // that has MORE filled players (would indicate data loss in cloud)
+          const localFilledCount = localTeam.players.filter(p => p.summonerName?.trim()).length;
+          const cloudFilledCount = cloudTeam.players.filter((p: { summonerName?: string }) => p.summonerName?.trim()).length;
+          if (localFilledCount > cloudFilledCount) {
+            console.warn(`[syncManager] Refusing to overwrite local enemy team "${localTeam.name}" (${localFilledCount} players) with cloud version (${cloudFilledCount} players)`);
+            return localTeam;
+          }
+
+          return cloudTeam;
+        });
+
+        // Include any local-only teams (created but not yet synced to cloud)
+        const localOnlyTeams = localTeams.filter(t => !cloudTeamIds.has(t.id));
+
+        useEnemyTeamStore.setState({ teams: [...mergedTeams, ...localOnlyTeams] });
       } else {
         // Cloud is empty - check if we have local data to preserve
         const localTeams = useEnemyTeamStore.getState().teams;
@@ -983,6 +1093,7 @@ export const syncManager = {
               notes: team.notes,
               is_favorite: team.isFavorite ?? false,
               sort_order: index,
+              updated_at: new Date(team.updatedAt).toISOString(),
             }),
           });
           // Also sync players for each enemy team
@@ -1018,8 +1129,25 @@ export const syncManager = {
           updatedAt: new Date(s.updated_at).getTime(),
         }));
 
+        // Merge with local data: keep local version if it's newer or within grace period
+        const DRAFT_MERGE_GRACE_MS = 10_000;
+        const localSessions = useDraftStore.getState().sessions;
+        const localSessionMap = new Map(localSessions.map(s => [s.id, s]));
+        const cloudSessionIds = new Set(transformedSessions.map((s: { id: string }) => s.id));
+
+        const mergedSessions = transformedSessions.map((cloudSession: { id: string; updatedAt: number }) => {
+          const localSession = localSessionMap.get(cloudSession.id);
+          if (localSession && localSession.updatedAt >= cloudSession.updatedAt - DRAFT_MERGE_GRACE_MS) {
+            return localSession;
+          }
+          return cloudSession;
+        });
+
+        // Include any local-only sessions (created but not yet synced)
+        const localOnlySessions = localSessions.filter(s => !cloudSessionIds.has(s.id));
+
         useDraftStore.setState({
-          sessions: transformedSessions,
+          sessions: [...mergedSessions, ...localOnlySessions],
           currentSessionId: null,
         });
       } else {

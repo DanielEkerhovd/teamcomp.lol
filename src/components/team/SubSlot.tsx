@@ -36,6 +36,7 @@ export default function SubSlot({ player, onPlayerChange, onRemove, readOnly = f
   } = useSortable({
     id: player.id,
     data: { type: 'player', player },
+    disabled: readOnly,
   });
 
   const currentRole = SUB_ROLES.find((r) => r.value === player.role);
@@ -49,8 +50,8 @@ export default function SubSlot({ player, onPlayerChange, onRemove, readOnly = f
           <span className="text-xs text-gray-500 font-medium uppercase tracking-wide">Sub</span>
           <div className="relative" ref={roleRef}>
             <button
-              onClick={() => setIsRoleOpen(!isRoleOpen)}
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-lol-dark border border-lol-border hover:border-gray-500 transition-colors cursor-pointer"
+              onClick={() => !readOnly && setIsRoleOpen(!isRoleOpen)}
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded bg-lol-dark border border-lol-border transition-colors ${readOnly ? 'cursor-default' : 'hover:border-gray-500 cursor-pointer'}`}
             >
               <RoleIcon role={player.role} size="xs" />
               <span className="text-xs text-gray-400">{currentRole?.label}</span>
@@ -81,13 +82,15 @@ export default function SubSlot({ player, onPlayerChange, onRemove, readOnly = f
             )}
           </div>
         </div>
-        <button
-          onClick={onRemove}
-          className="text-xs text-gray-500 hover:text-red-400 transition-colors"
-          title="Remove sub"
-        >
-          ×
-        </button>
+        {!readOnly && (
+          <button
+            onClick={onRemove}
+            className="text-xs text-gray-500 hover:text-red-400 transition-colors"
+            title="Remove sub"
+          >
+            ×
+          </button>
+        )}
       </div>
       <div
         ref={setNodeRef}
@@ -100,6 +103,7 @@ export default function SubSlot({ player, onPlayerChange, onRemove, readOnly = f
           onChange={(updates) => onPlayerChange(player.id, updates)}
           isDragging={isDragging}
           showRole={false}
+          readOnly={readOnly}
           compact
         />
       </div>

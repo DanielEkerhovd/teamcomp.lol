@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useDraftStore } from '../stores/useDraftStore';
 import { useEnemyTeamStore } from '../stores/useEnemyTeamStore';
@@ -95,7 +95,7 @@ export default function DraftDetailPage() {
   } = useDraftStore();
 
   const { teams: enemyTeams, getTeam } = useEnemyTeamStore();
-  const { teams: myTeams, selectedTeamId } = useMyTeamStore();
+  const { teams: myTeams, selectedTeamId, memberships, getMyPermissions } = useMyTeamStore();
   const myTeam = myTeams.find((t) => t.id === selectedTeamId) || myTeams[0];
 
   const [isNewSessionModalOpen, setIsNewSessionModalOpen] = useState(false);
@@ -113,6 +113,29 @@ export default function DraftDetailPage() {
   const currentEnemyTeam = currentSession?.enemyTeamId
     ? getTeam(currentSession.enemyTeamId)
     : null;
+
+  // Detect team drafts and compute edit permissions
+  const paidTeamIds = useMemo(() => {
+    const ids = new Set<string>();
+    myTeams.forEach((t) => {
+      const dbTeam = t as typeof t & { hasTeamPlan?: boolean };
+      if (dbTeam.hasTeamPlan) ids.add(t.id);
+    });
+    memberships.forEach((m) => {
+      if (m.hasTeamPlan) ids.add(m.teamId);
+    });
+    return ids;
+  }, [myTeams, memberships]);
+
+  const isTeamDraft = !!(currentSession?.myTeamId && paidTeamIds.has(currentSession.myTeamId));
+  const teamName = isTeamDraft
+    ? myTeams.find((t) => t.id === currentSession.myTeamId)?.name
+      || memberships.find((m) => m.teamId === currentSession.myTeamId)?.teamName
+      || 'Team'
+    : null;
+  const canEdit = isTeamDraft
+    ? getMyPermissions(currentSession!.myTeamId!).canManageDrafts
+    : true;
 
   // Set current session when component mounts or draftId changes
   useEffect(() => {
@@ -190,28 +213,38 @@ export default function DraftDetailPage() {
         {/* Title & Actions */}
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
-            {isEditingName ? (
-              <input
-                type="text"
-                value={currentSession.name}
-                onChange={(e) => updateSession(currentSession.id, { name: e.target.value })}
-                onBlur={() => setIsEditingName(false)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') setIsEditingName(false);
-                  if (e.key === 'Escape') setIsEditingName(false);
-                }}
-                autoFocus
-                className="text-3xl font-bold text-white bg-transparent border-b-2 border-lol-gold/50 focus:border-lol-gold outline-none w-full pb-1"
-              />
-            ) : (
-              <h1
-                onClick={() => setIsEditingName(true)}
-                className="text-3xl font-bold text-white cursor-pointer hover:text-lol-gold transition-colors truncate"
-                title="Click to edit"
-              >
-                {currentSession.name}
-              </h1>
-            )}
+            <div className="flex items-center gap-3">
+              {isEditingName && canEdit ? (
+                <input
+                  type="text"
+                  value={currentSession.name}
+                  onChange={(e) => updateSession(currentSession.id, { name: e.target.value })}
+                  onBlur={() => setIsEditingName(false)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') setIsEditingName(false);
+                    if (e.key === 'Escape') setIsEditingName(false);
+                  }}
+                  autoFocus
+                  className="text-3xl font-bold text-white bg-transparent border-b-2 border-lol-gold/50 focus:border-lol-gold outline-none w-full pb-1"
+                />
+              ) : (
+                <h1
+                  onClick={() => canEdit && setIsEditingName(true)}
+                  className={`text-3xl font-bold text-white truncate ${canEdit ? 'cursor-pointer hover:text-lol-gold' : ''} transition-colors`}
+                  title={canEdit ? 'Click to edit' : undefined}
+                >
+                  {currentSession.name}
+                </h1>
+              )}
+              {isTeamDraft && (
+                <span className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400 text-xs font-medium">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  {teamName}
+                </span>
+              )}
+            </div>
             {currentEnemyTeam && (
               <p className="text-red-400 mt-1">vs {currentEnemyTeam.name}</p>
             )}
@@ -249,10 +282,20 @@ export default function DraftDetailPage() {
                 </div>
               </button>
             )}
-            <SettingsDropdown onDelete={handleDeleteSession} />
+            {canEdit && <SettingsDropdown onDelete={handleDeleteSession} />}
           </div>
         </div>
       </div>
+
+      {/* Read-only banner for team drafts without edit permission */}
+      {isTeamDraft && !canEdit && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm">
+          <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg>
+          <span>You have view-only access to this team draft. Contact a team admin to get edit permissions.</span>
+        </div>
+      )}
 
       {/* Team VS Display */}
       <TeamVsDisplay
@@ -260,7 +303,7 @@ export default function DraftDetailPage() {
         enemyTeam={currentEnemyTeam || null}
         selectedEnemyTeamId={currentSession.enemyTeamId}
         onSelectEnemyTeam={(teamId) =>
-          updateSession(currentSession.id, { enemyTeamId: teamId })
+          canEdit && updateSession(currentSession.id, { enemyTeamId: teamId })
         }
       />
 
@@ -310,32 +353,37 @@ export default function DraftDetailPage() {
               key={note.id}
               className="relative group w-[calc((100%-3rem)/5)] min-w-36 h-38 bg-lol-dark rounded-xl border border-lol-border/50 p-3 hover:border-lol-border-light transition-all duration-200"
             >
-              <button
-                onClick={() => deleteNote(currentSession.id, note.id)}
-                className="absolute -top-2 -right-2 w-5 h-5 bg-red-500/80 hover:bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center z-10"
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+              {canEdit && (
+                <button
+                  onClick={() => deleteNote(currentSession.id, note.id)}
+                  className="absolute -top-2 -right-2 w-5 h-5 bg-red-500/80 hover:bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center z-10"
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
               <textarea
                 value={note.content}
-                onChange={(e) => updateNote(currentSession.id, note.id, e.target.value)}
+                onChange={(e) => canEdit && updateNote(currentSession.id, note.id, e.target.value)}
+                readOnly={!canEdit}
                 placeholder="Add note..."
-                className="w-full h-full bg-transparent text-white text-sm placeholder-gray-600 resize-none focus:outline-none"
+                className={`w-full h-full bg-transparent text-white text-sm placeholder-gray-600 resize-none focus:outline-none ${!canEdit ? 'cursor-default' : ''}`}
               />
             </div>
           ))}
           {/* Add Note Placeholder */}
-          <button
-            onClick={() => addNote(currentSession.id)}
-            className="w-[calc((100%-3rem)/5)] min-w-36 h-38 bg-lol-card/50 rounded-xl border border-dashed border-lol-border/50 hover:border-lol-gold/50 hover:bg-lol-card transition-all duration-200 flex flex-col items-center justify-center gap-2 text-gray-500 hover:text-lol-gold"
-          >
-            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
-            </svg>
-            <span className="text-sm">Add Note</span>
-          </button>
+          {canEdit && (
+            <button
+              onClick={() => addNote(currentSession.id)}
+              className="w-[calc((100%-3rem)/5)] min-w-36 h-38 bg-lol-card/50 rounded-xl border border-dashed border-lol-border/50 hover:border-lol-gold/50 hover:bg-lol-card transition-all duration-200 flex flex-col items-center justify-center gap-2 text-gray-500 hover:text-lol-gold"
+            >
+              <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
+              </svg>
+              <span className="text-sm">Add Note</span>
+            </button>
+          )}
         </div>
       </Card>
 

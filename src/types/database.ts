@@ -155,6 +155,7 @@ export interface Database {
           has_team_plan: boolean;
           team_plan_status: string | null;
           team_max_enemy_teams: number;
+          team_max_drafts: number;
           perm_drafts: 'admins' | 'players' | 'all';
           perm_enemy_teams: 'admins' | 'players' | 'all';
           perm_players: 'admins' | 'players' | 'all';
@@ -175,6 +176,7 @@ export interface Database {
           has_team_plan?: boolean;
           team_plan_status?: string | null;
           team_max_enemy_teams?: number;
+          team_max_drafts?: number;
           perm_drafts?: 'admins' | 'players' | 'all';
           perm_enemy_teams?: 'admins' | 'players' | 'all';
           perm_players?: 'admins' | 'players' | 'all';
@@ -192,6 +194,7 @@ export interface Database {
           has_team_plan?: boolean;
           team_plan_status?: string | null;
           team_max_enemy_teams?: number;
+          team_max_drafts?: number;
           perm_drafts?: 'admins' | 'players' | 'all';
           perm_enemy_teams?: 'admins' | 'players' | 'all';
           perm_players?: 'admins' | 'players' | 'all';

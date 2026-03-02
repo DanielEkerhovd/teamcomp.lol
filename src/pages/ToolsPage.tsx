@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import DraftTheory from '../components/tools/DraftTheory';
+import PatchTracker from '../components/tools/PatchTracker';
 
-type ToolTab = 'draft-theory';
+type ToolTab = 'draft-theory' | 'patch-tracker';
 
 export default function ToolsPage() {
-  const [activeTab] = useState<ToolTab>('draft-theory');
+  const [activeTab, setActiveTab] = useState<ToolTab>('draft-theory');
 
   return (
     <div className="flex flex-col h-[calc(100vh-3rem)]">
@@ -18,6 +19,7 @@ export default function ToolsPage() {
       <div className="border-b border-lol-border mt-6 shrink-0">
         <nav className="flex gap-4">
           <button
+            onClick={() => setActiveTab('draft-theory')}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               activeTab === 'draft-theory'
                 ? 'border-lol-gold text-lol-gold'
@@ -26,13 +28,23 @@ export default function ToolsPage() {
           >
             Draft Theorycrafting
           </button>
-          {/* Future tabs can be added here */}
+          <button
+            onClick={() => setActiveTab('patch-tracker')}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'patch-tracker'
+                ? 'border-lol-gold text-lol-gold'
+                : 'border-transparent text-gray-400 hover:text-white'
+            }`}
+          >
+            Patch Tracker
+          </button>
         </nav>
       </div>
 
       {/* Content */}
       <div className="flex-1 min-h-0 mt-6">
         {activeTab === 'draft-theory' && <DraftTheory />}
+        {activeTab === 'patch-tracker' && <PatchTracker />}
       </div>
     </div>
   );

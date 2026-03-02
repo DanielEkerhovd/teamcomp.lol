@@ -60,7 +60,9 @@
       "Bash(find /c/Coding/private/draft-sheet/supabase/migrations -name \"*.sql\" -exec grep -l \"CREATE TABLE.*my_teams\" {} ;)",
       "Bash(find supabase/migrations -name \"*draft*\" -type f -exec basename {} ;)",
       "Bash(find c:/Coding/private/draft-sheet/supabase/migrations -name \"*.sql\" -exec grep -l \"enemy_players\" {} ;)",
-      "Bash(find c:/Coding/private/draft-sheet/supabase/migrations -name \"*.sql\" -exec grep -H \"CREATE TABLE.*enemy_players\" {} ;)"
+      "Bash(find c:/Coding/private/draft-sheet/supabase/migrations -name \"*.sql\" -exec grep -H \"CREATE TABLE.*enemy_players\" {} ;)",
+      "Bash(npx eslint src/stores/useMyTeamStore.ts src/pages/MyTeamPage.tsx src/components/team/RoleSlot.tsx src/components/team/SubSlot.tsx src/components/team/PlayerCard.tsx)",
+      "Bash(find supabase/migrations -name \"*.sql\" -exec grep -l \"draft_sessions\" {} ;)"
     ],
     "defaultMode": "acceptEdits"
   }

@@ -100,6 +100,7 @@ serve(async (req) => {
               has_team_plan: true,
               team_plan_status: 'active',
               team_max_enemy_teams: 300,
+              team_max_drafts: 3000,
             }).eq('id', teamId);
 
           } else {
@@ -188,6 +189,7 @@ serve(async (req) => {
               has_team_plan: true,
               team_plan_status: 'active',
               team_max_enemy_teams: 300,
+              team_max_drafts: 3000,
             }).eq('id', teamId);
           } else if (subscription.cancel_at_period_end) {
             await adminClient.from('my_teams').update({
@@ -202,6 +204,7 @@ serve(async (req) => {
               has_team_plan: false,
               team_plan_status: 'canceled',
               team_max_enemy_teams: 0,
+              team_max_drafts: 0,
             }).eq('id', teamId);
           }
         } else {

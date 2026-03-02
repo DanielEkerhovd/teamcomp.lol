@@ -833,12 +833,16 @@ export const useEnemyTeamStore = create<EnemyTeamState>()(
         tableName: 'enemy_teams',
         isArraySync: true,
         selectSyncData: (state) => state.teams,
+        // Only delete orphan personal enemy teams — team-linked ones (team_id IS NOT NULL) are protected
+        deleteFilter: { team_id: null },
         transformItem: (team: Team, userId: string, index: number) => ({
           id: team.id,
           user_id: userId,
           name: team.name,
           notes: team.notes,
           is_favorite: team.isFavorite ?? false,
+          sort_order: index,
+          updated_at: new Date(team.updatedAt).toISOString(),
         }),
         // Sync players to the enemy_players table after team sync
         onAfterSync: (teams: Team[], storeKey: string, debounceMs: number) => {

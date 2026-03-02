@@ -5,6 +5,9 @@ import { checkModerationAndRecord, checkImageModerationAndRecord, getViolationWa
 import { resizeImage } from '../lib/imageResize';
 import type { Profile, UserTier, ProfileRole } from '../types/database';
 import { useAdminSessionStore } from './useAdminSessionStore';
+import { useFriendsStore } from './useFriendsStore';
+import { useMessagesStore } from './useMessagesStore';
+import { useNotificationsStore } from './useNotificationsStore';
 
 // Guard against multiple initialization calls (React Strict Mode)
 let isInitializing = false;
@@ -339,7 +342,12 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         // Clear admin PIN session
         useAdminSessionStore.getState().reset();
 
-        // Clear all local data stores
+        // Reset in-memory social stores before reload
+        useFriendsStore.getState().reset();
+        useMessagesStore.getState().reset();
+        useNotificationsStore.getState().reset();
+
+        // Clear all local data stores (including settings)
         const storeKeys = [
           'teamcomp-lol-my-team',
           'teamcomp-lol-enemy-teams',
@@ -348,6 +356,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
           'teamcomp-lol-custom-pools',
           'teamcomp-lol-draft-theory',
           'teamcomp-lol-custom-templates',
+          'teamcomp-lol-settings',
         ];
         storeKeys.forEach((key) => localStorage.removeItem(key));
 

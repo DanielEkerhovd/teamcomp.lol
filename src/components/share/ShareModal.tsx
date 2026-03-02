@@ -1,8 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Modal from '../ui/Modal';
 import { shareService, DraftShare } from '../../lib/shareService';
 import { useMyTeamStore } from '../../stores/useMyTeamStore';
 import { useDraftStore } from '../../stores/useDraftStore';
+import { useEnemyTeamStore } from '../../stores/useEnemyTeamStore';
+import { syncManager } from '../../lib/syncManager';
 
 interface ShareModalProps {
   isOpen: boolean;
@@ -19,38 +21,98 @@ export default function ShareModal({ isOpen, onClose, draftSessionId, draftName 
   const [error, setError] = useState<string | null>(null);
   // Start with syncing=true when modal opens to prevent premature loading
   const [syncing, setSyncing] = useState(true);
+  const syncAbortRef = useRef(false);
 
-  // Get store functions to trigger sync
-  const { teams: myTeams, selectedTeamId, updateTeam } = useMyTeamStore();
-  const { sessions, updateSession } = useDraftStore();
+  // Get store data (read-only - we never mutate stores from the share modal)
+  const { teams: myTeams, selectedTeamId } = useMyTeamStore();
+  const { sessions } = useDraftStore();
+  const { teams: enemyTeams } = useEnemyTeamStore();
   const myTeam = myTeams.find((t) => t.id === selectedTeamId) || myTeams[0];
   const currentSession = sessions.find((s) => s.id === draftSessionId);
+  const enemyTeam = currentSession?.enemyTeamId
+    ? enemyTeams.find((t) => t.id === currentSession.enemyTeamId)
+    : null;
 
   // Reset state when modal opens
   useEffect(() => {
     if (isOpen) {
+      syncAbortRef.current = false;
       setSyncing(true);
       setError(null);
       setShares([]);
+    } else {
+      syncAbortRef.current = true;
     }
   }, [isOpen]);
 
-  // Force sync team data when modal opens
+  // Push share-relevant data to the cloud when modal opens.
+  // IMPORTANT: This is purely cloud-write — no local store mutations are made
+  // to avoid triggering the debounced cloudSync middleware which has orphan
+  // deletion that can race with these immediate writes.
   useEffect(() => {
-    if (isOpen && myTeam && currentSession) {
-      setSyncing(true);
-      // Trigger team sync by updating with same data (forces the sync middleware)
-      updateTeam({ notes: myTeam.notes ?? '' });
-      // Ensure draft session has myTeamId set and trigger sync
-      if (!currentSession.myTeamId || currentSession.myTeamId !== myTeam.id) {
-        updateSession(draftSessionId, { myTeamId: myTeam.id });
-      } else {
-        // Force sync by updating with same notes
-        updateSession(draftSessionId, { notes: currentSession.notes ?? '' });
+    if (!isOpen || !myTeam || !currentSession) return;
+
+    const syncData = async () => {
+      try {
+        // 1. Upsert my team row
+        await syncManager.syncArrayToCloudImmediate('share-my-team', 'my_teams', [myTeam], {
+          transformItem: (team, userId, index) => ({
+            id: team.id,
+            user_id: userId,
+            name: team.name,
+            notes: team.notes,
+            champion_pool: team.championPool || [],
+            sort_order: index,
+          }),
+        });
+
+        // 2. Upsert my team players
+        await syncManager.syncPlayersToCloudImmediate('players', myTeam.id, myTeam.players);
+
+        // 3. Upsert enemy team + players if one is linked
+        if (enemyTeam) {
+          await syncManager.syncArrayToCloudImmediate('share-enemy-team', 'enemy_teams', [enemyTeam], {
+            transformItem: (team, userId, index) => ({
+              id: team.id,
+              user_id: userId,
+              name: team.name,
+              notes: team.notes,
+              is_favorite: team.isFavorite ?? false,
+              sort_order: index,
+              updated_at: new Date(team.updatedAt).toISOString(),
+            }),
+          });
+          await syncManager.syncPlayersToCloudImmediate('enemy_players', enemyTeam.id, enemyTeam.players);
+        }
+
+        // 4. Upsert draft session (references the team IDs above)
+        const sessionMyTeamId = currentSession.myTeamId || myTeam.id;
+        await syncManager.syncArrayToCloudImmediate('share-draft', 'draft_sessions', [currentSession], {
+          transformItem: (session, userId, index) => ({
+            id: session.id,
+            user_id: userId,
+            name: session.name,
+            enemy_team_id: session.enemyTeamId || null,
+            my_team_id: sessionMyTeamId,
+            ban_groups: session.banGroups || [],
+            priority_groups: session.priorityGroups || [],
+            notes: session.notes,
+            notepad: session.notepad || [],
+            is_favorite: session.isFavorite || false,
+            is_planned: session.isPlanned || false,
+            sort_order: index,
+          }),
+        });
+      } catch (err) {
+        console.error('Share sync error:', err);
+      } finally {
+        if (!syncAbortRef.current) {
+          setSyncing(false);
+        }
       }
-      // Wait for debounced sync to complete (cloudSync uses 3s debounce + network time)
-      setTimeout(() => setSyncing(false), 3500);
-    }
+    };
+
+    syncData();
   }, [isOpen]);
 
   // Load existing shares after sync completes

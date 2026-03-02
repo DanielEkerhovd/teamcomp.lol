@@ -355,8 +355,8 @@ export default function GroupedChampionList({
     setEditingGroupName('');
   };
 
-  // Get all champion IDs across all groups for exclusion
-  const allChampionIds = groups.flatMap(g => g.championIds);
+  // Only exclude champions within the same group (allow duplicates across groups)
+  const firstGroupChampionIds = groups.length > 0 ? groups[0].championIds : [];
 
   const activeChampionId = activeId ? parseId(activeId).championId : null;
   const activeChampion = activeChampionId ? getChampionById(activeChampionId) : null;
@@ -381,7 +381,7 @@ export default function GroupedChampionList({
         <ChampionSearch
           onSelect={(champion) => onAddToFirstGroup(champion.id)}
           placeholder={variant === 'ban' ? 'Add ban...' : 'Add priority...'}
-          excludeIds={allChampionIds}
+          excludeIds={firstGroupChampionIds}
           variant="minimal"
         />
       )}
@@ -491,7 +491,7 @@ export default function GroupedChampionList({
                         <InlineAddChampion
                           groupId={group.id}
                           onAdd={onAddChampion}
-                          excludeIds={allChampionIds}
+                          excludeIds={group.championIds}
                           colorClass={colors.text}
                           borderClass={colors.border}
                         />

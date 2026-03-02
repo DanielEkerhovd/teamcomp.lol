@@ -65,6 +65,7 @@ interface DraftState {
   getCurrentSession: () => DraftSession | undefined;
   toggleFavorite: (id: string) => void;
   togglePlanned: (id: string) => void;
+  duplicateSession: (id: string, targetTeamId: string | null) => DraftSession | null;
 
   // Ban group actions
   addBanGroup: (name: string) => void;
@@ -169,6 +170,26 @@ export const useDraftStore = create<DraftState>()(
                 : session
             ),
           }));
+        },
+
+        duplicateSession: (id: string, targetTeamId: string | null) => {
+          const source = get().sessions.find((s) => s.id === id);
+          if (!source) return null;
+          const copy: DraftSession = {
+            ...source,
+            id: generateId(),
+            myTeamId: targetTeamId,
+            name: `${source.name} (Copy)`,
+            isFavorite: false,
+            isPlanned: false,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            banGroups: (source.banGroups || []).map((g) => ({ ...g, id: generateId(), championIds: [...g.championIds] })),
+            priorityGroups: (source.priorityGroups || []).map((g) => ({ ...g, id: generateId(), championIds: [...g.championIds] })),
+            notepad: (source.notepad || []).map((n) => ({ ...n, id: generateId() })),
+          };
+          set((state) => ({ sessions: [...state.sessions, copy] }));
+          return copy;
         },
 
         // Ban group actions
@@ -513,9 +534,9 @@ export const useDraftStore = create<DraftState>()(
                   updatedAt: Date.now(),
                 };
               }
-              // Add to first group
-              const alreadyExists = migrated.banGroups.some((g) => g.championIds.includes(championId));
-              if (alreadyExists) return migrated;
+              // Add to first group (allow duplicates across groups, only prevent within same group)
+              const firstGroup = migrated.banGroups[0];
+              if (firstGroup.championIds.includes(championId)) return migrated;
               return {
                 ...migrated,
                 banGroups: migrated.banGroups.map((g, i) =>
@@ -565,9 +586,9 @@ export const useDraftStore = create<DraftState>()(
                   updatedAt: Date.now(),
                 };
               }
-              // Add to first group
-              const alreadyExists = migrated.priorityGroups.some((g) => g.championIds.includes(championId));
-              if (alreadyExists) return migrated;
+              // Add to first group (allow duplicates across groups, only prevent within same group)
+              const firstGroup = migrated.priorityGroups[0];
+              if (firstGroup.championIds.includes(championId)) return migrated;
               return {
                 ...migrated,
                 priorityGroups: migrated.priorityGroups.map((g, i) =>

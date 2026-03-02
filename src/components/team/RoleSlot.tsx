@@ -9,10 +9,11 @@ interface RoleSlotProps {
   player: Player | undefined;
   onPlayerChange: (playerId: string, updates: Partial<Omit<Player, 'id'>>) => void;
   onAddPlayer?: (role: Role) => void;
+  onRemove?: (playerId: string) => void;
   readOnly?: boolean;
 }
 
-export default function RoleSlot({ role, player, onPlayerChange, onAddPlayer, readOnly = false }: RoleSlotProps) {
+export default function RoleSlot({ role, player, onPlayerChange, onAddPlayer, onRemove, readOnly = false }: RoleSlotProps) {
   const roleLabel = ROLES.find((r) => r.value === role)?.label || role;
 
   const {
@@ -42,9 +43,20 @@ export default function RoleSlot({ role, player, onPlayerChange, onAddPlayer, re
         isOver ? 'bg-lol-gold/15 ring-2 ring-lol-gold/50' : ''
       }`}
     >
-      <div className="text-xs text-lol-gold text-center mb-2 font-semibold uppercase tracking-wider bg-lol-gold/10 rounded-md py-1 px-2 mx-auto w-fit flex items-center gap-1">
-        <RoleIcon role={role} size="xs" />
-        {roleLabel}
+      <div className="relative flex items-center justify-center mb-2">
+        <div className="text-xs text-lol-gold font-semibold uppercase tracking-wider bg-lol-gold/10 rounded-md py-1 px-2 flex items-center gap-1">
+          <RoleIcon role={role} size="xs" />
+          {roleLabel}
+        </div>
+        {!readOnly && player && onRemove && (
+          <button
+            onClick={() => onRemove(player.id)}
+            className="absolute right-0 text-xs text-gray-500 hover:text-red-400 transition-colors"
+            title="Remove player"
+          >
+            ×
+          </button>
+        )}
       </div>
       {player ? (
         <div

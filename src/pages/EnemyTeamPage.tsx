@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -94,7 +94,8 @@ export default function EnemyTeamPage() {
   const [teamToDelete, setTeamToDelete] = useState<string | null>(null);
   const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
   const [enemyFilter, setEnemyFilter] = useState<EnemyFilter>('personal');
-  const [isAddingTeamEnemy, setIsAddingTeamEnemy] = useState(false);
+  const [isAddingTeam, setIsAddingTeam] = useState(false);
+  const skipNextToggleRef = useRef<string | null>(null);
 
   const { user } = useAuthStore();
   const { maxEnemyTeams } = useTierLimits();
@@ -246,43 +247,48 @@ export default function EnemyTeamPage() {
       return;
     }
 
-    const modResult = await checkModerationAndRecord(newTeamName.trim(), 'enemy_team_name');
-    if (modResult.flagged) {
-      setAddTeamError(getViolationWarning(modResult));
-      return;
-    }
+    setIsAddingTeam(true);
+    try {
+      const modResult = await checkModerationAndRecord(newTeamName.trim(), 'enemy_team_name');
+      if (modResult.flagged) {
+        setAddTeamError(getViolationWarning(modResult));
+        return;
+      }
 
-    // Team enemy team add
-    if (isTeamFilter) {
-      setIsAddingTeamEnemy(true);
-      const result = await addTeamEnemyTeam(enemyFilter, newTeamName.trim());
-      setIsAddingTeamEnemy(false);
+      // Team enemy team add
+      if (isTeamFilter) {
+        const result = await addTeamEnemyTeam(enemyFilter, newTeamName.trim());
+        if (!result.success) {
+          setAddTeamError(result.error === 'max_teams_reached'
+            ? `You've reached the maximum limit of ${teamEnemyMax} team enemy teams`
+            : 'Failed to add team');
+          return;
+        }
+        setNewTeamName("");
+        setAddTeamError("");
+        setIsAddModalOpen(false);
+        skipNextToggleRef.current = result.team!.id;
+        setExpandedTeamId(result.team!.id);
+        return;
+      }
+
+      const result = addTeam(newTeamName.trim());
       if (!result.success) {
-        setAddTeamError(result.error === 'max_teams_reached'
-          ? `You've reached the maximum limit of ${teamEnemyMax} team enemy teams`
-          : 'Failed to add team');
+        if (result.error === 'duplicate_name') {
+          setAddTeamError('A team with this name already exists');
+        } else if (result.error === 'max_teams_reached') {
+          setAddTeamError(maxEnemyTeams >= 9999 ? "You've reached the team limit" : `You've reached the maximum limit of ${maxEnemyTeams} teams`);
+        }
         return;
       }
       setNewTeamName("");
       setAddTeamError("");
       setIsAddModalOpen(false);
+      skipNextToggleRef.current = result.team!.id;
       setExpandedTeamId(result.team!.id);
-      return;
+    } finally {
+      setIsAddingTeam(false);
     }
-
-    const result = addTeam(newTeamName.trim());
-    if (!result.success) {
-      if (result.error === 'duplicate_name') {
-        setAddTeamError('A team with this name already exists');
-      } else if (result.error === 'max_teams_reached') {
-        setAddTeamError(`You've reached the maximum limit of ${maxEnemyTeams} teams`);
-      }
-      return;
-    }
-    setNewTeamName("");
-    setAddTeamError("");
-    setIsAddModalOpen(false);
-    setExpandedTeamId(result.team!.id);
   };
 
   const handleImport = () => {
@@ -309,7 +315,7 @@ export default function EnemyTeamPage() {
       if (result.error === 'duplicate_name') {
         setImportError('A team with this name already exists. Please choose a different name.');
       } else if (result.error === 'max_teams_reached') {
-        setImportError(`You've reached the maximum limit of ${maxEnemyTeams} teams. Please delete some teams to add new ones.`);
+        setImportError(maxEnemyTeams >= 9999 ? "You've reached the team limit. Please delete some teams to add new ones." : `You've reached the maximum limit of ${maxEnemyTeams} teams. Please delete some teams to add new ones.`);
       }
       return;
     }
@@ -360,6 +366,10 @@ export default function EnemyTeamPage() {
   };
 
   const toggleExpanded = (id: string) => {
+    if (skipNextToggleRef.current === id) {
+      skipNextToggleRef.current = null;
+      return;
+    }
     setExpandedTeamId(expandedTeamId === id ? null : id);
   };
 
@@ -407,7 +417,7 @@ export default function EnemyTeamPage() {
         <p className="text-gray-400 mt-1">
           Scout and track your opponents
           <span className="ml-2 text-gray-500">
-            ({currentCount}/{isTeamFilter ? `${currentLimit}` : maxEnemyTeams})
+            ({currentCount}/{isTeamFilter ? (currentLimit >= 9999 ? '\u221e' : currentLimit) : (maxEnemyTeams >= 9999 ? '\u221e' : maxEnemyTeams)})
             {isTeamFilter && ' team'}
           </span>
         </p>
@@ -425,7 +435,7 @@ export default function EnemyTeamPage() {
             }`}
           >
             Personal
-            <span className="ml-1.5 text-xs opacity-70">({teams.length}/{maxEnemyTeams})</span>
+            <span className="ml-1.5 text-xs opacity-70">({teams.length}/{maxEnemyTeams >= 9999 ? '\u221e' : maxEnemyTeams})</span>
           </button>
           {paidTeamTabs.map((tab) => (
             <button
@@ -439,7 +449,7 @@ export default function EnemyTeamPage() {
             >
               {tab.name}
               <span className="ml-1.5 text-xs opacity-70">
-                ({(teamEnemyTeams[tab.id] || []).length}/{tab.maxEnemyTeams})
+                ({(teamEnemyTeams[tab.id] || []).length}/{tab.maxEnemyTeams >= 9999 ? '\u221e' : tab.maxEnemyTeams})
               </span>
             </button>
           ))}
@@ -473,7 +483,7 @@ export default function EnemyTeamPage() {
         <div className="flex gap-3 items-center">
           <Button
             onClick={() => setIsAddModalOpen(true)}
-            disabled={currentIsAtLimit || isAddingTeamEnemy || isFilteredTeamBanned}
+            disabled={currentIsAtLimit || isAddingTeam || isFilteredTeamBanned}
             title={isFilteredTeamBanned ? 'This team is banned' : currentIsAtLimit ? `Maximum of ${currentLimit} teams reached` : undefined}
           >
             {isFilteredTeamBanned ? 'Team Banned' : '+ Add Team'}
@@ -804,7 +814,7 @@ export default function EnemyTeamPage() {
 
                           return (
                             <Button
-                              variant="ghost"
+                              variant={isUpdated ? "outline" : "secondary"}
                               onClick={() => handleFetchRanksForTeam(team.id)}
                               disabled={isFetching || !needsUpdate}
                               title={
@@ -813,11 +823,29 @@ export default function EnemyTeamPage() {
                                   : "Fetch player ranks from Riot API"
                               }
                             >
-                              {isFetching
-                                ? "Fetching Ranks..."
-                                : isUpdated
-                                  ? "Ranks Updated"
-                                  : "Update Ranks"}
+                              {isFetching ? (
+                                <>
+                                  <svg className="w-4 h-4 mr-1.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                  </svg>
+                                  Fetching Ranks...
+                                </>
+                              ) : isUpdated ? (
+                                <>
+                                  <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                  </svg>
+                                  Ranks Updated
+                                </>
+                              ) : (
+                                <>
+                                  <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                  </svg>
+                                  Update Ranks
+                                </>
+                              )}
                             </Button>
                           );
                         })()}
@@ -864,6 +892,9 @@ export default function EnemyTeamPage() {
                                   player={player}
                                   onPlayerChange={(playerId, updates) =>
                                     updatePlayer(team.id, playerId, updates)
+                                  }
+                                  onRemove={(playerId) =>
+                                    removeSub(team.id, playerId)
                                   }
                                 />
                               );
@@ -1048,9 +1079,17 @@ export default function EnemyTeamPage() {
                   handleAddTeam();
                 }
               }}
-              disabled={!newTeamName.trim() && !importUrl.trim()}
+              disabled={isAddingTeam || (!newTeamName.trim() && !importUrl.trim())}
             >
-              {importUrl.trim() ? "Import Team" : "Add Team"}
+              {isAddingTeam ? (
+                <span className="flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Creating...
+                </span>
+              ) : importUrl.trim() ? "Import Team" : "Add Team"}
             </Button>
           </div>
         </div>
